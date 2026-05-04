@@ -3,7 +3,11 @@
 ;   "C:\Users\tballew\AppData\Local\Programs\Inno Setup 6\ISCC.exe" BoardGameLibrary.iss
 
 #define AppName      "Board Game Library"
-#define AppVersion   "1.1"
+; AppVersion is passed in via /DAppVersion=x.y on the ISCC command line
+; (done automatically by GitHub Actions). Fallback for local manual builds:
+#ifndef AppVersion
+  #define AppVersion "1.2"
+#endif
 #define AppPublisher "Ballewcifer"
 #define AppExeName   "BoardGameLibrary.exe"
 #define SourceDir    "dist\BoardGameLibrary"

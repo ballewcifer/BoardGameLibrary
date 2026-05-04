@@ -1,12 +1,12 @@
 name: Build Installers
 
-# Runs automatically when you push a version tag (e.g. git tag v1.0 && git push --tags)
-# or manually from the Actions tab on GitHub.
+# Triggered by a version tag (git tag v1.2 && git push --tags)
+# or manually from the Actions tab.
 on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:   # lets you trigger a build manually from the GitHub UI
+  workflow_dispatch:
 
 jobs:
   # ── Windows: .exe installer ──────────────────────────────────────────────────
@@ -23,8 +23,19 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Extract version from tag
+        id: ver
+        shell: bash
+        # strips the leading "v" from the tag name (v1.2 → 1.2)
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Stamp version.py
+        # Makes version.py the single source of truth at build time
+        shell: bash
+        run: echo "__version__ = \"${{ steps.ver.outputs.VERSION }}\"" > version.py
+
       - name: Install Python dependencies
-        run: pip install pyinstaller pillow
+        run: pip install pyinstaller pillow certifi
 
       - name: Generate icon.ico
         run: python create_icon.py
@@ -36,9 +47,12 @@ jobs:
         run: choco install innosetup --yes --no-progress
 
       - name: Build Windows installer
+        shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path installer | Out-Null
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" BoardGameLibrary.iss
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
+            /DAppVersion="${{ steps.ver.outputs.VERSION }}" `
+            BoardGameLibrary.iss
 
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
@@ -61,8 +75,17 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Extract version from tag
+        id: ver
+        shell: bash
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Stamp version.py
+        shell: bash
+        run: echo "__version__ = \"${{ steps.ver.outputs.VERSION }}\"" > version.py
+
       - name: Install Python dependencies
-        run: pip install pyinstaller pillow
+        run: pip install pyinstaller pillow certifi
 
       - name: Install create-dmg
         run: brew install create-dmg
@@ -88,13 +111,16 @@ jobs:
     name: Create GitHub Release
     needs: [build-windows, build-macos]
     runs-on: ubuntu-latest
-    # Only create a release when triggered by a version tag
     if: startsWith(github.ref, 'refs/tags/v')
 
     permissions:
       contents: write
 
     steps:
+      - name: Extract version from tag
+        id: ver
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
       - name: Download Windows installer
         uses: actions/download-artifact@v4
         with:
@@ -110,18 +136,18 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          name: Board Game Library ${{ github.ref_name }}
+          name: Board Game Library v${{ steps.ver.outputs.VERSION }}
           draft: false
           prerelease: false
           files: artifacts/*
           body: |
-            ## Board Game Library ${{ github.ref_name }}
+            ## Board Game Library v${{ steps.ver.outputs.VERSION }}
 
             ### Downloads
             | Platform | File |
             |----------|------|
-            | Windows 10/11 | `BoardGameLibrarySetup-*.exe` |
-            | macOS 12+ | `BoardGameLibraryInstaller-*.dmg` |
+            | Windows 10/11 | `BoardGameLibrarySetup-v${{ steps.ver.outputs.VERSION }}.exe` |
+            | macOS 12+ | `BoardGameLibraryInstaller-v${{ steps.ver.outputs.VERSION }}.dmg` |
 
             Both installers are fully self-contained — no Python installation required.
 

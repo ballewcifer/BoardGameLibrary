@@ -9,7 +9,9 @@
 
 set -euo pipefail
 
-VERSION="1.1"
+# Read version from version.py (single source of truth).
+# GitHub Actions overrides this by writing version.py before calling this script.
+VERSION=$(python3 -c "from version import __version__; print(__version__)")
 APP_NAME="Board Game Library"
 APP_BUNDLE="dist/BoardGameLibrary.app"
 DMG_OUT="dist/BoardGameLibraryInstaller-v${VERSION}.dmg"
