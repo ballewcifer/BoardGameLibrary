@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import shutil
 import threading
 import time
 import tkinter as tk
@@ -838,11 +839,12 @@ class App(tk.Tk):
             menu.add_command(label="Check In",  command=lambda: self.on_check_in(game))
         else:
             menu.add_command(label="Check Out", command=lambda: self.on_check_out(game))
-        menu.add_command(label="Log Play…",  command=lambda: self.on_log_play(game))
+        menu.add_command(label="Log Play…",    command=lambda: self.on_log_play(game))
         menu.add_separator()
-        menu.add_command(label="Details…",   command=lambda: self.show_details(game))
+        menu.add_command(label="Details…",     command=lambda: self.show_details(game))
+        menu.add_command(label="Set Image…",   command=lambda: self.on_set_image(game))
         fav_lbl = "Remove from Favorites" if game["is_favorite"] else "Add to Favorites"
-        menu.add_command(label=fav_lbl,      command=lambda: self.on_toggle_favorite(game))
+        menu.add_command(label=fav_lbl,        command=lambda: self.on_toggle_favorite(game))
         menu.tk_popup(event.x_root, event.y_root)
 
     def _build_card(self, game, loan, play_counts: dict) -> ttk.Frame:
@@ -1889,7 +1891,125 @@ class App(tk.Tk):
         close_row.pack(fill="x", pady=(0, 10))
         ttk.Button(close_row, text="Log Play",
                    command=lambda: self.on_log_play(game)).pack(side="left", padx=10)
+        ttk.Button(close_row, text="Set Image…",
+                   command=lambda: self.on_set_image(game, refresh_callback=win.destroy)
+                   ).pack(side="left")
         ttk.Button(close_row, text="Close", command=win.destroy).pack(side="right", padx=10)
+
+    # ---------- set image ----------
+
+    def on_set_image(self, game, refresh_callback=None) -> None:
+        """Open a dialog to set or replace the cover image for a game.
+
+        Accepts either a URL (e.g. right-click any box art on boardgamegeek.com
+        → 'Copy image address') or a local file picked from disk.
+        """
+        bgg_id = game["bgg_id"]
+
+        dialog = tk.Toplevel(self)
+        dialog.title(f"Set Image — {game['name']}")
+        dialog.resizable(False, False)
+        dialog.transient(self)
+        dialog.configure(bg=C_BG)
+
+        # ── URL input ────────────────────────────────────────────────────────
+        ttk.Label(dialog, text="Image URL:", padding=(14, 14, 14, 2)).pack(anchor="w")
+        url_var = tk.StringVar()
+        url_entry = ttk.Entry(dialog, textvariable=url_var, width=52)
+        url_entry.pack(padx=14, pady=(0, 2))
+        url_entry.focus_set()
+
+        tk.Label(
+            dialog,
+            text=(
+                "💡  On boardgamegeek.com, right-click the game's box art\n"
+                "    and choose 'Copy image address', then paste it above."
+            ),
+            bg=C_BG, fg="#555", font=("Segoe UI", 8), justify="left",
+        ).pack(anchor="w", padx=14, pady=(0, 8))
+
+        # ── divider ──────────────────────────────────────────────────────────
+        div = ttk.Frame(dialog)
+        div.pack(fill="x", padx=14, pady=(0, 8))
+        ttk.Separator(div, orient="horizontal").pack(side="left", fill="x", expand=True)
+        ttk.Label(div, text="  or  ", foreground="#888").pack(side="left")
+        ttk.Separator(div, orient="horizontal").pack(side="left", fill="x", expand=True)
+
+        # ── local file picker ────────────────────────────────────────────────
+        ttk.Label(dialog, text="Local image file:", padding=(14, 0, 14, 2)).pack(anchor="w")
+        file_row = ttk.Frame(dialog)
+        file_row.pack(padx=14, fill="x")
+        file_var = tk.StringVar()
+        ttk.Entry(file_row, textvariable=file_var, width=40,
+                  state="readonly").pack(side="left", fill="x", expand=True)
+
+        def browse() -> None:
+            path = filedialog.askopenfilename(
+                title="Choose an image",
+                filetypes=[
+                    ("Image files", "*.jpg *.jpeg *.png *.gif *.webp *.bmp"),
+                    ("All files", "*.*"),
+                ],
+            )
+            if path:
+                file_var.set(path)
+                url_var.set("")   # clear URL if a file is chosen
+
+        ttk.Button(file_row, text="Browse…", command=browse).pack(side="left", padx=(6, 0))
+
+        # ── confirm / cancel ─────────────────────────────────────────────────
+        btn_frame = ttk.Frame(dialog)
+        btn_frame.pack(padx=14, pady=(12, 14), fill="x")
+
+        def confirm() -> None:
+            url   = url_var.get().strip()
+            local = file_var.get().strip()
+
+            if not url and not local:
+                messagebox.showerror("No image", "Paste a URL or pick a file.", parent=dialog)
+                return
+
+            IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+
+            if url:
+                ext  = Path(url.split("?", 1)[0]).suffix.lower() or ".jpg"
+                dest = IMAGES_DIR / f"{bgg_id}{ext}"
+                try:
+                    bgg.download_image(url, dest)
+                except Exception as exc:
+                    messagebox.showerror("Download failed",
+                                         f"Could not download image:\n{exc}", parent=dialog)
+                    return
+            else:
+                ext  = Path(local).suffix.lower() or ".jpg"
+                dest = IMAGES_DIR / f"{bgg_id}{ext}"
+                try:
+                    shutil.copy2(local, dest)
+                except Exception as exc:
+                    messagebox.showerror("Copy failed",
+                                         f"Could not copy file:\n{exc}", parent=dialog)
+                    return
+
+            # Invalidate cached thumbnail so the new image is loaded
+            old_path = game.get("image_path") or ""
+            self._image_cache.pop(old_path, None)
+
+            with db.connect() as c:
+                db.set_image_path(c, bgg_id, str(dest))
+                if url:
+                    c.execute("UPDATE games SET image_url = ? WHERE bgg_id = ?",
+                              (url, bgg_id))
+
+            dialog.destroy()
+            self.refresh_games()
+            if refresh_callback:
+                refresh_callback()
+            self.status(f"Image updated for {game['name']}.")
+
+        ttk.Button(btn_frame, text="Cancel", command=dialog.destroy).pack(side="left")
+        ttk.Button(btn_frame, text="Set Image", command=confirm).pack(side="right")
+        dialog.bind("<Return>", lambda *_: confirm())
+        dialog.grab_set()
 
     # ---------- refresh ----------
 
