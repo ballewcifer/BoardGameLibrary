@@ -209,18 +209,19 @@ def fetch_collection(
 def import_from_username(
     username: str,
     *,
+    token: Optional[str] = None,
     on_status: Optional[Callable[[str], None]] = None,
 ) -> list[GameDetails]:
-    """Import an owned collection using only a BGG username — no API token needed.
+    """Import an owned collection by BGG username.
 
-    Step 1: fetch /collection  (public, returns image URLs + basic stats).
-    Step 2: try /thing in batches for weight, categories, best-at, etc.
-            If /thing returns 401 (token required), we skip it gracefully and
-            use the collection data alone.
+    Requires a BGG Bearer token (register at boardgamegeek.com/applications).
+
+    Step 1: fetch /collection — returns game list + image URLs + basic stats.
+    Step 2: fetch /thing in batches — adds weight, categories, designers, best-at.
     """
     if on_status:
         on_status(f"Fetching collection for {username}…")
-    entries = fetch_collection(username, on_status=on_status)
+    entries = fetch_collection(username, token=token, on_status=on_status)
     if not entries:
         return []
 
@@ -242,22 +243,21 @@ def import_from_username(
             my_comment=e.my_comment,
         )
 
-    # Try to enrich with /thing details (weight, categories, designers, etc.).
+    # Enrich with /thing details (weight, categories, designers, best-at, etc.).
     if on_status:
         on_status(f"Fetching full game details for {len(result)} games…")
     try:
-        things = fetch_things(list(result.keys()), on_status=on_status)
+        things = fetch_things(list(result.keys()), token=token, on_status=on_status)
         for d in things:
             existing = result.get(d.bgg_id)
             if existing is None:
                 result[d.bgg_id] = d
                 continue
-            # Keep collection image URLs (reliable) & user-specific fields;
-            # use /thing for everything else.
-            d.image_url      = d.image_url      or existing.image_url
-            d.thumbnail_url  = d.thumbnail_url  or existing.thumbnail_url
-            d.my_rating      = existing.my_rating
-            d.my_comment     = existing.my_comment
+            # Prefer /thing details but keep collection image URLs + user fields.
+            d.image_url     = d.image_url     or existing.image_url
+            d.thumbnail_url = d.thumbnail_url or existing.thumbnail_url
+            d.my_rating     = existing.my_rating
+            d.my_comment    = existing.my_comment
             result[d.bgg_id] = d
     except PermissionError:
         if on_status:
