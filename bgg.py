@@ -28,6 +28,13 @@ from typing import Callable, Iterable, Optional
 
 BASE = "https://boardgamegeek.com/xmlapi2"
 USER_AGENT = "BoardGameLibrary/0.1 (personal-use)"
+# BGG returns 403 to non-browser User-Agents on its HTML pages.
+# Use a real Chrome UA for page scraping only.
+BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/124.0.0.0 Safari/537.36"
+)
 THING_BATCH = 20
 
 
@@ -381,7 +388,11 @@ def get_bgg_page_data(bgg_id: int, *, timeout: int = 15) -> PageData:
     """
     page_url = f"https://boardgamegeek.com/boardgame/{bgg_id}"
     try:
-        req = urllib.request.Request(page_url, headers={"User-Agent": USER_AGENT})
+        req = urllib.request.Request(page_url, headers={
+            "User-Agent":      BROWSER_UA,
+            "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+        })
         with urllib.request.urlopen(req, timeout=timeout, context=_ssl_ctx()) as resp:
             html = resp.read(200000).decode("utf-8", errors="ignore")
     except Exception as exc:

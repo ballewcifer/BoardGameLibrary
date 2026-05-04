@@ -976,18 +976,30 @@ class App(tk.Tk):
         for bgg_id in bgg_ids:
             self._post_status(f"Fetching BGG data {done + 1}/{total}...")
 
+            # --- fetch BGG page (image URL + best-at data) ---
+            with db.connect() as c:
+                row = db.get_game(c, bgg_id)
+
+            page = None
             try:
                 page = bgg.get_bgg_page_data(bgg_id)
             except Exception as exc:
-                failed += 1
                 last_error = str(exc)
-                done += 1
-                time.sleep(0.5)
-                continue
+                # BGG blocked the page scrape (often 403). Fall back to
+                # the image_url / thumbnail_url already stored from CSV import.
+                fallback_url = (
+                    (row["image_url"] if row else None)
+                    or (row["thumbnail_url"] if row else None)
+                )
+                if fallback_url:
+                    page = bgg.PageData(image_url=fallback_url)
+                else:
+                    failed += 1
+                    done += 1
+                    time.sleep(0.5)
+                    continue
 
             # --- image ---
-            with db.connect() as c:
-                row = db.get_game(c, bgg_id)
             need_image = not (row and row["image_path"] and Path(row["image_path"]).exists())
 
             if need_image and page.image_url:
