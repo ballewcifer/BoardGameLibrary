@@ -20,7 +20,7 @@ from paths import IMAGES_DIR
 THUMB_SIZE = (140, 140)
 PLACEHOLDER_BG = "#dcdcdc"
 
-APP_VERSION   = "1.0"
+APP_VERSION   = "1.1"
 APP_CREATED   = "April 30, 2026"
 APP_AUTHOR    = "Ballewcifer"
 

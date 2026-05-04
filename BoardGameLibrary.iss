@@ -3,7 +3,7 @@
 ;   "C:\Users\tballew\AppData\Local\Programs\Inno Setup 6\ISCC.exe" BoardGameLibrary.iss
 
 #define AppName      "Board Game Library"
-#define AppVersion   "1.0"
+#define AppVersion   "1.1"
 #define AppPublisher "Ballewcifer"
 #define AppExeName   "BoardGameLibrary.exe"
 #define SourceDir    "dist\BoardGameLibrary"

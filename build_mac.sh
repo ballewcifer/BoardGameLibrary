@@ -9,7 +9,7 @@
 
 set -euo pipefail
 
-VERSION="1.0"
+VERSION="1.1"
 APP_NAME="Board Game Library"
 APP_BUNDLE="dist/BoardGameLibrary.app"
 DMG_OUT="dist/BoardGameLibraryInstaller-v${VERSION}.dmg"
