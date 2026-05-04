@@ -463,6 +463,30 @@ def get_bgg_page_data(bgg_id: int, *, timeout: int = 15) -> PageData:
     return result
 
 
+def get_image_url_from_api(bgg_id: int) -> Optional[str]:
+    """Fetch an image URL for a game via the BGG XML API.
+
+    The /thing endpoint is public — no Bearer token required.
+    Returns the full image URL, or None if unavailable.
+    """
+    url = f"{BASE}/thing?id={bgg_id}"
+    try:
+        status, body = _http_get(url)
+        if status != 200:
+            return None
+        root = ET.fromstring(body)
+        item = root.find("item")
+        if item is None:
+            return None
+        for tag in ("image", "thumbnail"):
+            el = item.find(tag)
+            if el is not None and el.text and el.text.strip():
+                return _maybe_protocol(el.text.strip())
+    except Exception:
+        pass
+    return None
+
+
 # Keep old name as a thin alias so existing call-sites still work.
 def get_bgg_image_url(bgg_id: int, *, timeout: int = 15) -> Optional[str]:
     return get_bgg_page_data(bgg_id, timeout=timeout).image_url

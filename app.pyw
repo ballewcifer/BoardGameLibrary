@@ -968,70 +968,76 @@ class App(tk.Tk):
         ).start()
 
     def _fetch_and_cache_images_bg(self, bgg_ids: list[int]) -> None:
+        """Download box-art for every game that is missing an image.
+
+        Image URL priority (most reliable → least):
+          1. image_url / thumbnail_url already stored from CSV import
+          2. BGG XML API  (/xmlapi2/thing — public, no token needed)
+        HTML page scraping is NOT used for images — BGG's Cloudflare blocks
+        non-browser clients.  Best-at data is fetched from the HTML page as a
+        silent, non-fatal bonus.
+        """
         IMAGES_DIR.mkdir(parents=True, exist_ok=True)
         total = len(bgg_ids)
         done = 0
-        failed = 0
+        img_ok = 0
+        img_failed = 0
         last_error = ""
-        for bgg_id in bgg_ids:
-            self._post_status(f"Fetching BGG data {done + 1}/{total}...")
 
-            # --- fetch BGG page (image URL + best-at data) ---
+        for bgg_id in bgg_ids:
+            self._post_status(f"Downloading images {done + 1}/{total}…")
+
             with db.connect() as c:
                 row = db.get_game(c, bgg_id)
 
-            page = None
-            try:
-                page = bgg.get_bgg_page_data(bgg_id)
-            except Exception as exc:
-                last_error = str(exc)
-                # BGG blocked the page scrape (often 403). Fall back to
-                # the image_url / thumbnail_url already stored from CSV import.
-                fallback_url = (
-                    (row["image_url"] if row else None)
-                    or (row["thumbnail_url"] if row else None)
-                )
-                if fallback_url:
-                    page = bgg.PageData(image_url=fallback_url)
-                else:
-                    failed += 1
-                    done += 1
-                    time.sleep(0.5)
-                    continue
-
-            # --- image ---
             need_image = not (row and row["image_path"] and Path(row["image_path"]).exists())
 
-            if need_image and page.image_url:
-                ext = Path(page.image_url.split("?", 1)[0]).suffix or ".jpg"
-                dest = IMAGES_DIR / f"{bgg_id}{ext}"
-                try:
-                    bgg.download_image(page.image_url, dest)
-                    with db.connect() as c:
-                        db.set_image_path(c, bgg_id, str(dest))
-                except Exception as exc:
-                    failed += 1
-                    last_error = str(exc)
-            elif need_image:
-                failed += 1
-                last_error = f"No image URL found for #{bgg_id}"
+            # ── image download ────────────────────────────────────────────────
+            if need_image:
+                # 1. Use URL already in the DB (populated from CSV import)
+                url = (
+                    (row["image_url"]     if row else None)
+                    or (row["thumbnail_url"] if row else None)
+                )
+                # 2. Ask the public XML API if we still have nothing
+                if not url:
+                    url = bgg.get_image_url_from_api(bgg_id)
 
-            # --- best_players ---
-            if page.best_players:
-                with db.connect() as c:
-                    c.execute(
-                        "UPDATE games SET best_players = ? WHERE bgg_id = ?",
-                        (page.best_players, bgg_id),
-                    )
+                if url:
+                    ext  = Path(url.split("?", 1)[0]).suffix or ".jpg"
+                    dest = IMAGES_DIR / f"{bgg_id}{ext}"
+                    try:
+                        bgg.download_image(url, dest)
+                        with db.connect() as c:
+                            db.set_image_path(c, bgg_id, str(dest))
+                        img_ok += 1
+                    except Exception as exc:
+                        img_failed += 1
+                        last_error = str(exc)
+                else:
+                    img_failed += 1
+                    last_error = f"No image URL found for game #{bgg_id}"
+
+            # ── best-at (HTML scrape — optional, silent on failure) ───────────
+            if not (row and row["best_players"]):
+                try:
+                    page = bgg.get_bgg_page_data(bgg_id)
+                    if page.best_players:
+                        with db.connect() as c:
+                            c.execute(
+                                "UPDATE games SET best_players = ? WHERE bgg_id = ?",
+                                (page.best_players, bgg_id),
+                            )
+                except Exception:
+                    pass  # Best-at data is a bonus; never block image downloads
 
             done += 1
             time.sleep(0.5)  # be polite to BGG
 
         self.after(0, self.refresh_games)
-        imgs_ok = done - failed
-        msg = f"Done: {imgs_ok}/{total} images fetched."
-        if failed:
-            msg += f" {failed} failed — last error: {last_error}"
+        msg = f"Done: {img_ok}/{total} images downloaded."
+        if img_failed:
+            msg += f"  {img_failed} failed — last error: {last_error}"
         self._post_status(msg)
 
     def _post_status(self, msg: str) -> None:
