@@ -1,0 +1,133 @@
+name: Build Installers
+
+# Runs automatically when you push a version tag (e.g. git tag v1.0 && git push --tags)
+# or manually from the Actions tab on GitHub.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:   # lets you trigger a build manually from the GitHub UI
+
+jobs:
+  # ── Windows: .exe installer ──────────────────────────────────────────────────
+  build-windows:
+    name: Windows installer
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python dependencies
+        run: pip install pyinstaller pillow
+
+      - name: Generate icon.ico
+        run: python create_icon.py
+
+      - name: Build exe with PyInstaller
+        run: python -m PyInstaller BoardGameLibrary.spec --clean -y
+
+      - name: Install Inno Setup
+        run: choco install innosetup --yes --no-progress
+
+      - name: Build Windows installer
+        run: |
+          New-Item -ItemType Directory -Force -Path installer | Out-Null
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" BoardGameLibrary.iss
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: installer/BoardGameLibrarySetup-*.exe
+          if-no-files-found: error
+
+  # ── macOS: .dmg installer ────────────────────────────────────────────────────
+  build-macos:
+    name: macOS installer
+    runs-on: macos-latest
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python dependencies
+        run: pip install pyinstaller pillow
+
+      - name: Install create-dmg
+        run: brew install create-dmg
+
+      - name: Generate icon.icns
+        run: python create_icon_mac.py
+
+      - name: Build .app bundle with PyInstaller
+        run: python -m PyInstaller BoardGameLibrary-mac.spec --clean -y
+
+      - name: Package .dmg
+        run: bash build_mac.sh
+
+      - name: Upload macOS installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg
+          path: dist/BoardGameLibraryInstaller-*.dmg
+          if-no-files-found: error
+
+  # ── GitHub Release: attach both installers ───────────────────────────────────
+  release:
+    name: Create GitHub Release
+    needs: [build-windows, build-macos]
+    runs-on: ubuntu-latest
+    # Only create a release when triggered by a version tag
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download Windows installer
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-installer
+          path: artifacts/
+
+      - name: Download macOS DMG
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-dmg
+          path: artifacts/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Board Game Library ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          files: artifacts/*
+          body: |
+            ## Board Game Library ${{ github.ref_name }}
+
+            ### Downloads
+            | Platform | File |
+            |----------|------|
+            | Windows 10/11 | `BoardGameLibrarySetup-*.exe` |
+            | macOS 12+ | `BoardGameLibraryInstaller-*.dmg` |
+
+            Both installers are fully self-contained — no Python installation required.
+
+            ### What's included
+            - Full game library synced from BoardGameGeek
+            - Check-in / check-out member tracking
+            - Play log with date, players, and winner
+            - Favorites, 3D-insert badges, and complexity filters
+            - Offline — all data stored locally

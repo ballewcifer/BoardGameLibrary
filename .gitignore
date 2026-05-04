@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# PyInstaller build output
+build/
+dist/
+
+# Generated icon (re-created at build time)
+icon.icns
+
+# Personal data — never commit the live database, images, or settings
+library.db
+settings.json
+images/
+
+# Installer output
+installer/
+
+# IDE / OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
