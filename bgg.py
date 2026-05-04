@@ -62,6 +62,12 @@ class CollectionEntry:
     my_rating: Optional[float]
     my_comment: Optional[str]
     own: bool
+    # Parsed from <stats> when stats=1 is included in the request
+    min_players: Optional[int] = None
+    max_players: Optional[int] = None
+    min_playtime: Optional[int] = None
+    max_playtime: Optional[int] = None
+    avg_rating: Optional[float] = None
 
 
 @dataclass
@@ -163,22 +169,107 @@ def fetch_collection(
         year_el = item.find("yearpublished")
         image_el = item.find("image")
         thumb_el = item.find("thumbnail")
+        stats_el = item.find("stats")
         rating_el = item.find("./stats/rating")
         my_rating = rating_el.get("value") if rating_el is not None else None
         comment_el = item.find("comment")
         status_el = item.find("status")
         own = status_el is not None and status_el.get("own") == "1"
+
+        # Parse player counts / playtime from <stats> (present when stats=1)
+        min_players = max_players = min_playtime = max_playtime = None
+        avg_rating = None
+        if stats_el is not None:
+            min_players  = _i(stats_el.get("minplayers"))
+            max_players  = _i(stats_el.get("maxplayers"))
+            min_playtime = _i(stats_el.get("minplaytime"))
+            max_playtime = _i(stats_el.get("maxplaytime"))
+            avg_el = stats_el.find("./rating/average")
+            if avg_el is not None:
+                avg_rating = _f(avg_el.get("value"))
+
         entries.append(CollectionEntry(
             bgg_id=bgg_id,
             name=(name_el.text or "").strip() if name_el is not None else f"#{bgg_id}",
             year=_i(year_el.text) if year_el is not None and year_el.text else None,
-            image_url=(image_el.text or None) if image_el is not None else None,
-            thumbnail_url=(thumb_el.text or None) if thumb_el is not None else None,
+            image_url=_maybe_protocol(image_el.text) if image_el is not None else None,
+            thumbnail_url=_maybe_protocol(thumb_el.text) if thumb_el is not None else None,
             my_rating=_f(my_rating) if my_rating not in ("N/A", None) else None,
             my_comment=(comment_el.text or "").strip() if comment_el is not None and comment_el.text else None,
             own=own,
+            min_players=min_players,
+            max_players=max_players,
+            min_playtime=min_playtime,
+            max_playtime=max_playtime,
+            avg_rating=avg_rating,
         ))
     return entries
+
+
+def import_from_username(
+    username: str,
+    *,
+    on_status: Optional[Callable[[str], None]] = None,
+) -> list[GameDetails]:
+    """Import an owned collection using only a BGG username — no API token needed.
+
+    Step 1: fetch /collection  (public, returns image URLs + basic stats).
+    Step 2: try /thing in batches for weight, categories, best-at, etc.
+            If /thing returns 401 (token required), we skip it gracefully and
+            use the collection data alone.
+    """
+    if on_status:
+        on_status(f"Fetching collection for {username}…")
+    entries = fetch_collection(username, on_status=on_status)
+    if not entries:
+        return []
+
+    # Seed GameDetails from the collection response (image URLs already normalised).
+    result: dict[int, GameDetails] = {}
+    for e in entries:
+        result[e.bgg_id] = GameDetails(
+            bgg_id=e.bgg_id,
+            name=e.name,
+            year=e.year,
+            image_url=e.image_url,
+            thumbnail_url=e.thumbnail_url,
+            min_players=e.min_players,
+            max_players=e.max_players,
+            min_playtime=e.min_playtime,
+            max_playtime=e.max_playtime,
+            avg_rating=e.avg_rating,
+            my_rating=e.my_rating,
+            my_comment=e.my_comment,
+        )
+
+    # Try to enrich with /thing details (weight, categories, designers, etc.).
+    if on_status:
+        on_status(f"Fetching full game details for {len(result)} games…")
+    try:
+        things = fetch_things(list(result.keys()), on_status=on_status)
+        for d in things:
+            existing = result.get(d.bgg_id)
+            if existing is None:
+                result[d.bgg_id] = d
+                continue
+            # Keep collection image URLs (reliable) & user-specific fields;
+            # use /thing for everything else.
+            d.image_url      = d.image_url      or existing.image_url
+            d.thumbnail_url  = d.thumbnail_url  or existing.thumbnail_url
+            d.my_rating      = existing.my_rating
+            d.my_comment     = existing.my_comment
+            result[d.bgg_id] = d
+    except PermissionError:
+        if on_status:
+            on_status(
+                f"Note: full details require an API token — imported {len(result)} games "
+                "with basic info + images."
+            )
+    except Exception as exc:
+        if on_status:
+            on_status(f"Warning: could not fetch full details ({exc}). Using basic collection data.")
+
+    return list(result.values())
 
 
 def _parse_thing(item: ET.Element) -> GameDetails:

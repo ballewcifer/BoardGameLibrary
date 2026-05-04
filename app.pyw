@@ -196,7 +196,7 @@ class App(tk.Tk):
         bar = ttk.Frame(self, padding=(8, 6))
         bar.pack(side="top", fill="x")
         ttk.Button(bar, text="Import collection CSV...", command=self.on_import_csv).pack(side="left")
-        ttk.Button(bar, text="Sync via BGG API", command=self.on_sync_api).pack(side="left", padx=(6, 0))
+        ttk.Button(bar, text="Import from BGG...", command=self.on_import_from_bgg).pack(side="left", padx=(6, 0))
         ttk.Button(bar, text="Download Images", command=self.on_download_images).pack(side="left", padx=(6, 0))
         ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=10)
         ttk.Label(bar, text="Search:").pack(side="left")
@@ -905,6 +905,76 @@ class App(tk.Tk):
         self.refresh_games()
         self.status(f"Imported {len(games)} games. Downloading thumbnails in the background...")
         threading.Thread(target=self._download_thumbnails_bg, args=(games,), daemon=True).start()
+
+    def on_import_from_bgg(self) -> None:
+        """Show a dialog asking for a BGG username, then import the collection."""
+        dialog = tk.Toplevel(self)
+        dialog.title("Import from BGG")
+        dialog.resizable(False, False)
+        dialog.transient(self)
+        dialog.configure(bg=C_BG)
+
+        ttk.Label(dialog, text="BGG username:", padding=(16, 14, 16, 4)).pack(anchor="w")
+
+        uname_var = tk.StringVar(value=self.settings.get("bgg_username", ""))
+        entry = ttk.Entry(dialog, textvariable=uname_var, width=32)
+        entry.pack(padx=16, pady=(0, 4))
+        entry.focus_set()
+        entry.select_range(0, "end")
+
+        ttk.Label(
+            dialog,
+            text="Imports your owned games directly from BGG.\nNo API token required.",
+            foreground="#555",
+            padding=(16, 0, 16, 10),
+        ).pack(anchor="w")
+
+        btn_frame = ttk.Frame(dialog)
+        btn_frame.pack(padx=16, pady=(0, 14), fill="x")
+
+        def do_import() -> None:
+            uname = uname_var.get().strip()
+            if not uname:
+                messagebox.showerror("Username required", "Enter your BGG username.", parent=dialog)
+                return
+            self.settings["bgg_username"] = uname
+            config.save(self.settings)
+            self.username_var.set(uname)
+            dialog.destroy()
+            self.status(f"Importing collection for {uname}…")
+            threading.Thread(
+                target=self._import_from_username_bg,
+                args=(uname,),
+                daemon=True,
+            ).start()
+
+        ttk.Button(btn_frame, text="Cancel", command=dialog.destroy).pack(side="left")
+        ttk.Button(btn_frame, text="Import", command=do_import).pack(side="right")
+        dialog.bind("<Return>", lambda *_: do_import())
+        dialog.grab_set()
+
+    def _import_from_username_bg(self, username: str) -> None:
+        try:
+            games = bgg.import_from_username(username, on_status=self._post_status)
+            if not games:
+                self.after(0, lambda: messagebox.showinfo(
+                    "Nothing found",
+                    f"No owned games found for '{username}'.\n"
+                    "Check the username is correct and your BGG collection is set to public.",
+                ))
+                self._post_status("Import: nothing found.")
+                return
+            self._save_games_to_db(games)
+            self.after(0, self.refresh_games)
+            self._post_status(f"Imported {len(games)} games. Downloading images…")
+            self._download_thumbnails_bg(games)
+        except Exception as exc:
+            traceback.print_exc()
+            self.after(0, lambda err=str(exc): messagebox.showerror(
+                "Import failed",
+                f"Could not import collection for '{username}':\n{err}",
+            ))
+            self._post_status("Import from BGG failed.")
 
     def on_sync_api(self) -> None:
         token = self.settings.get("bgg_token", "")
