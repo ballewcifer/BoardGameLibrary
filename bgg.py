@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import csv
 import re
+import ssl
 import time
 import urllib.parse
 import urllib.request
@@ -25,9 +26,22 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable, Optional
 
+import certifi
+
 BASE = "https://boardgamegeek.com/xmlapi2"
 USER_AGENT = "BoardGameLibrary/0.1 (personal-use)"
 THING_BATCH = 20
+
+
+def _ssl_ctx() -> ssl.SSLContext:
+    """Return an SSL context that uses certifi's CA bundle.
+
+    PyInstaller bundles the Python runtime but not the system certificate
+    store, so on machines where the app wasn't built, urllib HTTPS requests
+    fail with SSL verification errors.  certifi ships its own CA bundle
+    which works identically on every machine.
+    """
+    return ssl.create_default_context(cafile=certifi.where())
 
 
 @dataclass
@@ -73,7 +87,7 @@ def _http_get(url: str, timeout: int = 30, token: Optional[str] = None) -> tuple
         headers["Authorization"] = f"Bearer {token}"
     req = urllib.request.Request(url, headers=headers)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with urllib.request.urlopen(req, timeout=timeout, context=_ssl_ctx()) as resp:
             return resp.status, resp.read()
     except urllib.error.HTTPError as e:
         if e.code == 401:
@@ -367,10 +381,10 @@ def get_bgg_page_data(bgg_id: int, *, timeout: int = 15) -> PageData:
     page_url = f"https://boardgamegeek.com/boardgame/{bgg_id}"
     try:
         req = urllib.request.Request(page_url, headers={"User-Agent": USER_AGENT})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with urllib.request.urlopen(req, timeout=timeout, context=_ssl_ctx()) as resp:
             html = resp.read(200000).decode("utf-8", errors="ignore")
-    except Exception:
-        return PageData()
+    except Exception as exc:
+        raise RuntimeError(f"Could not fetch BGG page for #{bgg_id}: {exc}") from exc
 
     result = PageData()
 
@@ -450,7 +464,8 @@ def download_image(url: str, dest: Path, *, timeout: int = 30) -> Path:
         url = "https:" + url
     dest.parent.mkdir(parents=True, exist_ok=True)
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(req, timeout=timeout) as resp, open(dest, "wb") as f:
+    with urllib.request.urlopen(req, timeout=timeout, context=_ssl_ctx()) as resp, \
+            open(dest, "wb") as f:
         f.write(resp.read())
     return dest
 

@@ -968,13 +968,22 @@ class App(tk.Tk):
         ).start()
 
     def _fetch_and_cache_images_bg(self, bgg_ids: list[int]) -> None:
+        IMAGES_DIR.mkdir(parents=True, exist_ok=True)
         total = len(bgg_ids)
         done = 0
         failed = 0
+        last_error = ""
         for bgg_id in bgg_ids:
             self._post_status(f"Fetching BGG data {done + 1}/{total}...")
 
-            page = bgg.get_bgg_page_data(bgg_id)
+            try:
+                page = bgg.get_bgg_page_data(bgg_id)
+            except Exception as exc:
+                failed += 1
+                last_error = str(exc)
+                done += 1
+                time.sleep(0.5)
+                continue
 
             # --- image ---
             with db.connect() as c:
@@ -988,10 +997,12 @@ class App(tk.Tk):
                     bgg.download_image(page.image_url, dest)
                     with db.connect() as c:
                         db.set_image_path(c, bgg_id, str(dest))
-                except Exception:
+                except Exception as exc:
                     failed += 1
+                    last_error = str(exc)
             elif need_image:
                 failed += 1
+                last_error = f"No image URL found for #{bgg_id}"
 
             # --- best_players ---
             if page.best_players:
@@ -1006,9 +1017,9 @@ class App(tk.Tk):
 
         self.after(0, self.refresh_games)
         imgs_ok = done - failed
-        msg = f"Done: {imgs_ok}/{total} images fetched, Best-at data updated."
+        msg = f"Done: {imgs_ok}/{total} images fetched."
         if failed:
-            msg += f" ({failed} image(s) failed.)"
+            msg += f" {failed} failed — last error: {last_error}"
         self._post_status(msg)
 
     def _post_status(self, msg: str) -> None:
@@ -1050,6 +1061,10 @@ class App(tk.Tk):
                 db.upsert_game(c, row)
 
     def _download_thumbnails_bg(self, games: list[bgg.GameDetails]) -> None:
+        IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+        ok = 0
+        failed = 0
+        last_error = ""
         for g in games:
             url = g.thumbnail_url or g.image_url
             if not url:
@@ -1062,12 +1077,17 @@ class App(tk.Tk):
             dest = IMAGES_DIR / f"{g.bgg_id}{ext}"
             try:
                 bgg.download_image(url, dest)
-            except Exception:
-                continue
-            with db.connect() as c:
-                db.set_image_path(c, g.bgg_id, str(dest))
+                with db.connect() as c:
+                    db.set_image_path(c, g.bgg_id, str(dest))
+                ok += 1
+            except Exception as exc:
+                failed += 1
+                last_error = str(exc)
         self.after(0, self.refresh_games)
-        self._post_status("Thumbnails downloaded.")
+        msg = f"Thumbnails downloaded: {ok} ok."
+        if failed:
+            msg += f" {failed} failed — last error: {last_error}"
+        self._post_status(msg)
 
     # ---------- check in / out ----------
 

@@ -13,6 +13,7 @@ a = Analysis(
         'PIL._tkinter_finder',
         'PIL.Image',
         'PIL.ImageTk',
+        'certifi',
     ],
     hookspath=[],
     hooksconfig={},
