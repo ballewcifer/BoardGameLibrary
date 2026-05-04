@@ -2,13 +2,19 @@
 # PyInstaller spec for Board Game Library
 # Build with:  pyinstaller BoardGameLibrary.spec
 
+from PyInstaller.utils.hooks import collect_data_files
+
 block_cipher = None
 
 a = Analysis(
     ['app.pyw'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[
+        # Bundle certifi's cacert.pem so HTTPS works on every machine,
+        # not just the one the app was compiled on.
+        *collect_data_files('certifi'),
+    ],
     hiddenimports=[
         'PIL._tkinter_finder',
         'PIL.Image',

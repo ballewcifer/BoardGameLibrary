@@ -3,13 +3,17 @@
 # Build with (on a Mac):
 #   pyinstaller BoardGameLibrary-mac.spec -y
 
+from PyInstaller.utils.hooks import collect_data_files
+
 block_cipher = None
 
 a = Analysis(
     ['app.pyw'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[
+        *collect_data_files('certifi'),
+    ],
     hiddenimports=[
         'PIL._tkinter_finder',
         'PIL.Image',

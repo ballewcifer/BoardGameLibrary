@@ -26,22 +26,23 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable, Optional
 
-import certifi
-
 BASE = "https://boardgamegeek.com/xmlapi2"
 USER_AGENT = "BoardGameLibrary/0.1 (personal-use)"
 THING_BATCH = 20
 
 
 def _ssl_ctx() -> ssl.SSLContext:
-    """Return an SSL context that uses certifi's CA bundle.
+    """Return an SSL context with a reliable CA bundle.
 
-    PyInstaller bundles the Python runtime but not the system certificate
-    store, so on machines where the app wasn't built, urllib HTTPS requests
-    fail with SSL verification errors.  certifi ships its own CA bundle
-    which works identically on every machine.
+    Tries certifi first (bundled CA certs that work on any machine),
+    then falls back to the system certificate store.  Using a lazy import
+    so the app still starts if certifi wasn't picked up by PyInstaller.
     """
-    return ssl.create_default_context(cafile=certifi.where())
+    try:
+        import certifi  # noqa: PLC0415
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        return ssl.create_default_context()
 
 
 @dataclass
