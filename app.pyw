@@ -76,6 +76,10 @@ class App(tk.Tk):
         self.settings = config.load()
         self._image_cache: dict[str, ImageTk.PhotoImage] = {}
         self._placeholder_img: Optional[ImageTk.PhotoImage] = None
+        self._view_mode: str = self.settings.get("view_mode", "cards")
+        self._sort_col: Optional[str] = None
+        self._sort_rev: bool = False
+        self._table_games: list = []
 
         self._apply_style()
         self.configure(bg=C_BG)
@@ -386,6 +390,26 @@ class App(tk.Tk):
 
         ttk.Button(fbar, text="Reset filters", command=self._reset_filters).pack(side="left")
 
+        # ── view toggle (right-aligned) ───────────────────────────────────────
+        ttk.Separator(fbar, orient="vertical").pack(side="right", fill="y", padx=(8, 4))
+
+        def _view_btn(text, mode):
+            active = self._view_mode == mode
+            btn = tk.Button(
+                fbar, text=text,
+                bg=C_NAVY if active else C_PALE,
+                fg=C_WHITE if active else C_NAVY,
+                activebackground=C_BLUE, activeforeground=C_WHITE,
+                relief="flat", font=("Segoe UI", 9, "bold"),
+                padx=8, pady=2, cursor="hand2",
+                command=lambda m=mode: self._set_view(m),
+            )
+            btn.pack(side="right", padx=(0, 2))
+            return btn
+
+        self._btn_table = _view_btn("≡  Table", "table")
+        self._btn_cards = _view_btn("⊞  Cards", "cards")
+
     def _build_tabs(self) -> None:
         self.nb = ttk.Notebook(self)
         self.nb.pack(side="top", fill="both", expand=True)
@@ -423,26 +447,90 @@ class App(tk.Tk):
         wrapper = ttk.Frame(self.games_tab)
         wrapper.pack(fill="both", expand=True)
 
-        self.games_canvas = tk.Canvas(wrapper, highlightthickness=0, background="#f5f5f5")
-        scroll = ttk.Scrollbar(wrapper, orient="vertical", command=self.games_canvas.yview)
+        # ── card grid ─────────────────────────────────────────────────────────
+        self._card_frame = ttk.Frame(wrapper)
+        self.games_canvas = tk.Canvas(self._card_frame, highlightthickness=0, background="#f5f5f5")
+        scroll = ttk.Scrollbar(self._card_frame, orient="vertical", command=self.games_canvas.yview)
         self.games_canvas.configure(yscrollcommand=scroll.set)
         self.games_canvas.pack(side="left", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
-
         self.games_inner = ttk.Frame(self.games_canvas)
         self.games_window_id = self.games_canvas.create_window((0, 0), window=self.games_inner, anchor="nw")
-
         self.games_inner.bind("<Configure>", lambda e: self.games_canvas.configure(scrollregion=self.games_canvas.bbox("all")))
         self.games_canvas.bind("<Configure>", self._reflow_games)
         self.games_canvas.bind_all("<MouseWheel>", self._on_mousewheel, add="+")
 
+        # ── table view ────────────────────────────────────────────────────────
+        self._table_frame = ttk.Frame(wrapper)
+        self._build_table_widget(self._table_frame)
+
         self._cards: list[ttk.Frame] = []
 
+        # Show whichever view was last used
+        if self._view_mode == "table":
+            self._table_frame.pack(fill="both", expand=True)
+        else:
+            self._card_frame.pack(fill="both", expand=True)
+
+    def _build_table_widget(self, parent: ttk.Frame) -> None:
+        cols = ("fav", "name", "year", "players", "time", "weight", "rating", "best", "status", "plays")
+        self.games_tree = ttk.Treeview(parent, columns=cols, show="headings", selectmode="browse")
+
+        col_defs = [
+            ("fav",     "★",           34,  "center", False),
+            ("name",    "Name",        280, "w",      True),
+            ("year",    "Year",         54, "center", False),
+            ("players", "Players",      72, "center", False),
+            ("time",    "Time",         84, "center", False),
+            ("weight",  "Complexity",   84, "center", False),
+            ("rating",  "BGG ★",        62, "center", False),
+            ("best",    "Best At",      72, "center", False),
+            ("status",  "Status",      140, "center", False),
+            ("plays",   "Plays",        50, "center", False),
+        ]
+        for cid, heading, width, anchor, stretch in col_defs:
+            self.games_tree.heading(cid, text=heading,
+                                    command=lambda c=cid: self._sort_table(c))
+            self.games_tree.column(cid, width=width, anchor=anchor, stretch=stretch)
+
+        vsb = ttk.Scrollbar(parent, orient="vertical", command=self.games_tree.yview)
+        self.games_tree.configure(yscrollcommand=vsb.set)
+        self.games_tree.pack(side="left", fill="both", expand=True)
+        vsb.pack(side="right", fill="y")
+
+        self.games_tree.bind("<Double-1>",  self._on_table_double_click)
+        self.games_tree.bind("<Return>",    self._on_table_return)
+        self.games_tree.bind("<Button-3>",  self._on_table_right_click)
+
+        # Row colour tags
+        self.games_tree.tag_configure("out",      background="#fff8e1")
+        self.games_tree.tag_configure("favorite", foreground=C_GOLD)
+
+    def _set_view(self, mode: str) -> None:
+        if mode == self._view_mode:
+            return
+        self._view_mode = mode
+        self.settings["view_mode"] = mode
+        config.save(self.settings)
+        # Update button colours
+        for btn, m in ((self._btn_cards, "cards"), (self._btn_table, "table")):
+            active = (m == mode)
+            btn.configure(bg=C_NAVY if active else C_PALE,
+                           fg=C_WHITE if active else C_NAVY)
+        if mode == "table":
+            self._card_frame.pack_forget()
+            self._table_frame.pack(fill="both", expand=True)
+        else:
+            self._table_frame.pack_forget()
+            self._card_frame.pack(fill="both", expand=True)
+        self.refresh_games()
+
     def _on_mousewheel(self, event: tk.Event) -> None:
-        # Only scroll when the Games tab is active
+        # Only scroll the card canvas when the Games tab is active and in card view
         if self.nb.index(self.nb.select()) != 0:
             return
-        self.games_canvas.yview_scroll(int(-event.delta / 120), "units")
+        if self._view_mode == "cards":
+            self.games_canvas.yview_scroll(int(-event.delta / 120), "units")
 
     def _reflow_games(self, event: tk.Event) -> None:
         self.games_canvas.itemconfigure(self.games_window_id, width=event.width)
@@ -586,10 +674,6 @@ class App(tk.Tk):
         return out
 
     def refresh_games(self) -> None:
-        for card in self._cards:
-            card.destroy()
-        self._cards.clear()
-
         with db.connect() as c:
             games = db.list_games(c, self.search_var.get().strip())
             open_loans = {
@@ -606,19 +690,31 @@ class App(tk.Tk):
 
         games = self._apply_filters(list(games), open_loans)
 
+        if self._view_mode == "table":
+            self._refresh_table_view(games, open_loans, play_counts)
+        else:
+            self._refresh_card_view(games, open_loans, play_counts)
+
+    def _filters_active(self) -> bool:
+        return (
+            any(v != "Any" for v in [self.players_var.get(), self.best_at_var.get(),
+                                      self.time_var.get(), self.weight_var.get(),
+                                      self.status_filter_var.get()])
+            or self.exact_players_var.get()
+            or self.favorites_var.get()
+            or bool(self.search_var.get())
+        )
+
+    def _refresh_card_view(self, games, open_loans, play_counts) -> None:
+        for card in self._cards:
+            card.destroy()
+        self._cards.clear()
+
         if not games:
-            filters_active = (
-                any(v != "Any" for v in [self.players_var.get(), self.best_at_var.get(),
-                                          self.time_var.get(), self.weight_var.get(),
-                                          self.status_filter_var.get()])
-                or self.exact_players_var.get()
-                or self.favorites_var.get()
-                or bool(self.search_var.get())
-            )
             msg = (
                 "No games match your filters."
-                if filters_active
-                else 'No games yet. Click "Import collection CSV..." above to load your BGG export.'
+                if self._filters_active()
+                else 'No games yet. Use "Import from BGG..." or "Import collection CSV..." to get started.'
             )
             empty = ttk.Label(self.games_inner, text=msg, padding=20)
             empty.grid(row=0, column=0)
@@ -627,8 +723,127 @@ class App(tk.Tk):
 
         for game in games:
             self._cards.append(self._build_card(game, open_loans.get(game["bgg_id"]), play_counts))
-
         self._layout_cards(self.games_canvas.winfo_width())
+
+    def _refresh_table_view(self, games, open_loans, play_counts) -> None:
+        self.games_tree.delete(*self.games_tree.get_children())
+
+        # Apply column sort
+        if self._sort_col:
+            def _key(g):
+                c = self._sort_col
+                if   c == "name":    return (g["name"] or "").lower()
+                elif c == "year":    return g["year"] or 0
+                elif c == "players": return g["min_players"] or 0
+                elif c == "time":    return g["playing_time"] or g["max_playtime"] or g["min_playtime"] or 0
+                elif c == "weight":  return g["weight"] or 0.0
+                elif c == "rating":  return g["avg_rating"] or 0.0
+                elif c == "best":    return g["best_players"] or ""
+                elif c == "status":  return 0 if g["bgg_id"] in open_loans else 1
+                elif c == "plays":   return play_counts.get(g["bgg_id"], 0)
+                elif c == "fav":     return 0 if g["is_favorite"] else 1
+                return ""
+            games = sorted(games, key=_key, reverse=self._sort_rev)
+
+        self._table_games = list(games)
+
+        if not games:
+            # Nothing to insert — status bar already describes the state
+            return
+
+        for g in games:
+            bgg_id  = g["bgg_id"]
+            loan    = open_loans.get(bgg_id)
+            n_plays = play_counts.get(bgg_id, 0)
+
+            tags: list[str] = []
+            if loan:
+                tags.append("out")
+            if g["is_favorite"]:
+                tags.append("favorite")
+
+            self.games_tree.insert(
+                "", "end", iid=str(bgg_id),
+                tags=tags,
+                values=(
+                    "★" if g["is_favorite"] else "",
+                    g["name"],
+                    g["year"] or "—",
+                    fmt_players(g["min_players"], g["max_players"]),
+                    fmt_time(g["min_playtime"], g["max_playtime"], g["playing_time"]),
+                    f"{g['weight']:.1f}" if g["weight"] else "—",
+                    f"{g['avg_rating']:.1f}" if g["avg_rating"] else "—",
+                    g["best_players"] or "—",
+                    f"Out: {loan['first_name']} {loan['last_name']}" if loan else "Available",
+                    n_plays if n_plays else "—",
+                ),
+            )
+
+    def _sort_table(self, col: str) -> None:
+        if self._sort_col == col:
+            self._sort_rev = not self._sort_rev
+        else:
+            self._sort_col = col
+            self._sort_rev = False
+
+        _labels = {
+            "fav": "★", "name": "Name", "year": "Year", "players": "Players",
+            "time": "Time", "weight": "Complexity", "rating": "BGG ★",
+            "best": "Best At", "status": "Status", "plays": "Plays",
+        }
+        for c, lbl in _labels.items():
+            arrow = (" ▲" if not self._sort_rev else " ▼") if c == col else ""
+            self.games_tree.heading(c, text=lbl + arrow)
+
+        self.refresh_games()
+
+    def _table_selected_game(self) -> Optional[dict]:
+        sel = self.games_tree.selection()
+        if not sel:
+            return None
+        bgg_id = int(sel[0])
+        return next((g for g in self._table_games if g["bgg_id"] == bgg_id), None)
+
+    def _on_table_double_click(self, event: tk.Event) -> None:
+        row = self.games_tree.identify_row(event.y)
+        if not row:
+            return
+        self.games_tree.selection_set(row)
+        game = next((g for g in self._table_games if g["bgg_id"] == int(row)), None)
+        if game:
+            self.show_details(game)
+
+    def _on_table_return(self, event: tk.Event) -> None:
+        game = self._table_selected_game()
+        if game:
+            self.show_details(game)
+
+    def _on_table_right_click(self, event: tk.Event) -> None:
+        row = self.games_tree.identify_row(event.y)
+        if not row:
+            return
+        self.games_tree.selection_set(row)
+        game = next((g for g in self._table_games if g["bgg_id"] == int(row)), None)
+        if not game:
+            return
+
+        with db.connect() as c:
+            loan = c.execute(
+                "SELECT * FROM loans WHERE game_id = ? AND returned_at IS NULL",
+                (game["bgg_id"],),
+            ).fetchone()
+
+        menu = tk.Menu(self, tearoff=0)
+        if loan:
+            menu.add_command(label="Check In",  command=lambda: self.on_check_in(game))
+        else:
+            menu.add_command(label="Check Out", command=lambda: self.on_check_out(game))
+        menu.add_command(label="Log Play…",  command=lambda: self.on_log_play(game))
+        menu.add_separator()
+        menu.add_command(label="Details…",   command=lambda: self.show_details(game))
+        fav_lbl = "Remove from Favorites" if game["is_favorite"] else "Add to Favorites"
+        menu.add_command(label=fav_lbl,      command=lambda: self.on_toggle_favorite(game))
+        menu.tk_popup(event.x_root, event.y_root)
 
     def _build_card(self, game, loan, play_counts: dict) -> ttk.Frame:
         out_to = None
