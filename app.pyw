@@ -86,6 +86,125 @@ class App(tk.Tk):
 
         self.refresh_all()
 
+        # Show first-run setup guide if this is a fresh install
+        if not self.settings.get("welcome_shown"):
+            self.after(300, self._show_welcome_dialog)
+
+    # ---------- first-run welcome ----------
+
+    def _show_welcome_dialog(self) -> None:
+        win = tk.Toplevel(self)
+        win.title("Welcome to Board Game Library")
+        win.resizable(False, False)
+        win.transient(self)
+        win.configure(bg=C_BG)
+
+        # ── header ────────────────────────────────────────────────────────────
+        hdr = tk.Frame(win, bg=C_NAVY, pady=16)
+        hdr.pack(fill="x")
+        tk.Label(hdr, text="\U0001f3b2", bg=C_NAVY, fg=C_WHITE,
+                 font=("Segoe UI", 28)).pack()
+        tk.Label(hdr, text="Welcome to Board Game Library!",
+                 bg=C_NAVY, fg=C_WHITE,
+                 font=("Segoe UI", 14, "bold")).pack(pady=(2, 0))
+        tk.Label(hdr, text="Let's get your collection set up.",
+                 bg=C_NAVY, fg=C_SKY,
+                 font=("Segoe UI", 10)).pack(pady=(2, 0))
+
+        # ── body ──────────────────────────────────────────────────────────────
+        body = tk.Frame(win, bg=C_BG, padx=28, pady=16)
+        body.pack(fill="both", expand=True)
+
+        def section(parent, number: str, title: str, color=C_NAVY):
+            row = tk.Frame(parent, bg=C_BG)
+            row.pack(fill="x", pady=(10, 2))
+            tk.Label(row, text=number, bg=C_BLUE, fg=C_WHITE,
+                     font=("Segoe UI", 10, "bold"),
+                     width=3, pady=2).pack(side="left", anchor="n")
+            tk.Label(row, text=f"  {title}", bg=C_BG, fg=color,
+                     font=("Segoe UI", 10, "bold")).pack(side="left", anchor="w")
+
+        def bullet(parent, text: str):
+            row = tk.Frame(parent, bg=C_BG)
+            row.pack(fill="x")
+            tk.Label(row, text="    •", bg=C_BG, fg=C_TEXT,
+                     font=("Segoe UI", 9)).pack(side="left", anchor="n")
+            tk.Label(row, text=f"  {text}", bg=C_BG, fg=C_TEXT,
+                     font=("Segoe UI", 9), justify="left",
+                     wraplength=400).pack(side="left", anchor="w")
+
+        def link_btn(parent, text: str, url: str):
+            tk.Button(
+                parent, text=f"    ↗  {text}",
+                bg=C_BG, fg=C_BLUE, relief="flat", cursor="hand2",
+                font=("Segoe UI", 9, "underline"), anchor="w",
+                command=lambda u=url: __import__("webbrowser").open(u),
+            ).pack(anchor="w", padx=(16, 0))
+
+        # ── Step 1 ────────────────────────────────────────────────────────────
+        section(body, "1", "Get a free BGG API token  (recommended)")
+        bullet(body, "Log into BoardGameGeek, then visit the link below.")
+        bullet(body, 'Click "Register a new application", give it any name, submit.')
+        bullet(body, "Copy the Bearer token shown on that page.")
+        bullet(body, 'Open the Settings tab → paste the token → click Save.')
+        link_btn(body, "boardgamegeek.com/applications", "https://boardgamegeek.com/applications")
+
+        # divider
+        tk.Frame(body, bg=C_PALE, height=1).pack(fill="x", pady=(14, 0))
+        tk.Label(body, text="  — OR —",
+                 bg=C_BG, fg="#888", font=("Segoe UI", 9, "italic")).pack(anchor="w")
+        tk.Frame(body, bg=C_PALE, height=1).pack(fill="x", pady=(0, 4))
+
+        # ── Step 1 alt ────────────────────────────────────────────────────────
+        section(body, "1b", "Export your collection as a CSV  (no token needed)")
+        bullet(body, "Log into BoardGameGeek and open your collection.")
+        bullet(body, 'Click the export / download icon → choose CSV format.')
+        bullet(body, 'Use "Import collection CSV..." on the toolbar to load it.')
+        bullet(body, "Note: your CSV may not include image URLs — you'll need the API token above to download images afterward.")
+        link_btn(body, "boardgamegeek.com/collection/user/YOUR_USERNAME",
+                 "https://boardgamegeek.com/collection/user/Ballewcifer")
+
+        # ── Step 2 ────────────────────────────────────────────────────────────
+        section(body, "2", "Import your collection")
+        bullet(body, 'With a token: click "Import from BGG..." on the toolbar, enter your username.')
+        bullet(body, 'With a CSV: click "Import collection CSV..." and select the file.')
+        bullet(body, "Images download automatically — no extra steps needed.")
+
+        # ── Step 3 ────────────────────────────────────────────────────────────
+        section(body, "3", "You're done!")
+        bullet(body, "Browse your games, check them out to members, and log plays.")
+        bullet(body, 'Use the Settings tab any time to update your username or token.')
+
+        # ── footer ────────────────────────────────────────────────────────────
+        tk.Frame(win, bg=C_BLUE, height=1).pack(fill="x")
+        footer = tk.Frame(win, bg=C_PALE, pady=10, padx=28)
+        footer.pack(fill="x")
+
+        def close(go_settings: bool = False) -> None:
+            self.settings["welcome_shown"] = True
+            config.save(self.settings)
+            win.destroy()
+            if go_settings:
+                self.nb.select(self.settings_tab)
+
+        tk.Button(
+            footer, text="Open Settings to add my token",
+            bg=C_BLUE, fg=C_WHITE, activebackground=C_NAVY, activeforeground=C_WHITE,
+            relief="flat", font=("Segoe UI", 9, "bold"),
+            padx=14, pady=5, cursor="hand2",
+            command=lambda: close(go_settings=True),
+        ).pack(side="left")
+
+        tk.Button(
+            footer, text="Get Started",
+            bg=C_NAVY, fg=C_WHITE, activebackground=C_BLUE, activeforeground=C_WHITE,
+            relief="flat", font=("Segoe UI", 9, "bold"),
+            padx=14, pady=5, cursor="hand2",
+            command=lambda: close(go_settings=False),
+        ).pack(side="right")
+
+        win.grab_set()
+
     # ---------- style / theme ----------
 
     def _apply_style(self) -> None:
