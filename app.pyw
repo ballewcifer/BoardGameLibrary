@@ -123,6 +123,7 @@ class App(tk.Tk):
 
         self._apply_style()
         self.configure(bg=C_BG)
+        self._build_menubar()
         self._build_header()
         self._build_toolbar()
         self._build_tabs()
@@ -205,15 +206,15 @@ class App(tk.Tk):
         section(body, "1b", "Export your collection as a CSV  (no token needed)")
         bullet(body, "Log into BoardGameGeek and open your collection.")
         bullet(body, 'Click the export / download icon → choose CSV format.')
-        bullet(body, 'Use "Import collection CSV..." on the toolbar to load it.')
-        bullet(body, "Note: your CSV may not include image URLs — you'll need the API token above to download images afterward.")
+        bullet(body, 'Use File → Import collection CSV… to load it.')
+        bullet(body, "Note: your CSV may not include image URLs — use File → Download Images after importing.")
         link_btn(body, "boardgamegeek.com/collection/user/YOUR_USERNAME",
                  "https://boardgamegeek.com/collection/user/Ballewcifer")
 
         # ── Step 2 ────────────────────────────────────────────────────────────
         section(body, "2", "Import your collection")
-        bullet(body, 'With a token: click "Import from BGG..." on the toolbar, enter your username.')
-        bullet(body, 'With a CSV: click "Import collection CSV..." and select the file.')
+        bullet(body, 'With a token: use File → Import from BGG…, enter your username.')
+        bullet(body, 'With a CSV: use File → Import collection CSV…')
         bullet(body, "Images download automatically — no extra steps needed.")
 
         # ── Step 3 ────────────────────────────────────────────────────────────
@@ -338,8 +339,36 @@ class App(tk.Tk):
 
     # ---------- layout ----------
 
+    def _build_menubar(self) -> None:
+        """OS-native menu bar: File | Library | Help."""
+        self.option_add("*tearOff", False)
+        menubar = tk.Menu(self)
+
+        # ── File ──────────────────────────────────────────────────────────────
+        file_menu = tk.Menu(menubar)
+        menubar.add_cascade(label="File", menu=file_menu)
+        file_menu.add_command(label="Import from BGG…",        command=self.on_import_from_bgg)
+        file_menu.add_command(label="Import collection CSV…",  command=self.on_import_csv)
+        file_menu.add_separator()
+        file_menu.add_command(label="Download Images",         command=self.on_download_images)
+        file_menu.add_separator()
+        file_menu.add_command(label="Exit",                    command=self.destroy)
+
+        # ── Library ───────────────────────────────────────────────────────────
+        lib_menu = tk.Menu(menubar)
+        menubar.add_cascade(label="Library", menu=lib_menu)
+        lib_menu.add_command(label="Add Game…",      command=self.on_add_game)
+        lib_menu.add_command(label="Collections…",   command=self.on_manage_collections)
+
+        # ── Help ──────────────────────────────────────────────────────────────
+        help_menu = tk.Menu(menubar)
+        menubar.add_cascade(label="Help", menu=help_menu)
+        help_menu.add_command(label="About…", command=self.on_about)
+
+        self.config(menu=menubar)
+
     def _build_header(self) -> None:
-        """Navy banner at the very top with app title and About button."""
+        """Navy banner at the very top with the app title."""
         hdr = tk.Frame(self, bg=C_NAVY, pady=6)
         hdr.pack(side="top", fill="x")
 
@@ -349,25 +378,11 @@ class App(tk.Tk):
             font=("Segoe UI", 13, "bold"),
         ).pack(side="left", padx=(8, 0))
 
-        tk.Button(
-            hdr, text="About",
-            bg=C_BLUE, fg=C_WHITE, activebackground=C_SKY, activeforeground=C_WHITE,
-            relief="flat", font=("Segoe UI", 9),
-            cursor="hand2", padx=10, pady=2,
-            command=self.on_about,
-        ).pack(side="right", padx=10)
-
     def _build_toolbar(self) -> None:
         bar = ttk.Frame(self, padding=(8, 6))
         bar.pack(side="top", fill="x")
 
-        # ── left-aligned toolbar items ────────────────────────────────────────
-        ttk.Button(bar, text="Import collection CSV...", command=self.on_import_csv).pack(side="left")
-        ttk.Button(bar, text="Import from BGG...", command=self.on_import_from_bgg).pack(side="left", padx=(6, 0))
-        ttk.Button(bar, text="Download Images", command=self.on_download_images).pack(side="left", padx=(6, 0))
-        ttk.Button(bar, text="Add Game...", command=self.on_add_game).pack(side="left", padx=(6, 0))
-        ttk.Button(bar, text="Collections…", command=self.on_manage_collections).pack(side="left", padx=(6, 0))
-        ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=10)
+        # ── search ────────────────────────────────────────────────────────────
         ttk.Label(bar, text="Search:").pack(side="left")
         self.search_var = tk.StringVar()
         self.search_var.trace_add("write", lambda *_: self.refresh_games())
@@ -375,7 +390,7 @@ class App(tk.Tk):
         entry.pack(side="left", padx=(4, 0))
         ttk.Button(bar, text="Clear", command=lambda: self.search_var.set("")).pack(side="left", padx=(4, 0))
 
-        # ── view toggle — left-aligned after Clear so it doesn't float right ──
+        # ── view toggle ───────────────────────────────────────────────────────
         ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=10)
         ttk.Label(bar, text="View:").pack(side="left")
 
@@ -1303,7 +1318,7 @@ class App(tk.Tk):
                 "  3.  Click 'Register a new application'.\n"
                 "  4.  Fill in a name (e.g. 'My Library') and any description.  Submit.\n"
                 "  5.  Copy the Bearer token shown and paste it into the field above.\n"
-                "  6.  Click Save, then use 'Import from BGG...' on the toolbar."
+                "  6.  Click Save, then use File → Import from BGG…"
             ),
             bg="#eaf4fd", fg=C_TEXT,
             font=("Segoe UI", 9),
