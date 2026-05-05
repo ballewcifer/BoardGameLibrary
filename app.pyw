@@ -382,8 +382,23 @@ class App(tk.Tk):
         bar = ttk.Frame(self, padding=(8, 6))
         bar.pack(side="top", fill="x")
 
+        # ── collection filter — created here, packed lazily by _refresh_collection_ui ──
+        self._coll_filter_modes: list = []
+        self._coll_combo_var = tk.StringVar()
+        self._coll_combo = ttk.Combobox(
+            bar, textvariable=self._coll_combo_var, state="readonly", width=24,
+        )
+        self._coll_combo.bind("<<ComboboxSelected>>", self._on_collection_filter_changed)
+        self._coll_label = ttk.Label(bar, text="Collection:")
+        self._coll_sep = ttk.Separator(bar, orient="vertical")
+        self._coll_delete_btn = ttk.Button(
+            bar, text="✕", width=2, command=self._on_delete_selected_collection,
+        )
+        # Not packed yet — _refresh_collection_ui inserts them before _search_label_ref
+
         # ── search ────────────────────────────────────────────────────────────
-        ttk.Label(bar, text="Search:").pack(side="left")
+        self._search_label_ref = ttk.Label(bar, text="Search:")
+        self._search_label_ref.pack(side="left")
         self.search_var = tk.StringVar()
         self.search_var.trace_add("write", lambda *_: self.refresh_games())
         entry = ttk.Entry(bar, textvariable=self.search_var, width=30)
@@ -415,7 +430,6 @@ class App(tk.Tk):
         # --- filter bar (second row, light-blue background) ---
         fbar = ttk.Frame(self, style="Filter.TFrame", padding=(8, 4, 8, 6))
         fbar.pack(side="top", fill="x")
-        self._fbar_ref = fbar
 
         def flabel(text): return ttk.Label(fbar, text=text, style="Filter.TLabel")
         def fcheck(text, var, cmd): return ttk.Checkbutton(fbar, text=text, variable=var,
@@ -479,19 +493,6 @@ class App(tk.Tk):
         ttk.Separator(fbar, orient="vertical").pack(side="left", fill="y", padx=10)
         self._count_label = ttk.Label(fbar, text="", style="Filter.TLabel")
         self._count_label.pack(side="left")
-
-        # ── collection filter bar (shown only when 2+ collections exist) ─────────
-        self._coll_bar = ttk.Frame(self, style="Filter.TFrame", padding=(8, 2, 8, 4))
-        # not packed yet — _refresh_collection_ui() shows/hides it
-        ttk.Label(self._coll_bar, text="Collection:", style="Filter.TLabel").pack(side="left")
-        self._coll_combo_var = tk.StringVar()
-        self._coll_combo = ttk.Combobox(
-            self._coll_bar, textvariable=self._coll_combo_var,
-            state="readonly", width=28,
-        )
-        self._coll_combo.pack(side="left", padx=(4, 0))
-        self._coll_combo.bind("<<ComboboxSelected>>", self._on_collection_filter_changed)
-        self._coll_filter_modes: list = []   # parallel list of filter mode values
 
     def _build_tabs(self) -> None:
         self.nb = ttk.Notebook(self)
@@ -643,12 +644,15 @@ class App(tk.Tk):
         self.search_var.set("")
 
     def _refresh_collection_ui(self) -> None:
-        """Rebuild the collection combobox and show/hide the collection bar."""
+        """Rebuild the collection combobox and show/hide it inside the toolbar."""
         with db.connect() as c:
             self._collections = [dict(r) for r in db.list_collections(c)]
 
+        # Always forget first so we can re-pack cleanly
+        for w in (self._coll_label, self._coll_combo, self._coll_delete_btn, self._coll_sep):
+            w.pack_forget()
+
         if len(self._collections) < 2:
-            self._coll_bar.pack_forget()
             self._collection_filter = "all"
             return
 
@@ -672,15 +676,52 @@ class App(tk.Tk):
             self._collection_filter = "all"
             self._coll_combo_var.set(labels[0])
 
-        # Show the bar — insert it right after the toolbar (before the fbar)
-        # Pack order: toolbar → coll_bar → fbar
-        # We need to re-pack in the right order.
-        self._coll_bar.pack(side="top", fill="x", before=self._fbar_ref)
+        # Insert widgets to the LEFT of the search label.
+        # Pack in reverse visual order: each widget is inserted before the previous one,
+        # so the final left-to-right layout is: Collection: [combo] [✕] | Search: …
+        ref = self._search_label_ref
+        self._coll_sep.pack(side="left", fill="y", padx=10, before=ref)
+        self._coll_delete_btn.pack(side="left", padx=(0, 4), before=self._coll_sep)
+        self._coll_combo.pack(side="left", padx=(4, 0), before=self._coll_delete_btn)
+        self._coll_label.pack(side="left", before=self._coll_combo)
+
+        self._update_coll_delete_btn()
 
     def _on_collection_filter_changed(self, *_) -> None:
         idx = self._coll_combo.current()
         if 0 <= idx < len(self._coll_filter_modes):
             self._collection_filter = self._coll_filter_modes[idx]
+        self._update_coll_delete_btn()
+        self.refresh_games()
+
+    def _update_coll_delete_btn(self) -> None:
+        """Enable ✕ only when a specific collection (not All / Shared) is selected."""
+        enabled = isinstance(self._collection_filter, tuple)
+        self._coll_delete_btn.config(state="normal" if enabled else "disabled")
+
+    def _on_delete_selected_collection(self) -> None:
+        """Delete whichever collection is currently shown in the toolbar combo."""
+        mode = self._collection_filter
+        if not isinstance(mode, tuple):
+            return
+        col_id = mode[1]
+        with db.connect() as c:
+            col = db.get_collection(c, col_id)
+            cnt = db.collection_game_count(c, col_id)
+        if col is None:
+            return
+        name = col["display_name"]
+        msg = (
+            f"Delete collection '{name}'?\n\n"
+            f"This will remove the collection and its {cnt} membership link(s).\n"
+            "Game data itself is NOT deleted."
+        )
+        if not messagebox.askyesno("Delete collection?", msg):
+            return
+        with db.connect() as c:
+            db.delete_collection(c, col_id)
+        self._collection_filter = "all"
+        self._refresh_collection_ui()
         self.refresh_games()
 
     def _apply_filters(self, games: list, open_loans: dict) -> list:
