@@ -2123,7 +2123,7 @@ class App(tk.Tk):
                     return
 
             # Invalidate cached thumbnail so the new image is loaded
-            old_path = game.get("image_path") or ""
+            old_path = game["image_path"] or ""
             self._image_cache.pop(old_path, None)
 
             with db.connect() as c:
