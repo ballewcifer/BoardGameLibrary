@@ -393,31 +393,51 @@ def fetch_things(
     return out
 
 
+GEEKSEARCH_URL = "https://www.boardgamegeek.com/geeksearch.php"
+
+
 def search_games(
     query: str,
     *,
-    token: Optional[str] = None,
+    token: Optional[str] = None,  # unused — geeksearch is public
 ) -> list[tuple[int, str, Optional[int]]]:
     """Search BGG for board games matching *query*.
 
-    Requires a BGG Bearer token (register at boardgamegeek.com/applications).
+    Uses BGG's internal geeksearch.php endpoint (the same one the website
+    uses) which returns JSON and requires no Bearer token.
 
     Returns a list of (bgg_id, name, year) tuples sorted by year descending
     so the most recent version of a game appears first.
     """
-    url = f"{BASE}/search?{urllib.parse.urlencode({'query': query, 'type': 'boardgame'})}"
-    root = _fetch_xml(url, token=token)
+    import json as _json  # noqa: PLC0415
+    params = urllib.parse.urlencode({
+        "action": "search",
+        "objecttype": "boardgame",
+        "q": query,
+        "showcount": "50",
+    })
+    url = f"{GEEKSEARCH_URL}?{params}"
+    req = urllib.request.Request(url, headers={
+        "User-Agent": BROWSER_UA,
+        "Accept": "application/json, text/javascript, */*",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=15, context=_ssl_ctx()) as resp:
+            data = _json.loads(resp.read())
+    except Exception as exc:
+        raise RuntimeError(f"BGG search failed: {exc}") from exc
+
     results: list[tuple[int, str, Optional[int]]] = []
-    for item in root.findall("item"):
-        bgg_id = int(item.get("id", "0") or "0")
+    for item in data.get("items", []):
+        bgg_id = int(item.get("objectid") or item.get("id") or 0)
         if not bgg_id:
             continue
-        name_el = item.find("name")
-        year_el = item.find("yearpublished")
-        name = name_el.get("value", "").strip() if name_el is not None else f"#{bgg_id}"
-        year = _i(year_el.get("value")) if year_el is not None else None
+        name = (item.get("name") or "").strip() or f"#{bgg_id}"
+        year_raw = item.get("yearpublished")
+        year = int(year_raw) if year_raw else None
         results.append((bgg_id, name, year))
-    results.sort(key=lambda x: (-(x[2] or 0), x[1].lower()))
+    # already returned in rank order; stable-sort by year descending as tiebreak
+    results.sort(key=lambda x: (-(x[2] or 0),))
     return results
 
 

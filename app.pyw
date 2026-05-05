@@ -1576,16 +1576,6 @@ class App(tk.Tk):
 
     def on_add_game(self) -> None:
         """Search BGG by title, pick a result, then confirm/edit before saving."""
-        tok = self.settings.get("bgg_token", "").strip()
-        if not tok:
-            messagebox.showinfo(
-                "API token required",
-                "Searching BGG requires a free Bearer token.\n\n"
-                "Register at boardgamegeek.com/applications, then paste the\n"
-                "token into Settings → BGG API token.",
-            )
-            return
-
         dlg = tk.Toplevel(self)
         dlg.title("Add Game")
         dlg.transient(self)
@@ -1638,7 +1628,7 @@ class App(tk.Tk):
 
             def _bg():
                 try:
-                    found = bgg.search_games(q, token=tok)
+                    found = bgg.search_games(q)
                 except Exception as exc:
                     self.after(0, lambda: status_var.set(f"Search failed: {exc}"))
                     self.after(0, lambda: search_btn.configure(state="normal"))
@@ -1694,16 +1684,21 @@ class App(tk.Tk):
         tok = self.settings.get("bgg_token", "").strip() or None
 
         def _bg():
-            try:
-                details_list = bgg.fetch_things([bgg_id], token=tok)
-                details = details_list[0] if details_list else None
-            except Exception as exc:
-                details = None
-                err = str(exc)
-                self.after(0, lambda: [wait.destroy(),
-                                       messagebox.showerror("Error",
-                                           f"Could not fetch game data:\n{err}")])
-                return
+            details = None
+            if tok:
+                try:
+                    details_list = bgg.fetch_things([bgg_id], token=tok)
+                    details = details_list[0] if details_list else None
+                except Exception as exc:
+                    # Token present but fetch failed — show error and stop
+                    err = str(exc)
+                    self.after(0, lambda: [wait.destroy(),
+                                           messagebox.showerror("Error",
+                                               f"Could not fetch game data:\n{err}")])
+                    return
+            else:
+                # No token — open a minimal stub the user can fill in by hand
+                details = bgg.GameDetails(bgg_id=bgg_id, name=name)
             self.after(0, lambda d=details: [wait.destroy(),
                                              self._open_game_edit_dialog(d, is_new=is_new)])
 
