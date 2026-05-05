@@ -11,7 +11,7 @@ import tkinter as tk
 import traceback
 from datetime import datetime
 from pathlib import Path
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 from typing import Optional
 
 from PIL import Image, ImageTk
@@ -115,6 +115,8 @@ class App(tk.Tk):
         self._image_cache: dict[str, ImageTk.PhotoImage] = {}
         self._placeholder_img: Optional[ImageTk.PhotoImage] = None
         self._view_mode: str = self.settings.get("view_mode", "cards")
+        self._collection_filter = "all"   # "all"|"shared"|("col",id)|("unique",id)
+        self._collections: list = []      # cached list of collection rows
         self._sort_col: Optional[str] = None
         self._sort_rev: bool = False
         self._table_games: list = []
@@ -131,6 +133,8 @@ class App(tk.Tk):
         # Show first-run setup guide if this is a fresh install
         if not self.settings.get("welcome_shown"):
             self.after(300, self._show_welcome_dialog)
+
+        self._refresh_collection_ui()
 
     # ---------- first-run welcome ----------
 
@@ -362,6 +366,7 @@ class App(tk.Tk):
         ttk.Button(bar, text="Import from BGG...", command=self.on_import_from_bgg).pack(side="left", padx=(6, 0))
         ttk.Button(bar, text="Download Images", command=self.on_download_images).pack(side="left", padx=(6, 0))
         ttk.Button(bar, text="Add Game...", command=self.on_add_game).pack(side="left", padx=(6, 0))
+        ttk.Button(bar, text="Collections…", command=self.on_manage_collections).pack(side="left", padx=(6, 0))
         ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=10)
         ttk.Label(bar, text="Search:").pack(side="left")
         self.search_var = tk.StringVar()
@@ -395,6 +400,7 @@ class App(tk.Tk):
         # --- filter bar (second row, light-blue background) ---
         fbar = ttk.Frame(self, style="Filter.TFrame", padding=(8, 4, 8, 6))
         fbar.pack(side="top", fill="x")
+        self._fbar_ref = fbar
 
         def flabel(text): return ttk.Label(fbar, text=text, style="Filter.TLabel")
         def fcheck(text, var, cmd): return ttk.Checkbutton(fbar, text=text, variable=var,
@@ -458,6 +464,19 @@ class App(tk.Tk):
         ttk.Separator(fbar, orient="vertical").pack(side="left", fill="y", padx=10)
         self._count_label = ttk.Label(fbar, text="", style="Filter.TLabel")
         self._count_label.pack(side="left")
+
+        # ── collection filter bar (shown only when 2+ collections exist) ─────────
+        self._coll_bar = ttk.Frame(self, style="Filter.TFrame", padding=(8, 2, 8, 4))
+        # not packed yet — _refresh_collection_ui() shows/hides it
+        ttk.Label(self._coll_bar, text="Collection:", style="Filter.TLabel").pack(side="left")
+        self._coll_combo_var = tk.StringVar()
+        self._coll_combo = ttk.Combobox(
+            self._coll_bar, textvariable=self._coll_combo_var,
+            state="readonly", width=28,
+        )
+        self._coll_combo.pack(side="left", padx=(4, 0))
+        self._coll_combo.bind("<<ComboboxSelected>>", self._on_collection_filter_changed)
+        self._coll_filter_modes: list = []   # parallel list of filter mode values
 
     def _build_tabs(self) -> None:
         self.nb = ttk.Notebook(self)
@@ -608,6 +627,47 @@ class App(tk.Tk):
         self.favorites_var.set(False)
         self.search_var.set("")
 
+    def _refresh_collection_ui(self) -> None:
+        """Rebuild the collection combobox and show/hide the collection bar."""
+        with db.connect() as c:
+            self._collections = [dict(r) for r in db.list_collections(c)]
+
+        if len(self._collections) < 2:
+            self._coll_bar.pack_forget()
+            self._collection_filter = "all"
+            return
+
+        # Build (display_text, filter_mode) pairs
+        modes = [("All collections", "all")]
+        for col in self._collections:
+            name = col["display_name"]
+            modes.append((f"{name} — all", ("col", col["id"])))
+            modes.append((f"{name} — unique to them", ("unique", col["id"])))
+        modes.append(("Both own  (shared)", "shared"))
+
+        self._coll_filter_modes = [m[1] for m in modes]
+        labels = [m[0] for m in modes]
+        self._coll_combo["values"] = labels
+
+        # Preserve current selection if still valid, else reset to "All"
+        try:
+            cur_idx = self._coll_filter_modes.index(self._collection_filter)
+            self._coll_combo_var.set(labels[cur_idx])
+        except (ValueError, TypeError):
+            self._collection_filter = "all"
+            self._coll_combo_var.set(labels[0])
+
+        # Show the bar — insert it right after the toolbar (before the fbar)
+        # Pack order: toolbar → coll_bar → fbar
+        # We need to re-pack in the right order.
+        self._coll_bar.pack(side="top", fill="x", before=self._fbar_ref)
+
+    def _on_collection_filter_changed(self, *_) -> None:
+        idx = self._coll_combo.current()
+        if 0 <= idx < len(self._coll_filter_modes):
+            self._collection_filter = self._coll_filter_modes[idx]
+        self.refresh_games()
+
     def _apply_filters(self, games: list, open_loans: dict) -> list:
         players_val = self.players_var.get()
         time_val = self.time_var.get()
@@ -725,8 +785,8 @@ class App(tk.Tk):
 
     def refresh_games(self) -> None:
         with db.connect() as c:
-            games = db.list_games(c, self.search_var.get().strip())
-            total_count = c.execute("SELECT COUNT(*) FROM games").fetchone()[0]
+            games = db.list_games(c, self.search_var.get().strip(), self._collection_filter)
+            all_count = c.execute("SELECT COUNT(DISTINCT bgg_id) FROM collection_games").fetchone()[0]
             open_loans = {
                 row["game_id"]: row
                 for row in c.execute(
@@ -743,10 +803,10 @@ class App(tk.Tk):
 
         # Update count label
         shown = len(games)
-        if self._filters_active():
-            self._count_label.configure(text=f"{shown} of {total_count} games")
+        if self._filters_active() or self._collection_filter != "all":
+            self._count_label.configure(text=f"{shown} of {all_count} game{'s' if all_count != 1 else ''}")
         else:
-            self._count_label.configure(text=f"{total_count} game{'s' if total_count != 1 else ''}")
+            self._count_label.configure(text=f"{all_count} game{'s' if all_count != 1 else ''}")
 
         if self._view_mode == "table":
             self._refresh_table_view(games, open_loans, play_counts)
@@ -760,7 +820,8 @@ class App(tk.Tk):
                                       self.status_filter_var.get()])
             or self.exact_players_var.get()
             or self.favorites_var.get()
-            or bool(self.search_var.get())
+            or bool(self.search_var.get().strip())
+            or self._collection_filter != "all"
         )
 
     def _refresh_card_view(self, games, open_loans, play_counts) -> None:
@@ -1002,6 +1063,25 @@ class App(tk.Tk):
                 card, text="Available",
                 bg="#b5d6a7", font=("Segoe UI", 8), padx=6, pady=2,
             ).pack(pady=(6, 0), fill="x")
+
+        # --- collection badges (only when 2+ collections exist) ---
+        if len(self._collections) > 1 and game.get("owned_by"):
+            owned_ids = set(
+                int(x) for x in str(game["owned_by"]).split(",") if x.strip()
+            )
+            badge_row = tk.Frame(card, bg=C_BG)
+            badge_row.pack(pady=(4, 0))
+            col_by_id = {c["id"]: c for c in self._collections}
+            for col_id in sorted(owned_ids):
+                col = col_by_id.get(col_id)
+                if col:
+                    tk.Label(
+                        badge_row,
+                        text=col["display_name"],
+                        bg=col["color"], fg=C_WHITE,
+                        font=("Segoe UI", 7, "bold"),
+                        padx=5, pady=1,
+                    ).pack(side="left", padx=(0, 3))
 
         # --- action buttons ---
         btn_row = ttk.Frame(card)
@@ -1399,7 +1479,11 @@ class App(tk.Tk):
             self.status("Nothing imported.")
             return
 
-        self._save_games_to_db(games)
+        col_id = self._pick_import_collection(parent=self)
+        if col_id is None:
+            return  # user cancelled
+        self._save_games_to_db(games, col_id)
+        self._refresh_collection_ui()
         self.refresh_games()
         self.status(f"Imported {len(games)} games. Downloading thumbnails in the background...")
         threading.Thread(target=self._download_thumbnails_bg, args=(games,), daemon=True).start()
@@ -1465,6 +1549,9 @@ class App(tk.Tk):
                     parent=dialog,
                 )
                 return
+            col_id = self._pick_import_collection(parent=dialog)
+            if col_id is None:
+                return
             self.settings["bgg_username"] = uname
             config.save(self.settings)
             self.username_var.set(uname)
@@ -1472,7 +1559,7 @@ class App(tk.Tk):
             self.status(f"Importing collection for {uname}…")
             threading.Thread(
                 target=self._import_from_username_bg,
-                args=(uname, tok),
+                args=(uname, tok, col_id),
                 daemon=True,
             ).start()
 
@@ -1484,7 +1571,7 @@ class App(tk.Tk):
         dialog.bind("<Return>", lambda *_: do_import())
         dialog.grab_set()
 
-    def _import_from_username_bg(self, username: str, token: str) -> None:
+    def _import_from_username_bg(self, username: str, token: str, col_id: Optional[int] = None) -> None:
         try:
             games = bgg.import_from_username(username, token=token, on_status=self._post_status)
             if not games:
@@ -1495,7 +1582,8 @@ class App(tk.Tk):
                 ))
                 self._post_status("Import: nothing found.")
                 return
-            self._save_games_to_db(games)
+            self._save_games_to_db(games, col_id)
+            self.after(0, self._refresh_collection_ui)
             self.after(0, self.refresh_games)
             self._post_status(f"Imported {len(games)} games. Downloading images…")
             self._download_thumbnails_bg(games)
@@ -1545,7 +1633,8 @@ class App(tk.Tk):
                     d.my_rating = entry.my_rating
                     d.my_comment = entry.my_comment
 
-            self._save_games_to_db(list(by_id.values()))
+            col_id = self._get_default_collection_id()
+            self._save_games_to_db(list(by_id.values()), col_id)
             self._post_status("Saved to database. Downloading thumbnails...")
             self._download_thumbnails_bg(list(by_id.values()))
             self.after(0, self.refresh_games)
@@ -1853,6 +1942,9 @@ class App(tk.Tk):
             }
             with db.connect() as c:
                 db.upsert_game(c, game_row)
+                if is_new:
+                    col_id = db.get_or_create_default_collection(c)
+                    db.add_game_to_collection(c, col_id, bgg_id)
 
             dlg.destroy()
             self.refresh_games()
@@ -1962,7 +2054,7 @@ class App(tk.Tk):
     def _post_status(self, msg: str) -> None:
         self.after(0, self.status, msg)
 
-    def _save_games_to_db(self, games: list[bgg.GameDetails]) -> None:
+    def _save_games_to_db(self, games: list[bgg.GameDetails], collection_id: Optional[int] = None) -> None:
         with db.connect() as c:
             for g in games:
                 row = {
@@ -1996,6 +2088,12 @@ class App(tk.Tk):
                 if existing and existing["image_path"]:
                     row["image_path"] = existing["image_path"]
                 db.upsert_game(c, row)
+                if collection_id is not None:
+                    db.add_game_to_collection(c, collection_id, g.bgg_id)
+
+    def _get_default_collection_id(self) -> int:
+        with db.connect() as c:
+            return db.get_or_create_default_collection(c)
 
     def _download_thumbnails_bg(self, games: list[bgg.GameDetails]) -> None:
         IMAGES_DIR.mkdir(parents=True, exist_ok=True)
@@ -2490,6 +2588,182 @@ class App(tk.Tk):
         ttk.Button(btn_frame, text="Set Image", command=confirm).pack(side="right")
         dialog.bind("<Return>", lambda *_: confirm())
         dialog.grab_set()
+
+    # ---------- collections ----------
+
+    def _pick_import_collection(self, parent=None) -> Optional[int]:
+        """Return a collection id to import into.
+
+        - If no collections exist: creates 'My Collection' and returns its id.
+        - If exactly 1 collection: returns its id immediately (no dialog).
+        - If 2+ collections: shows a small dialog asking which collection
+          (with an option to create a new one).
+        """
+        with db.connect() as c:
+            cols = db.list_collections(c)
+
+        if not cols:
+            with db.connect() as c:
+                return db.get_or_create_default_collection(c)
+
+        if len(cols) == 1:
+            return cols[0]["id"]
+
+        # 2+ collections — ask the user
+        result: list[Optional[int]] = [None]
+        dlg = tk.Toplevel(parent or self)
+        dlg.title("Import into…")
+        dlg.transient(parent or self)
+        dlg.resizable(False, False)
+        dlg.configure(bg=C_BG)
+
+        ttk.Label(dlg, text="Add imported games to:", padding=(16, 14, 16, 4)).pack(anchor="w")
+
+        var = tk.IntVar(value=cols[0]["id"])
+        for col in cols:
+            ttk.Radiobutton(
+                dlg, text=col["display_name"], variable=var, value=col["id"],
+            ).pack(anchor="w", padx=24, pady=2)
+
+        # Option to create new collection
+        NEW_SENTINEL = -999
+        new_name_var = tk.StringVar()
+        new_row = ttk.Frame(dlg, padding=(24, 4, 16, 0))
+        new_row.pack(fill="x")
+        ttk.Radiobutton(new_row, text="New collection:", variable=var, value=NEW_SENTINEL).pack(side="left")
+        ttk.Entry(new_row, textvariable=new_name_var, width=22).pack(side="left", padx=(6, 0))
+
+        btn_frame = ttk.Frame(dlg, padding=(16, 12, 16, 14))
+        btn_frame.pack(fill="x")
+
+        def pick_colors():
+            """Simple color cycle for new collections."""
+            used = {c["color"] for c in cols}
+            palette = ["#c0392b", "#27ae60", "#8e44ad", "#d35400", "#16a085"]
+            for p in palette:
+                if p not in used:
+                    return p
+            return palette[0]
+
+        def confirm():
+            chosen = var.get()
+            if chosen == NEW_SENTINEL:
+                name = new_name_var.get().strip()
+                if not name:
+                    messagebox.showwarning("Name required", "Enter a name for the new collection.", parent=dlg)
+                    return
+                with db.connect() as c:
+                    col_id = db.add_collection(c, name, pick_colors())
+                result[0] = col_id
+            else:
+                result[0] = chosen
+            dlg.destroy()
+
+        ttk.Button(btn_frame, text="Cancel", command=dlg.destroy).pack(side="left")
+        ttk.Button(btn_frame, text="Import here →", command=confirm).pack(side="right")
+        dlg.bind("<Return>", lambda *_: confirm())
+        dlg.grab_set()
+        dlg.wait_window()
+        return result[0]
+
+    def on_manage_collections(self) -> None:
+        """Dialog to add, rename, and delete collections."""
+        dlg = tk.Toplevel(self)
+        dlg.title("Manage Collections")
+        dlg.transient(self)
+        dlg.resizable(False, False)
+        dlg.configure(bg=C_BG)
+
+        ttk.Label(dlg, text="Your collections:", padding=(16, 14, 16, 4),
+                  font=("Segoe UI", 9, "bold")).pack(anchor="w")
+
+        list_frame = ttk.Frame(dlg, padding=(16, 0, 16, 0))
+        list_frame.pack(fill="both")
+
+        def refresh_list():
+            for w in list_frame.winfo_children():
+                w.destroy()
+            with db.connect() as c:
+                cols = db.list_collections(c)
+            if not cols:
+                ttk.Label(list_frame, text="No collections yet.").pack()
+                return
+            for col in cols:
+                with db.connect() as c:
+                    cnt = db.collection_game_count(c, col["id"])
+                row = tk.Frame(list_frame, bg=C_BG)
+                row.pack(fill="x", pady=2)
+                # color swatch
+                tk.Label(row, bg=col["color"], width=2, relief="flat").pack(side="left", padx=(0, 6))
+                tk.Label(row, text=f"{col['display_name']}  ({cnt} games)",
+                         bg=C_BG, font=("Segoe UI", 9)).pack(side="left", fill="x", expand=True)
+                col_id = col["id"]
+                ttk.Button(row, text="Rename", width=7,
+                           command=lambda cid=col_id, cname=col["display_name"]: rename(cid, cname)
+                           ).pack(side="right", padx=(4, 0))
+                ttk.Button(row, text="Delete", width=7,
+                           command=lambda cid=col_id, cname=col["display_name"]: delete(cid, cname)
+                           ).pack(side="right")
+
+        def rename(col_id, current_name):
+            new_name = simpledialog.askstring(
+                "Rename collection", f"New name for '{current_name}':",
+                initialvalue=current_name, parent=dlg,
+            )
+            if new_name and new_name.strip():
+                with db.connect() as c:
+                    db.rename_collection(c, col_id, new_name.strip())
+                refresh_list()
+                self._refresh_collection_ui()
+
+        def delete(col_id, name):
+            with db.connect() as c:
+                cnt = db.collection_game_count(c, col_id)
+            msg = (
+                f"Delete collection '{name}'?\n\n"
+                f"This will remove the collection and its {cnt} membership link(s).\n"
+                "Game data itself is NOT deleted."
+            )
+            if messagebox.askyesno("Delete collection?", msg, parent=dlg):
+                with db.connect() as c:
+                    db.delete_collection(c, col_id)
+                self._collection_filter = "all"
+                refresh_list()
+                self._refresh_collection_ui()
+                self.refresh_games()
+
+        # Add new collection row
+        sep = ttk.Separator(dlg, orient="horizontal")
+        sep.pack(fill="x", padx=16, pady=8)
+
+        add_frame = ttk.Frame(dlg, padding=(16, 0, 16, 0))
+        add_frame.pack(fill="x")
+        ttk.Label(add_frame, text="Add collection:").pack(side="left")
+        new_name_var = tk.StringVar()
+        ttk.Entry(add_frame, textvariable=new_name_var, width=22).pack(side="left", padx=(6, 6))
+
+        COLORS = ["#c0392b", "#27ae60", "#8e44ad", "#d35400", "#16a085", "#2471a3"]
+
+        def add_collection():
+            name = new_name_var.get().strip()
+            if not name:
+                return
+            with db.connect() as c:
+                existing = db.list_collections(c)
+                used = {col["color"] for col in existing}
+                color = next((p for p in COLORS if p not in used), COLORS[0])
+                db.add_collection(c, name, color)
+            new_name_var.set("")
+            refresh_list()
+            self._refresh_collection_ui()
+
+        ttk.Button(add_frame, text="Add", command=add_collection).pack(side="left")
+
+        ttk.Button(dlg, text="Close", command=dlg.destroy,
+                   padding=(16, 8)).pack(pady=(8, 14))
+
+        refresh_list()
+        dlg.grab_set()
 
     # ---------- refresh ----------
 
