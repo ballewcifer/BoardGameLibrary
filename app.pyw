@@ -356,8 +356,21 @@ class App(tk.Tk):
         bar = ttk.Frame(self, padding=(8, 6))
         bar.pack(side="top", fill="x")
 
-        # ── right-aligned view toggle packed FIRST so side="right" reserves space ──
-        ttk.Separator(bar, orient="vertical").pack(side="right", fill="y", padx=(8, 4))
+        # ── left-aligned toolbar items ────────────────────────────────────────
+        ttk.Button(bar, text="Import collection CSV...", command=self.on_import_csv).pack(side="left")
+        ttk.Button(bar, text="Import from BGG...", command=self.on_import_from_bgg).pack(side="left", padx=(6, 0))
+        ttk.Button(bar, text="Download Images", command=self.on_download_images).pack(side="left", padx=(6, 0))
+        ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=10)
+        ttk.Label(bar, text="Search:").pack(side="left")
+        self.search_var = tk.StringVar()
+        self.search_var.trace_add("write", lambda *_: self.refresh_games())
+        entry = ttk.Entry(bar, textvariable=self.search_var, width=30)
+        entry.pack(side="left", padx=(4, 0))
+        ttk.Button(bar, text="Clear", command=lambda: self.search_var.set("")).pack(side="left", padx=(4, 0))
+
+        # ── view toggle — left-aligned after Clear so it doesn't float right ──
+        ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=10)
+        ttk.Label(bar, text="View:").pack(side="left")
 
         def _view_btn(text, mode):
             active = self._view_mode == mode
@@ -371,24 +384,11 @@ class App(tk.Tk):
                 padx=10, pady=3, cursor="hand2",
                 command=lambda m=mode: self._set_view(m),
             )
-            btn.pack(side="right", padx=(0, 2))
+            btn.pack(side="left", padx=(4, 0))
             return btn
 
-        self._btn_table = _view_btn("≡  Table", "table")
         self._btn_cards = _view_btn("⊞  Cards", "cards")
-        ttk.Label(bar, text="View:").pack(side="right", padx=(0, 4))
-
-        # ── left-aligned toolbar items ────────────────────────────────────────
-        ttk.Button(bar, text="Import collection CSV...", command=self.on_import_csv).pack(side="left")
-        ttk.Button(bar, text="Import from BGG...", command=self.on_import_from_bgg).pack(side="left", padx=(6, 0))
-        ttk.Button(bar, text="Download Images", command=self.on_download_images).pack(side="left", padx=(6, 0))
-        ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=10)
-        ttk.Label(bar, text="Search:").pack(side="left")
-        self.search_var = tk.StringVar()
-        self.search_var.trace_add("write", lambda *_: self.refresh_games())
-        entry = ttk.Entry(bar, textvariable=self.search_var, width=30)
-        entry.pack(side="left", padx=(4, 0))
-        ttk.Button(bar, text="Clear", command=lambda: self.search_var.set("")).pack(side="left", padx=(4, 0))
+        self._btn_table = _view_btn("≡  Table", "table")
 
         # --- filter bar (second row, light-blue background) ---
         fbar = ttk.Frame(self, style="Filter.TFrame", padding=(8, 4, 8, 6))
@@ -397,10 +397,6 @@ class App(tk.Tk):
         def flabel(text): return ttk.Label(fbar, text=text, style="Filter.TLabel")
         def fcheck(text, var, cmd): return ttk.Checkbutton(fbar, text=text, variable=var,
                                                            command=cmd, style="Filter.TCheckbutton")
-
-        # ── count label packed FIRST (right-aligned) to reserve space ────────
-        self._count_label = ttk.Label(fbar, text="", style="Filter.TLabel")
-        self._count_label.pack(side="right", padx=(0, 8))
 
         # ── left-aligned filter widgets ───────────────────────────────────────
         flabel("Players:").pack(side="left")
@@ -455,6 +451,11 @@ class App(tk.Tk):
         fcheck("Favorites only", self.favorites_var, self.refresh_games).pack(side="left", padx=(0, 12))
 
         ttk.Button(fbar, text="Reset filters", command=self._reset_filters).pack(side="left")
+
+        # ── game count — left-aligned after Reset filters, not floating right ──
+        ttk.Separator(fbar, orient="vertical").pack(side="left", fill="y", padx=10)
+        self._count_label = ttk.Label(fbar, text="", style="Filter.TLabel")
+        self._count_label.pack(side="left")
 
     def _build_tabs(self) -> None:
         self.nb = ttk.Notebook(self)
@@ -916,31 +917,22 @@ class App(tk.Tk):
         card = ttk.Frame(self.games_inner, padding=8, relief="solid", borderwidth=1)
         card.configure(width=180)
 
-        # --- image canvas: art centered, star text overlaid top-right.
-        #     Canvas text has no widget background so the star is transparent.
-        #     <Configure> keeps image centered and star in the corner as the
-        #     canvas expands to fill the card width. ---
-        _CH = THUMB_SIZE[1]
+        # --- image canvas: fixed size so star position is always exact.
+        #     Canvas text has no widget background — star is transparent over art. ---
+        _CW, _CH = THUMB_SIZE[0], THUMB_SIZE[1]  # 140 × 140
         img_canvas = tk.Canvas(
-            card, height=_CH,
+            card, width=_CW, height=_CH,
             bg=C_BG, highlightthickness=0, bd=0,
         )
-        img_canvas.pack(fill="x")
+        img_canvas.pack(anchor="center")  # centred in card, not stretched
 
-        _img_id = img_canvas.create_image(0, _CH // 2, anchor="center")
+        _img_id = img_canvas.create_image(_CW // 2, _CH // 2, anchor="center")
         _star_id = img_canvas.create_text(
-            0, 2, anchor="ne",
+            _CW - 2, 2, anchor="ne",
             text="★" if is_fav else "☆",
             font=("Segoe UI", 13),
             fill="#f5a623" if is_fav else "#aaa",
         )
-
-        def _on_canvas_resize(event, c=img_canvas, iid=_img_id, sid=_star_id, ch=_CH):
-            w = event.width
-            c.coords(iid, w // 2, ch // 2)
-            c.coords(sid, w - 2, 2)
-
-        img_canvas.bind("<Configure>", _on_canvas_resize)
         img_canvas.tag_bind(_star_id, "<Button-1>",
                             lambda e, g=game: self.on_toggle_favorite(g))
         img_canvas.tag_bind(_star_id, "<Enter>", lambda e: img_canvas.configure(cursor="hand2"))
