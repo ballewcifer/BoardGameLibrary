@@ -1,8 +1,10 @@
 """Board Game Library — Tkinter GUI."""
 from __future__ import annotations
 
+import os
 import re
 import shutil
+import sys
 import threading
 import time
 import tkinter as tk
@@ -22,8 +24,28 @@ from version import __version__ as APP_VERSION
 
 THUMB_SIZE = (140, 140)
 PLACEHOLDER_BG = "#dcdcdc"
-APP_CREATED   = "April 30, 2026"
+APP_CREATED   = "May 5, 2026"
 APP_AUTHOR    = "Ballewcifer"
+APP_CONTACT   = "ballewcifer@gmail.com"
+
+
+def _open_url(url: str) -> None:
+    """Open a URL in the system default browser.
+
+    Uses os.startfile on Windows (most reliable from a PyInstaller bundle),
+    'open' on macOS, and 'xdg-open' on Linux.
+    """
+    try:
+        if sys.platform == "win32":
+            os.startfile(url)
+        elif sys.platform == "darwin":
+            import subprocess
+            subprocess.Popen(["open", url])
+        else:
+            import subprocess
+            subprocess.Popen(["xdg-open", url])
+    except Exception:
+        pass
 
 # ── colour palette ────────────────────────────────────────────────────────────
 C_NAVY    = "#1a3a5c"   # dark navy  – header bar, treeview headings
@@ -143,7 +165,7 @@ class App(tk.Tk):
                 parent, text=f"    ↗  {text}",
                 bg=C_BG, fg=C_BLUE, relief="flat", cursor="hand2",
                 font=("Segoe UI", 9, "underline"), anchor="w",
-                command=lambda u=url: __import__("webbrowser").open(u),
+                command=lambda u=url: _open_url(u),
             ).pack(anchor="w", padx=(16, 0))
 
         # ── Step 1 ────────────────────────────────────────────────────────────
@@ -330,6 +352,28 @@ class App(tk.Tk):
         entry.pack(side="left", padx=(4, 0))
         ttk.Button(bar, text="Clear", command=lambda: self.search_var.set("")).pack(side="left", padx=(4, 0))
 
+        # ── view toggle (right side of the search row) ────────────────────────
+        ttk.Separator(bar, orient="vertical").pack(side="right", fill="y", padx=(8, 4))
+        ttk.Label(bar, text="View:").pack(side="right", padx=(0, 4))
+
+        def _view_btn(text, mode):
+            active = self._view_mode == mode
+            btn = tk.Button(
+                bar, text=text,
+                bg=C_NAVY if active else C_WHITE,
+                fg=C_WHITE if active else C_NAVY,
+                activebackground=C_BLUE, activeforeground=C_WHITE,
+                relief="solid", bd=1,
+                font=("Segoe UI", 9, "bold"),
+                padx=10, pady=3, cursor="hand2",
+                command=lambda m=mode: self._set_view(m),
+            )
+            btn.pack(side="right", padx=(0, 2))
+            return btn
+
+        self._btn_table = _view_btn("≡  Table", "table")
+        self._btn_cards = _view_btn("⊞  Cards", "cards")
+
         # --- filter bar (second row, light-blue background) ---
         fbar = ttk.Frame(self, style="Filter.TFrame", padding=(8, 4, 8, 6))
         fbar.pack(side="top", fill="x")
@@ -390,28 +434,6 @@ class App(tk.Tk):
         fcheck("Favorites only", self.favorites_var, self.refresh_games).pack(side="left", padx=(0, 12))
 
         ttk.Button(fbar, text="Reset filters", command=self._reset_filters).pack(side="left")
-
-        # ── view toggle (right-aligned) ───────────────────────────────────────
-        ttk.Separator(fbar, orient="vertical").pack(side="right", fill="y", padx=(8, 4))
-        ttk.Label(fbar, text="View:", style="Filter.TLabel").pack(side="right", padx=(0, 4))
-
-        def _view_btn(text, mode):
-            active = self._view_mode == mode
-            btn = tk.Button(
-                fbar, text=text,
-                bg=C_NAVY if active else C_WHITE,
-                fg=C_WHITE if active else C_NAVY,
-                activebackground=C_BLUE, activeforeground=C_WHITE,
-                relief="solid", bd=1,
-                font=("Segoe UI", 9, "bold"),
-                padx=10, pady=3, cursor="hand2",
-                command=lambda m=mode: self._set_view(m),
-            )
-            btn.pack(side="right", padx=(0, 2))
-            return btn
-
-        self._btn_table = _view_btn("≡  Table", "table")
-        self._btn_cards = _view_btn("⊞  Cards", "cards")
 
     def _build_tabs(self) -> None:
         self.nb = ttk.Notebook(self)
@@ -1178,7 +1200,7 @@ class App(tk.Tk):
             bg="#eaf4fd", fg=C_BLUE,
             relief="flat", cursor="hand2",
             font=("Segoe UI", 9, "underline"),
-            command=lambda: __import__("webbrowser").open("https://boardgamegeek.com/applications"),
+            command=lambda: _open_url("https://boardgamegeek.com/applications"),
         ).pack(anchor="w", pady=(4, 0))
 
         ttk.Button(frame, text="Save", command=self.on_save_settings).grid(row=3, column=0, sticky="w", pady=(12, 0))
@@ -1268,7 +1290,8 @@ class App(tk.Tk):
         body.pack()
 
         rows = [
-            ("Created",  APP_CREATED),
+            ("Version",    APP_VERSION),
+            ("Created",    APP_CREATED),
             ("Created by", APP_AUTHOR),
             ("Built with", "Claude Code  •  Python  •  Tkinter  •  SQLite"),
             ("Data source", "BoardGameGeek (boardgamegeek.com)"),
@@ -1280,6 +1303,18 @@ class App(tk.Tk):
                      font=("Segoe UI", 9, "bold"), width=12, anchor="e").pack(side="left")
             tk.Label(row, text=value, bg=C_BG, fg=C_TEXT,
                      font=("Segoe UI", 9)).pack(side="left", padx=(8, 0))
+
+        # Contact row — clickable mailto link
+        contact_row = tk.Frame(body, bg=C_BG)
+        contact_row.pack(anchor="w", pady=3)
+        tk.Label(contact_row, text="Contact:", bg=C_BG, fg=C_NAVY,
+                 font=("Segoe UI", 9, "bold"), width=12, anchor="e").pack(side="left")
+        tk.Button(
+            contact_row, text=APP_CONTACT,
+            bg=C_BG, fg=C_BLUE, relief="flat", cursor="hand2",
+            font=("Segoe UI", 9, "underline"),
+            command=lambda: _open_url(f"mailto:{APP_CONTACT}"),
+        ).pack(side="left", padx=(8, 0))
 
         # Divider
         tk.Frame(win, bg=C_BLUE, height=1).pack(fill="x", padx=20)
