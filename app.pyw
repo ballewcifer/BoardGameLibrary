@@ -393,16 +393,18 @@ class App(tk.Tk):
 
         # ── view toggle (right-aligned) ───────────────────────────────────────
         ttk.Separator(fbar, orient="vertical").pack(side="right", fill="y", padx=(8, 4))
+        ttk.Label(fbar, text="View:", style="Filter.TLabel").pack(side="right", padx=(0, 4))
 
         def _view_btn(text, mode):
             active = self._view_mode == mode
             btn = tk.Button(
                 fbar, text=text,
-                bg=C_NAVY if active else C_PALE,
+                bg=C_NAVY if active else C_WHITE,
                 fg=C_WHITE if active else C_NAVY,
                 activebackground=C_BLUE, activeforeground=C_WHITE,
-                relief="flat", font=("Segoe UI", 9, "bold"),
-                padx=8, pady=2, cursor="hand2",
+                relief="solid", bd=1,
+                font=("Segoe UI", 9, "bold"),
+                padx=10, pady=3, cursor="hand2",
                 command=lambda m=mode: self._set_view(m),
             )
             btn.pack(side="right", padx=(0, 2))
@@ -517,7 +519,7 @@ class App(tk.Tk):
         # Update button colours
         for btn, m in ((self._btn_cards, "cards"), (self._btn_table, "table")):
             active = (m == mode)
-            btn.configure(bg=C_NAVY if active else C_PALE,
+            btn.configure(bg=C_NAVY if active else C_WHITE,
                            fg=C_WHITE if active else C_NAVY)
         if mode == "table":
             self._card_frame.pack_forget()
@@ -1181,11 +1183,66 @@ class App(tk.Tk):
 
         ttk.Button(frame, text="Save", command=self.on_save_settings).grid(row=3, column=0, sticky="w", pady=(12, 0))
 
+        # ── danger zone ───────────────────────────────────────────────────────
+        tk.Frame(frame, bg=C_PALE, height=1).grid(row=4, column=0, columnspan=2, sticky="ew", pady=(24, 0))
+        tk.Label(
+            frame, text="Danger zone",
+            bg=C_BG, fg="#b71c1c",
+            font=("Segoe UI", 9, "bold"),
+        ).grid(row=5, column=0, sticky="w", pady=(8, 4))
+
+        tk.Button(
+            frame, text="Clear collection…",
+            bg="#b71c1c", fg=C_WHITE,
+            activebackground="#7f0000", activeforeground=C_WHITE,
+            relief="flat", font=("Segoe UI", 9, "bold"),
+            padx=12, pady=4, cursor="hand2",
+            command=self.on_clear_collection,
+        ).grid(row=6, column=0, sticky="w")
+        tk.Label(
+            frame,
+            text="Removes all games, images, play logs, and loan history.\nMembers and settings are kept.",
+            bg=C_BG, fg="#888",
+            font=("Segoe UI", 8), justify="left",
+        ).grid(row=6, column=1, sticky="w", padx=(12, 0))
+
     def on_save_settings(self) -> None:
         self.settings["bgg_username"] = self.username_var.get().strip()
         self.settings["bgg_token"] = self.token_var.get().strip()
         config.save(self.settings)
         self.status("Settings saved.")
+
+    def on_clear_collection(self) -> None:
+        if not messagebox.askyesno(
+            "Clear collection",
+            "This will permanently delete ALL games, play logs, and loan history.\n\n"
+            "Members and settings will be kept.\n\n"
+            "Are you sure?",
+            icon="warning",
+        ):
+            return
+        # Second confirmation — hard to click through by accident
+        if not messagebox.askyesno(
+            "Are you sure?",
+            "This cannot be undone. Delete the entire collection?",
+            icon="warning",
+        ):
+            return
+        with db.connect() as c:
+            c.execute("DELETE FROM plays")
+            c.execute("DELETE FROM loans")
+            c.execute("DELETE FROM games")
+        # Remove all cached images
+        try:
+            if IMAGES_DIR.exists():
+                shutil.rmtree(IMAGES_DIR)
+                IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+        self._image_cache.clear()
+        self._placeholder_img = None
+        self.refresh_all()
+        self.status("Collection cleared.")
 
     # ---------- about ----------
 
