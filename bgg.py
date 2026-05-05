@@ -389,6 +389,32 @@ def fetch_things(
     return out
 
 
+def search_games(
+    query: str,
+    *,
+    token: Optional[str] = None,
+) -> list[tuple[int, str, Optional[int]]]:
+    """Search BGG for board games matching *query*.
+
+    Returns a list of (bgg_id, name, year) tuples sorted by year descending
+    so the most recent version of a game appears first.
+    """
+    url = f"{BASE}/search?{urllib.parse.urlencode({'query': query, 'type': 'boardgame'})}"
+    root = _fetch_xml(url, token=token)
+    results: list[tuple[int, str, Optional[int]]] = []
+    for item in root.findall("item"):
+        bgg_id = int(item.get("id", "0") or "0")
+        if not bgg_id:
+            continue
+        name_el = item.find("name")
+        year_el = item.find("yearpublished")
+        name = name_el.get("value", "").strip() if name_el is not None else f"#{bgg_id}"
+        year = _i(year_el.get("value")) if year_el is not None else None
+        results.append((bgg_id, name, year))
+    results.sort(key=lambda x: (-(x[2] or 0), x[1].lower()))
+    return results
+
+
 # ---------- CSV import (the no-token path) ----------
 
 def _pick(row: dict[str, str], *names: str) -> Optional[str]:

@@ -900,7 +900,9 @@ class App(tk.Tk):
         menu.add_command(label="Log Play…",    command=lambda: self.on_log_play(game))
         menu.add_separator()
         menu.add_command(label="Details…",     command=lambda: self.show_details(game))
+        menu.add_command(label="Edit Game…",   command=lambda: self.on_edit_game(game))
         menu.add_command(label="Set Image…",   command=lambda: self.on_set_image(game))
+
         fav_lbl = "Remove from Favorites" if game["is_favorite"] else "Add to Favorites"
         menu.add_command(label=fav_lbl,        command=lambda: self.on_toggle_favorite(game))
         menu.tk_popup(event.x_root, event.y_root)
@@ -1570,162 +1572,291 @@ class App(tk.Tk):
         ).start()
 
     def on_add_game(self) -> None:
-        """Open a dialog to manually add a game to the library."""
-        dialog = tk.Toplevel(self)
-        dialog.title("Add Game Manually")
-        dialog.transient(self)
-        dialog.resizable(False, False)
-        dialog.configure(bg=C_BG)
+        """Search BGG by title, pick a result, then confirm/edit before saving."""
+        dlg = tk.Toplevel(self)
+        dlg.title("Add Game")
+        dlg.transient(self)
+        dlg.resizable(False, False)
+        dlg.configure(bg=C_BG)
 
-        pad  = {"padx": (12, 4), "pady": 4, "sticky": "e"}
-        pad2 = {"padx": (4, 12), "pady": 4, "sticky": "we"}
+        # ── search row ────────────────────────────────────────────────────────
+        top = ttk.Frame(dlg, padding=(12, 12, 12, 4))
+        top.pack(fill="x")
+        ttk.Label(top, text="Game title:", font=("Segoe UI", 9, "bold")).pack(side="left")
+        query_var = tk.StringVar()
+        query_entry = ttk.Entry(top, textvariable=query_var, width=36)
+        query_entry.pack(side="left", padx=(6, 6))
+        search_btn = ttk.Button(top, text="Search BGG")
+        search_btn.pack(side="left")
 
-        def lbl(text, row):
-            ttk.Label(dialog, text=text, font=("Segoe UI", 9, "bold")).grid(
-                row=row, column=0, **pad)
+        # ── status + results list ─────────────────────────────────────────────
+        status_var = tk.StringVar(value="Enter a title and press Search or Enter.")
+        ttk.Label(dlg, textvariable=status_var, foreground="#555",
+                  font=("Segoe UI", 8), padding=(12, 2)).pack(anchor="w")
 
-        def entry(row, width=34, **kw):
-            var = tk.StringVar(**kw)
-            e = ttk.Entry(dialog, textvariable=var, width=width)
-            e.grid(row=row, column=1, **pad2)
-            return var, e
+        list_frame = ttk.Frame(dlg, padding=(12, 0, 12, 4))
+        list_frame.pack(fill="both", expand=True)
+        lb = tk.Listbox(list_frame, width=56, height=12, selectmode="single",
+                        font=("Segoe UI", 9), activestyle="none",
+                        selectbackground=C_BLUE, selectforeground=C_WHITE)
+        sb = ttk.Scrollbar(list_frame, command=lb.yview)
+        lb.configure(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y")
+        lb.pack(side="left", fill="both", expand=True)
 
-        # ── fields ────────────────────────────────────────────────────────────
-        lbl("Name *", 0)
-        name_var, name_entry = entry(0)
+        # ── buttons ───────────────────────────────────────────────────────────
+        btn_frame = ttk.Frame(dlg, padding=(12, 4, 12, 12))
+        btn_frame.pack(fill="x")
+        ttk.Button(btn_frame, text="Cancel", command=dlg.destroy).pack(side="right", padx=(6, 0))
+        add_btn = ttk.Button(btn_frame, text="Add Selected →", state="disabled")
+        add_btn.pack(side="right")
 
-        lbl("Year", 1)
-        year_var, _ = entry(1, width=10)
+        results: list[tuple[int, str, Optional[int]]] = []
 
-        lbl("BGG ID", 2)
-        bgg_id_var, _ = entry(2, width=12)
-        ttk.Label(dialog, text="(leave blank to auto-assign)",
-                  foreground="#888", font=("Segoe UI", 8)).grid(
-            row=2, column=2, padx=(0, 12), sticky="w")
+        def do_search(*_) -> None:
+            q = query_var.get().strip()
+            if not q:
+                return
+            search_btn.configure(state="disabled")
+            add_btn.configure(state="disabled")
+            status_var.set("Searching BGG…")
+            lb.delete(0, "end")
+            results.clear()
 
-        lbl("Min players", 3)
-        min_p_var, _ = entry(3, width=6)
+            def _bg():
+                try:
+                    found = bgg.search_games(q)
+                except Exception as exc:
+                    self.after(0, lambda: status_var.set(f"Search failed: {exc}"))
+                    self.after(0, lambda: search_btn.configure(state="normal"))
+                    return
+                self.after(0, lambda f=found: _show(f))
 
-        lbl("Max players", 4)
-        max_p_var, _ = entry(4, width=6)
+            def _show(found):
+                results.extend(found)
+                for _, name, year in found:
+                    lb.insert("end", f"{name}  ({year})" if year else name)
+                n = len(found)
+                status_var.set(f"{n} result{'s' if n != 1 else ''} — double-click or select and click Add.")
+                search_btn.configure(state="normal")
+                if found:
+                    lb.selection_set(0)
+                    add_btn.configure(state="normal")
 
-        lbl("Play time (min)", 5)
-        time_var, _ = entry(5, width=8)
+            threading.Thread(target=_bg, daemon=True).start()
 
-        lbl("Complexity (1–5)", 6)
-        weight_var, _ = entry(6, width=8)
-        ttk.Label(dialog, text="e.g. 2.5",
-                  foreground="#888", font=("Segoe UI", 8)).grid(
-            row=6, column=2, padx=(0, 12), sticky="w")
+        def on_select(*_):
+            if lb.curselection():
+                add_btn.configure(state="normal")
 
-        lbl("Description", 7)
-        desc_text = tk.Text(dialog, width=36, height=4,
-                            font=("Segoe UI", 9), wrap="word",
-                            relief="solid", bd=1)
-        desc_text.grid(row=7, column=1, padx=(4, 12), pady=4, sticky="we")
+        def proceed(*_) -> None:
+            sel = lb.curselection()
+            if not sel:
+                return
+            bgg_id, name, year = results[sel[0]]
+            dlg.destroy()
+            self._fetch_and_open_edit(bgg_id, name, is_new=True)
 
-        lbl("Comment", 8)
-        comment_var, _ = entry(8)
+        lb.bind("<<ListboxSelect>>", on_select)
+        lb.bind("<Double-Button-1>", proceed)
+        query_entry.bind("<Return>", do_search)
+        search_btn.configure(command=do_search)
+        add_btn.configure(command=proceed)
 
-        # ── error label + buttons ─────────────────────────────────────────────
+        dlg.grab_set()
+        query_entry.focus_set()
+
+    def _fetch_and_open_edit(self, bgg_id: int, name: str, *, is_new: bool) -> None:
+        """Fetch full BGG details for bgg_id, then open the edit/confirm dialog."""
+        wait = tk.Toplevel(self)
+        wait.title("Fetching…")
+        wait.transient(self)
+        wait.resizable(False, False)
+        wait.configure(bg=C_BG)
+        ttk.Label(wait, text=f"Fetching details for "{name}"…",
+                  padding=(24, 16)).pack()
+        wait.grab_set()
+        wait.update()
+
+        def _bg():
+            try:
+                details_list = bgg.fetch_things([bgg_id])
+                details = details_list[0] if details_list else None
+            except Exception as exc:
+                details = None
+                err = str(exc)
+                self.after(0, lambda: [wait.destroy(),
+                                       messagebox.showerror("Error",
+                                           f"Could not fetch game data:\n{err}")])
+                return
+            self.after(0, lambda d=details: [wait.destroy(),
+                                             self._open_game_edit_dialog(d, is_new=is_new)])
+
+        threading.Thread(target=_bg, daemon=True).start()
+
+    def on_edit_game(self, game) -> None:
+        """Open the edit dialog pre-filled from the existing DB row."""
+        # Convert sqlite3.Row → GameDetails so the shared dialog can use it
+        details = bgg.GameDetails(
+            bgg_id       = game["bgg_id"],
+            name         = game["name"],
+            year         = game["year"],
+            image_url    = game["image_url"],
+            thumbnail_url= game["thumbnail_url"],
+            min_players  = game["min_players"],
+            max_players  = game["max_players"],
+            min_playtime = game["min_playtime"],
+            max_playtime = game["max_playtime"],
+            playing_time = game["playing_time"],
+            min_age      = game["min_age"],
+            weight       = game["weight"],
+            avg_rating   = game["avg_rating"],
+            description  = game["description"],
+            my_rating    = game["my_rating"],
+            my_comment   = game["my_comment"],
+        )
+        self._open_game_edit_dialog(details, is_new=False)
+
+    def _open_game_edit_dialog(self, details: Optional[bgg.GameDetails], *,
+                               is_new: bool) -> None:
+        """Editable form pre-filled from a GameDetails object.
+
+        is_new=True  → saves as a new game (or replaces if BGG ID already exists).
+        is_new=False → updates an existing game, preserving image_path.
+        """
+        if details is None:
+            messagebox.showerror("Error", "No game data received from BGG.")
+            return
+
+        dlg = tk.Toplevel(self)
+        dlg.title("Add Game — Confirm Details" if is_new else "Edit Game")
+        dlg.transient(self)
+        dlg.resizable(False, False)
+        dlg.configure(bg=C_BG)
+
+        lpad = {"padx": (12, 4), "pady": 3, "sticky": "e"}
+        rpad = {"padx": (4, 12), "pady": 3, "sticky": "we"}
+
+        def row_entry(r, label, value, width=34):
+            ttk.Label(dlg, text=label, font=("Segoe UI", 9, "bold")).grid(
+                row=r, column=0, **lpad)
+            var = tk.StringVar(value=str(value) if value is not None else "")
+            ttk.Entry(dlg, textvariable=var, width=width).grid(row=r, column=1, **rpad)
+            return var
+
+        d = details
+        # Play time: prefer playing_time, fall back to min/max average
+        pt = d.playing_time or (
+            ((d.min_playtime or 0) + (d.max_playtime or 0)) // 2 or None
+        )
+
+        name_var    = row_entry(0, "Name *",           d.name)
+        year_var    = row_entry(1, "Year",              d.year,         width=10)
+        bgg_id_var  = row_entry(2, "BGG ID",            d.bgg_id,       width=12)
+        minp_var    = row_entry(3, "Min players",       d.min_players,  width=8)
+        maxp_var    = row_entry(4, "Max players",       d.max_players,  width=8)
+        time_var    = row_entry(5, "Play time (min)",   pt,             width=10)
+        weight_var  = row_entry(6, "Complexity (1–5)",
+                                f"{d.weight:.2f}" if d.weight else "", width=10)
+        comment_var = row_entry(7, "Comment",           d.my_comment)
+
+        ttk.Label(dlg, text="Description",
+                  font=("Segoe UI", 9, "bold")).grid(row=8, column=0, **lpad)
+        desc_box = tk.Text(dlg, width=38, height=5, font=("Segoe UI", 9),
+                           wrap="word", relief="solid", bd=1)
+        desc_box.grid(row=8, column=1, padx=(4, 12), pady=3, sticky="we")
+        if d.description:
+            desc_box.insert("1.0", d.description)
+
         err_var = tk.StringVar()
-        ttk.Label(dialog, textvariable=err_var, foreground="red",
+        ttk.Label(dlg, textvariable=err_var, foreground="red",
                   font=("Segoe UI", 8)).grid(
-            row=9, column=0, columnspan=3, padx=12, sticky="w")
+            row=9, column=0, columnspan=2, padx=12, sticky="w")
 
         def save() -> None:
             name = name_var.get().strip()
             if not name:
                 err_var.set("Name is required.")
-                name_entry.focus_set()
                 return
 
-            # Parse optional numeric fields
-            def _int(v):
+            def _i(v):
                 s = v.get().strip()
-                if not s:
-                    return None
-                try:
-                    return int(s)
-                except ValueError:
-                    return None
+                try: return int(s) if s else None
+                except ValueError: return None
 
-            def _float(v):
+            def _f(v):
                 s = v.get().strip()
-                if not s:
-                    return None
-                try:
-                    return float(s)
-                except ValueError:
-                    return None
+                try: return float(s) if s else None
+                except ValueError: return None
 
-            year       = _int(year_var)
-            min_p      = _int(min_p_var)
-            max_p      = _int(max_p_var)
-            play_time  = _int(time_var)
-            weight     = _float(weight_var)
-            description = desc_text.get("1.0", "end-1c").strip()
-            comment    = comment_var.get().strip()
-
-            # Resolve BGG ID
-            bgg_id_str = bgg_id_var.get().strip()
-            if bgg_id_str:
+            bgg_id_s = bgg_id_var.get().strip()
+            if bgg_id_s:
                 try:
-                    bgg_id = int(bgg_id_str)
+                    bgg_id = int(bgg_id_s)
                 except ValueError:
                     err_var.set("BGG ID must be a whole number.")
                     return
             else:
-                # Auto-assign: one below the lowest existing ID (or -1)
                 with db.connect() as c:
-                    row = c.execute("SELECT MIN(bgg_id) FROM games").fetchone()
-                    lowest = row[0] if row[0] is not None else 0
+                    r = c.execute("SELECT MIN(bgg_id) FROM games").fetchone()
+                    lowest = r[0] if r[0] is not None else 0
                 bgg_id = min(lowest, 0) - 1
 
+            pt_val = _i(time_var)
+
+            # Preserve image_path / image_url if we're updating an existing game
+            existing_image_path = None
+            existing_image_url  = None
+            existing_thumb_url  = None
+            with db.connect() as c:
+                existing = db.get_game(c, bgg_id)
+                if existing:
+                    existing_image_path = existing["image_path"]
+                    existing_image_url  = existing["image_url"]
+                    existing_thumb_url  = existing["thumbnail_url"]
+
             game_row = {
-                "bgg_id":       bgg_id,
-                "name":         name,
-                "year":         year,
-                "image_url":    None,
-                "thumbnail_url": None,
-                "image_path":   None,
-                "min_players":  min_p,
-                "max_players":  max_p,
-                "min_playtime": play_time,
-                "max_playtime": play_time,
-                "playing_time": play_time,
-                "min_age":      None,
-                "weight":       weight,
-                "avg_rating":   None,
-                "my_rating":    None,
-                "description":  description or None,
-                "categories":   None,
-                "mechanics":    None,
-                "designers":    None,
-                "publishers":   None,
-                "best_players": None,
-                "my_comment":   comment or None,
-                "own":          1,
-                "last_synced":  db.now_iso(),
+                "bgg_id":        bgg_id,
+                "name":          name,
+                "year":          _i(year_var),
+                "image_url":     existing_image_url  or d.image_url,
+                "thumbnail_url": existing_thumb_url  or d.thumbnail_url,
+                "image_path":    existing_image_path,
+                "min_players":   _i(minp_var),
+                "max_players":   _i(maxp_var),
+                "min_playtime":  pt_val,
+                "max_playtime":  pt_val,
+                "playing_time":  pt_val,
+                "min_age":       d.min_age,
+                "weight":        _f(weight_var),
+                "avg_rating":    d.avg_rating,
+                "my_rating":     d.my_rating,
+                "description":   desc_box.get("1.0", "end-1c").strip() or None,
+                "categories":    ", ".join(d.categories) if d.categories else None,
+                "mechanics":     ", ".join(d.mechanics)  if d.mechanics  else None,
+                "designers":     ", ".join(d.designers)  if d.designers  else None,
+                "publishers":    ", ".join(d.publishers) if d.publishers else None,
+                "best_players":  d.best_players,
+                "my_comment":    comment_var.get().strip() or None,
+                "own":           1,
+                "last_synced":   db.now_iso(),
             }
             with db.connect() as c:
                 db.upsert_game(c, game_row)
 
-            dialog.destroy()
+            dlg.destroy()
             self.refresh_games()
-            self.status(f"Added \"{name}\" to the library.")
+            verb = "Added" if is_new else "Updated"
+            self.status(f"{verb} \"{name}\".")
 
-        btn_frame = ttk.Frame(dialog)
-        btn_frame.grid(row=10, column=0, columnspan=3,
-                       pady=(4, 12), padx=12, sticky="e")
-        ttk.Button(btn_frame, text="Cancel",
-                   command=dialog.destroy).pack(side="left", padx=(0, 6))
-        ttk.Button(btn_frame, text="Add Game",
+        btn_row = ttk.Frame(dlg, padding=(12, 4, 12, 12))
+        btn_row.grid(row=10, column=0, columnspan=2, sticky="e")
+        ttk.Button(btn_row, text="Cancel", command=dlg.destroy).pack(side="left", padx=(0, 6))
+        ttk.Button(btn_row, text="Save Game" if is_new else "Save Changes",
                    command=save).pack(side="left")
 
-        dialog.columnconfigure(1, weight=1)
-        dialog.grab_set()
-        name_entry.focus_set()
+        dlg.columnconfigure(1, weight=1)
+        dlg.grab_set()
 
     def _fetch_and_cache_images_bg(self, bgg_ids: list[int]) -> None:
         """Download box-art for every game that is missing an image.
