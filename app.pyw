@@ -355,6 +355,30 @@ class App(tk.Tk):
     def _build_toolbar(self) -> None:
         bar = ttk.Frame(self, padding=(8, 6))
         bar.pack(side="top", fill="x")
+
+        # ── right-aligned view toggle packed FIRST so side="right" reserves space ──
+        ttk.Separator(bar, orient="vertical").pack(side="right", fill="y", padx=(8, 4))
+
+        def _view_btn(text, mode):
+            active = self._view_mode == mode
+            btn = tk.Button(
+                bar, text=text,
+                bg=C_NAVY if active else C_WHITE,
+                fg=C_WHITE if active else C_NAVY,
+                activebackground=C_BLUE, activeforeground=C_WHITE,
+                relief="solid", bd=1,
+                font=("Segoe UI", 9, "bold"),
+                padx=10, pady=3, cursor="hand2",
+                command=lambda m=mode: self._set_view(m),
+            )
+            btn.pack(side="right", padx=(0, 2))
+            return btn
+
+        self._btn_table = _view_btn("≡  Table", "table")
+        self._btn_cards = _view_btn("⊞  Cards", "cards")
+        ttk.Label(bar, text="View:").pack(side="right", padx=(0, 4))
+
+        # ── left-aligned toolbar items ────────────────────────────────────────
         ttk.Button(bar, text="Import collection CSV...", command=self.on_import_csv).pack(side="left")
         ttk.Button(bar, text="Import from BGG...", command=self.on_import_from_bgg).pack(side="left", padx=(6, 0))
         ttk.Button(bar, text="Download Images", command=self.on_download_images).pack(side="left", padx=(6, 0))
@@ -374,32 +398,9 @@ class App(tk.Tk):
         def fcheck(text, var, cmd): return ttk.Checkbutton(fbar, text=text, variable=var,
                                                            command=cmd, style="Filter.TCheckbutton")
 
-        # ── right-aligned items packed FIRST so they reserve space before
-        #    the left-packed filter widgets fill in the remaining row. ────────
+        # ── count label packed FIRST (right-aligned) to reserve space ────────
         self._count_label = ttk.Label(fbar, text="", style="Filter.TLabel")
         self._count_label.pack(side="right", padx=(0, 8))
-
-        ttk.Separator(fbar, orient="vertical").pack(side="right", fill="y", padx=(8, 4))
-
-        def _view_btn(text, mode):
-            active = self._view_mode == mode
-            btn = tk.Button(
-                fbar, text=text,
-                bg=C_NAVY if active else C_WHITE,
-                fg=C_WHITE if active else C_NAVY,
-                activebackground=C_BLUE, activeforeground=C_WHITE,
-                relief="solid", bd=1,
-                font=("Segoe UI", 9, "bold"),
-                padx=10, pady=3, cursor="hand2",
-                command=lambda m=mode: self._set_view(m),
-            )
-            btn.pack(side="right", padx=(0, 2))
-            return btn
-
-        self._btn_table = _view_btn("≡  Table", "table")
-        self._btn_cards = _view_btn("⊞  Cards", "cards")
-        # Label packs last so it appears to the LEFT of the buttons
-        ttk.Label(fbar, text="View:", style="Filter.TLabel").pack(side="right", padx=(8, 4))
 
         # ── left-aligned filter widgets ───────────────────────────────────────
         flabel("Players:").pack(side="left")
@@ -915,26 +916,28 @@ class App(tk.Tk):
         card = ttk.Frame(self.games_inner, padding=8, relief="solid", borderwidth=1)
         card.configure(width=180)
 
-        # --- image centered, star overlaid in top-right corner ---
-        img_frame = tk.Frame(card, bg=C_BG)
-        img_frame.pack(fill="x")
-
-        img_label = ttk.Label(img_frame, anchor="center")
-        img_label.pack(expand=True, fill="x")
-        self._set_card_image(img_label, game)
-
-        star_text = "★" if is_fav else "☆"
-        star_btn = tk.Button(
-            img_frame,
-            text=star_text,
-            font=("Segoe UI", 13),
-            fg="#f5a623" if is_fav else "#aaa",
-            bg=C_BG,
-            relief="flat", cursor="hand2", bd=0, highlightthickness=0,
-            command=lambda g=game: self.on_toggle_favorite(g),
+        # --- image canvas: art centered, star text overlaid top-right.
+        #     Canvas text has no widget background so the star is transparent. ---
+        _CW, _CH = 164, THUMB_SIZE[1]
+        img_canvas = tk.Canvas(
+            card, width=_CW, height=_CH,
+            bg=C_BG, highlightthickness=0, bd=0,
         )
-        # place() overlays the star on the image frame without disrupting layout
-        star_btn.place(relx=1.0, rely=0.0, anchor="ne", x=-2, y=2)
+        img_canvas.pack(fill="x")
+
+        _img_id = img_canvas.create_image(_CW // 2, _CH // 2, anchor="center")
+        _star_id = img_canvas.create_text(
+            _CW - 3, 3, anchor="ne",
+            text="★" if is_fav else "☆",
+            font=("Segoe UI", 13),
+            fill="#f5a623" if is_fav else "#aaa",
+        )
+        img_canvas.tag_bind(_star_id, "<Button-1>",
+                            lambda e, g=game: self.on_toggle_favorite(g))
+        img_canvas.tag_bind(_star_id, "<Enter>", lambda e: img_canvas.configure(cursor="hand2"))
+        img_canvas.tag_bind(_star_id, "<Leave>", lambda e: img_canvas.configure(cursor=""))
+
+        self._set_card_image(img_canvas, _img_id, game)
 
         # --- name + year ---
         ttk.Label(
@@ -1012,16 +1015,15 @@ class App(tk.Tk):
 
         return card
 
-    def _set_card_image(self, label: ttk.Label, game) -> None:
+    def _set_card_image(self, canvas: tk.Canvas, img_id: int, game) -> None:
         path = game["image_path"]
+        img = None
         if path and Path(path).exists():
             img = self._load_thumb(path)
-            if img is not None:
-                label.configure(image=img)
-                label.image = img  # keep reference
-                return
-        label.configure(image=self._get_placeholder(), text="")
-        label.image = self._get_placeholder()
+        if img is None:
+            img = self._get_placeholder()
+        canvas.itemconfigure(img_id, image=img)
+        canvas._card_img_ref = img  # keep reference so Tkinter doesn't GC it
 
     def _load_thumb(self, path: str) -> Optional[ImageTk.PhotoImage]:
         if path in self._image_cache:
