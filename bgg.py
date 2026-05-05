@@ -41,15 +41,19 @@ THING_BATCH = 20
 def _ssl_ctx() -> ssl.SSLContext:
     """Return an SSL context with a reliable CA bundle.
 
-    Tries certifi first (bundled CA certs that work on any machine),
-    then falls back to the system certificate store.  Using a lazy import
-    so the app still starts if certifi wasn't picked up by PyInstaller.
+    Loads the OS/system certificate store first (via create_default_context),
+    then layers certifi's bundle on top via load_verify_locations so that
+    both sources are trusted.  On Windows, create_default_context() pulls
+    from the Windows Certificate Store (SChannel), so setting SSL_CERT_FILE
+    has no effect — we must add certifi explicitly after the fact.
     """
+    ctx = ssl.create_default_context()
     try:
         import certifi  # noqa: PLC0415
-        return ssl.create_default_context(cafile=certifi.where())
+        ctx.load_verify_locations(cafile=certifi.where())
     except Exception:
-        return ssl.create_default_context()
+        pass
+    return ctx
 
 
 @dataclass
