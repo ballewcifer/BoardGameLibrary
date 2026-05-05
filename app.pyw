@@ -1673,7 +1673,7 @@ class App(tk.Tk):
         wait.transient(self)
         wait.resizable(False, False)
         wait.configure(bg=C_BG)
-        ttk.Label(wait, text=f"Fetching details for "{name}"…",
+        ttk.Label(wait, text=f'Fetching details for "{name}"...',
                   padding=(24, 16)).pack()
         wait.grab_set()
         wait.update()
