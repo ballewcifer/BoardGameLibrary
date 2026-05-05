@@ -58,6 +58,20 @@ C_TEXT    = "#1c2833"   # near-black body text
 C_GOLD    = "#d4a017"   # darker gold for best-at labels (replaces #b8860b)
 
 
+_ORDINALS = {
+    "First": "1st", "Second": "2nd", "Third": "3rd", "Fourth": "4th",
+    "Fifth": "5th", "Sixth": "6th", "Seventh": "7th", "Eighth": "8th",
+    "first": "1st", "second": "2nd", "third": "3rd", "fourth": "4th",
+    "fifth": "5th", "sixth": "6th", "seventh": "7th", "eighth": "8th",
+}
+_ORDINAL_RE = re.compile(r"\b(" + "|".join(_ORDINALS) + r")\b")
+
+
+def _shorten(text: str) -> str:
+    """Replace spelled-out ordinals with compact numeral forms to save card space."""
+    return _ORDINAL_RE.sub(lambda m: _ORDINALS[m.group()], text)
+
+
 def fmt_players(min_p: Optional[int], max_p: Optional[int]) -> str:
     if not min_p and not max_p:
         return "?"
@@ -438,6 +452,9 @@ class App(tk.Tk):
 
         ttk.Button(fbar, text="Reset filters", command=self._reset_filters).pack(side="left")
 
+        self._count_label = ttk.Label(fbar, text="", style="Filter.TLabel")
+        self._count_label.pack(side="right", padx=(0, 4))
+
     def _build_tabs(self) -> None:
         self.nb = ttk.Notebook(self)
         self.nb.pack(side="top", fill="both", expand=True)
@@ -705,6 +722,7 @@ class App(tk.Tk):
     def refresh_games(self) -> None:
         with db.connect() as c:
             games = db.list_games(c, self.search_var.get().strip())
+            total_count = c.execute("SELECT COUNT(*) FROM games").fetchone()[0]
             open_loans = {
                 row["game_id"]: row
                 for row in c.execute(
@@ -718,6 +736,13 @@ class App(tk.Tk):
             play_counts = db.play_counts(c)
 
         games = self._apply_filters(list(games), open_loans)
+
+        # Update count label
+        shown = len(games)
+        if self._filters_active():
+            self._count_label.configure(text=f"{shown} of {total_count} games")
+        else:
+            self._count_label.configure(text=f"{total_count} game{'s' if total_count != 1 else ''}")
 
         if self._view_mode == "table":
             self._refresh_table_view(games, open_loans, play_counts)
@@ -890,32 +915,31 @@ class App(tk.Tk):
         card = ttk.Frame(self.games_inner, padding=8, relief="solid", borderwidth=1)
         card.configure(width=180)
 
-        # --- top row: image + star in top-right corner ---
-        img_frame = ttk.Frame(card)
+        # --- image centered, star overlaid in top-right corner ---
+        img_frame = tk.Frame(card, bg=C_BG)
         img_frame.pack(fill="x")
 
         img_label = ttk.Label(img_frame, anchor="center")
-        img_label.pack(side="left", expand=True)
+        img_label.pack(expand=True, fill="x")
         self._set_card_image(img_label, game)
 
-        star_text = "★" if is_fav else "☆"          # filled / outline star
+        star_text = "★" if is_fav else "☆"
         star_btn = tk.Button(
             img_frame,
             text=star_text,
-            font=("Segoe UI", 14),
+            font=("Segoe UI", 13),
             fg="#f5a623" if is_fav else "#aaa",
-            relief="flat",
-            cursor="hand2",
-            bd=0,
-            highlightthickness=0,
+            bg=C_BG,
+            relief="flat", cursor="hand2", bd=0, highlightthickness=0,
             command=lambda g=game: self.on_toggle_favorite(g),
         )
-        star_btn.pack(side="right", anchor="n", padx=(0, 2), pady=2)
+        # place() overlays the star on the image frame without disrupting layout
+        star_btn.place(relx=1.0, rely=0.0, anchor="ne", x=-2, y=2)
 
         # --- name + year ---
         ttk.Label(
             card,
-            text=game["name"],
+            text=_shorten(game["name"]),
             wraplength=160,
             justify="center",
             font=("Segoe UI", 9, "bold"),
