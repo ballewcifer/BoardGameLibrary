@@ -68,6 +68,22 @@ CREATE INDEX IF NOT EXISTS idx_loans_open
     ON loans(game_id) WHERE returned_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_loans_user ON loans(user_id);
 CREATE INDEX IF NOT EXISTS idx_plays_game ON plays(game_id);
+
+CREATE TABLE IF NOT EXISTS collections (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    username     TEXT,
+    display_name TEXT    NOT NULL,
+    color        TEXT    NOT NULL DEFAULT '#2471a3'
+);
+
+CREATE TABLE IF NOT EXISTS collection_games (
+    collection_id INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+    bgg_id        INTEGER NOT NULL REFERENCES games(bgg_id)   ON DELETE CASCADE,
+    PRIMARY KEY (collection_id, bgg_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_cg_collection ON collection_games(collection_id);
+CREATE INDEX IF NOT EXISTS idx_cg_game       ON collection_games(bgg_id);
 """
 
 # Columns added after the initial release — applied via ALTER TABLE so
@@ -104,6 +120,23 @@ def init_db(db_path: Path = DB_PATH) -> None:
             except sqlite3.OperationalError:
                 pass  # Column already exists — safe to ignore.
 
+        # Data migration: if collections table is empty but games exist,
+        # create a default "My Collection" containing all current games.
+        col_count = c.execute("SELECT COUNT(*) FROM collections").fetchone()[0]
+        if col_count == 0:
+            game_count = c.execute("SELECT COUNT(*) FROM games").fetchone()[0]
+            if game_count > 0:
+                cur = c.execute(
+                    "INSERT INTO collections (display_name, color) VALUES (?, ?)",
+                    ("My Collection", "#2471a3"),
+                )
+                col_id = cur.lastrowid
+                c.execute(
+                    "INSERT OR IGNORE INTO collection_games (collection_id, bgg_id) "
+                    "SELECT ?, bgg_id FROM games",
+                    (col_id,),
+                )
+
 
 # ---------- games ----------
 
@@ -137,17 +170,136 @@ def set_insert(c: sqlite3.Connection, bgg_id: int, value: bool) -> None:
     c.execute("UPDATE games SET has_insert = ? WHERE bgg_id = ?", (int(value), bgg_id))
 
 
-def list_games(c: sqlite3.Connection, search: str = "") -> list[sqlite3.Row]:
-    if search:
-        return c.execute(
-            "SELECT * FROM games WHERE name LIKE ? ORDER BY name COLLATE NOCASE",
-            (f"%{search}%",),
-        ).fetchall()
-    return c.execute("SELECT * FROM games ORDER BY name COLLATE NOCASE").fetchall()
+def list_games(
+    c: sqlite3.Connection,
+    search: str = "",
+    collection_filter = "all",   # "all" | "shared" | ("col", id) | ("unique", id)
+) -> list[sqlite3.Row]:
+    like = f"%{search}%"
+    base = """
+        SELECT games.*,
+               GROUP_CONCAT(cg.collection_id) AS owned_by
+        FROM games
+        JOIN collection_games cg ON cg.bgg_id = games.bgg_id
+        {where}
+        GROUP BY games.bgg_id
+        {having}
+        ORDER BY games.name COLLATE NOCASE
+    """
+    if collection_filter == "all":
+        sql = base.format(where="WHERE games.name LIKE ?", having="")
+        return c.execute(sql, (like,)).fetchall()
+    elif collection_filter == "shared":
+        sql = base.format(
+            where="WHERE games.name LIKE ?",
+            having="HAVING COUNT(DISTINCT cg.collection_id) >= (SELECT COUNT(*) FROM collections)",
+        )
+        return c.execute(sql, (like,)).fetchall()
+    elif isinstance(collection_filter, tuple) and collection_filter[0] == "col":
+        col_id = collection_filter[1]
+        sql = base.format(
+            where="WHERE cg.collection_id = ? AND games.name LIKE ?",
+            having="",
+        )
+        return c.execute(sql, (col_id, like)).fetchall()
+    elif isinstance(collection_filter, tuple) and collection_filter[0] == "unique":
+        col_id = collection_filter[1]
+        # Games in this collection that are NOT in any other collection
+        sql = base.format(
+            where="WHERE cg.collection_id = ? AND games.name LIKE ?",
+            having="""HAVING COUNT(DISTINCT cg2.collection_id) = 0""",
+        ).replace(
+            "JOIN collection_games cg ON cg.bgg_id = games.bgg_id",
+            "JOIN collection_games cg ON cg.bgg_id = games.bgg_id\n"
+            "        LEFT JOIN collection_games cg2 ON cg2.bgg_id = games.bgg_id AND cg2.collection_id != ?",
+        )
+        return c.execute(sql, (col_id, like, col_id)).fetchall()
+    else:
+        # Fallback — return all
+        sql = base.format(where="WHERE games.name LIKE ?", having="")
+        return c.execute(sql, (like,)).fetchall()
 
 
 def get_game(c: sqlite3.Connection, bgg_id: int) -> Optional[sqlite3.Row]:
     return c.execute("SELECT * FROM games WHERE bgg_id = ?", (bgg_id,)).fetchone()
+
+
+# ---------- collections ----------
+
+def list_collections(c: sqlite3.Connection) -> list[sqlite3.Row]:
+    return c.execute("SELECT * FROM collections ORDER BY id").fetchall()
+
+
+def get_collection(c: sqlite3.Connection, col_id: int) -> Optional[sqlite3.Row]:
+    return c.execute("SELECT * FROM collections WHERE id = ?", (col_id,)).fetchone()
+
+
+def add_collection(
+    c: sqlite3.Connection,
+    display_name: str,
+    color: str = "#2471a3",
+    username: str = "",
+) -> int:
+    cur = c.execute(
+        "INSERT INTO collections (display_name, color, username) VALUES (?, ?, ?)",
+        (display_name.strip(), color, username.strip()),
+    )
+    return cur.lastrowid
+
+
+def rename_collection(c: sqlite3.Connection, col_id: int, display_name: str) -> None:
+    c.execute(
+        "UPDATE collections SET display_name = ? WHERE id = ?",
+        (display_name.strip(), col_id),
+    )
+
+
+def set_collection_color(c: sqlite3.Connection, col_id: int, color: str) -> None:
+    c.execute("UPDATE collections SET color = ? WHERE id = ?", (color, col_id))
+
+
+def delete_collection(c: sqlite3.Connection, col_id: int) -> None:
+    # collection_games rows are cascade-deleted by FK
+    c.execute("DELETE FROM collections WHERE id = ?", (col_id,))
+
+
+def add_game_to_collection(c: sqlite3.Connection, col_id: int, bgg_id: int) -> None:
+    c.execute(
+        "INSERT OR IGNORE INTO collection_games (collection_id, bgg_id) VALUES (?, ?)",
+        (col_id, bgg_id),
+    )
+
+
+def remove_game_from_collection(c: sqlite3.Connection, col_id: int, bgg_id: int) -> None:
+    c.execute(
+        "DELETE FROM collection_games WHERE collection_id = ? AND bgg_id = ?",
+        (col_id, bgg_id),
+    )
+
+
+def get_game_collection_ids(c: sqlite3.Connection, bgg_id: int) -> list[int]:
+    rows = c.execute(
+        "SELECT collection_id FROM collection_games WHERE bgg_id = ?", (bgg_id,)
+    ).fetchall()
+    return [r["collection_id"] for r in rows]
+
+
+def collection_game_count(c: sqlite3.Connection, col_id: int) -> int:
+    return c.execute(
+        "SELECT COUNT(*) FROM collection_games WHERE collection_id = ?", (col_id,)
+    ).fetchone()[0]
+
+
+def get_or_create_default_collection(c: sqlite3.Connection) -> int:
+    """Return the id of the first collection, creating 'My Collection' if none exist."""
+    row = c.execute("SELECT id FROM collections ORDER BY id LIMIT 1").fetchone()
+    if row:
+        return row["id"]
+    cur = c.execute(
+        "INSERT INTO collections (display_name, color) VALUES (?, ?)",
+        ("My Collection", "#2471a3"),
+    )
+    return cur.lastrowid
 
 
 # ---------- users ----------
