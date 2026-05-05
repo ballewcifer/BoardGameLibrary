@@ -400,6 +400,8 @@ def search_games(
 ) -> list[tuple[int, str, Optional[int]]]:
     """Search BGG for board games matching *query*.
 
+    Requires a BGG Bearer token (register at boardgamegeek.com/applications).
+
     Returns a list of (bgg_id, name, year) tuples sorted by year descending
     so the most recent version of a game appears first.
     """

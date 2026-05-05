@@ -1576,6 +1576,16 @@ class App(tk.Tk):
 
     def on_add_game(self) -> None:
         """Search BGG by title, pick a result, then confirm/edit before saving."""
+        tok = self.settings.get("bgg_token", "").strip()
+        if not tok:
+            messagebox.showinfo(
+                "API token required",
+                "Searching BGG requires a free Bearer token.\n\n"
+                "Register at boardgamegeek.com/applications, then paste the\n"
+                "token into Settings → BGG API token.",
+            )
+            return
+
         dlg = tk.Toplevel(self)
         dlg.title("Add Game")
         dlg.transient(self)
@@ -1628,7 +1638,7 @@ class App(tk.Tk):
 
             def _bg():
                 try:
-                    found = bgg.search_games(q)
+                    found = bgg.search_games(q, token=tok)
                 except Exception as exc:
                     self.after(0, lambda: status_var.set(f"Search failed: {exc}"))
                     self.after(0, lambda: search_btn.configure(state="normal"))
@@ -1681,9 +1691,11 @@ class App(tk.Tk):
         wait.grab_set()
         wait.update()
 
+        tok = self.settings.get("bgg_token", "").strip() or None
+
         def _bg():
             try:
-                details_list = bgg.fetch_things([bgg_id])
+                details_list = bgg.fetch_things([bgg_id], token=tok)
                 details = details_list[0] if details_list else None
             except Exception as exc:
                 details = None
