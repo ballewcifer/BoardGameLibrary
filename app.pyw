@@ -360,6 +360,7 @@ class App(tk.Tk):
         ttk.Button(bar, text="Import collection CSV...", command=self.on_import_csv).pack(side="left")
         ttk.Button(bar, text="Import from BGG...", command=self.on_import_from_bgg).pack(side="left", padx=(6, 0))
         ttk.Button(bar, text="Download Images", command=self.on_download_images).pack(side="left", padx=(6, 0))
+        ttk.Button(bar, text="Add Game...", command=self.on_add_game).pack(side="left", padx=(6, 0))
         ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=10)
         ttk.Label(bar, text="Search:").pack(side="left")
         self.search_var = tk.StringVar()
@@ -1567,6 +1568,164 @@ class App(tk.Tk):
             args=(needs_fetch,),
             daemon=True,
         ).start()
+
+    def on_add_game(self) -> None:
+        """Open a dialog to manually add a game to the library."""
+        dialog = tk.Toplevel(self)
+        dialog.title("Add Game Manually")
+        dialog.transient(self)
+        dialog.resizable(False, False)
+        dialog.configure(bg=C_BG)
+
+        pad  = {"padx": (12, 4), "pady": 4, "sticky": "e"}
+        pad2 = {"padx": (4, 12), "pady": 4, "sticky": "we"}
+
+        def lbl(text, row):
+            ttk.Label(dialog, text=text, font=("Segoe UI", 9, "bold")).grid(
+                row=row, column=0, **pad)
+
+        def entry(row, width=34, **kw):
+            var = tk.StringVar(**kw)
+            e = ttk.Entry(dialog, textvariable=var, width=width)
+            e.grid(row=row, column=1, **pad2)
+            return var, e
+
+        # ── fields ────────────────────────────────────────────────────────────
+        lbl("Name *", 0)
+        name_var, name_entry = entry(0)
+
+        lbl("Year", 1)
+        year_var, _ = entry(1, width=10)
+
+        lbl("BGG ID", 2)
+        bgg_id_var, _ = entry(2, width=12)
+        ttk.Label(dialog, text="(leave blank to auto-assign)",
+                  foreground="#888", font=("Segoe UI", 8)).grid(
+            row=2, column=2, padx=(0, 12), sticky="w")
+
+        lbl("Min players", 3)
+        min_p_var, _ = entry(3, width=6)
+
+        lbl("Max players", 4)
+        max_p_var, _ = entry(4, width=6)
+
+        lbl("Play time (min)", 5)
+        time_var, _ = entry(5, width=8)
+
+        lbl("Complexity (1–5)", 6)
+        weight_var, _ = entry(6, width=8)
+        ttk.Label(dialog, text="e.g. 2.5",
+                  foreground="#888", font=("Segoe UI", 8)).grid(
+            row=6, column=2, padx=(0, 12), sticky="w")
+
+        lbl("Description", 7)
+        desc_text = tk.Text(dialog, width=36, height=4,
+                            font=("Segoe UI", 9), wrap="word",
+                            relief="solid", bd=1)
+        desc_text.grid(row=7, column=1, padx=(4, 12), pady=4, sticky="we")
+
+        lbl("Comment", 8)
+        comment_var, _ = entry(8)
+
+        # ── error label + buttons ─────────────────────────────────────────────
+        err_var = tk.StringVar()
+        ttk.Label(dialog, textvariable=err_var, foreground="red",
+                  font=("Segoe UI", 8)).grid(
+            row=9, column=0, columnspan=3, padx=12, sticky="w")
+
+        def save() -> None:
+            name = name_var.get().strip()
+            if not name:
+                err_var.set("Name is required.")
+                name_entry.focus_set()
+                return
+
+            # Parse optional numeric fields
+            def _int(v):
+                s = v.get().strip()
+                if not s:
+                    return None
+                try:
+                    return int(s)
+                except ValueError:
+                    return None
+
+            def _float(v):
+                s = v.get().strip()
+                if not s:
+                    return None
+                try:
+                    return float(s)
+                except ValueError:
+                    return None
+
+            year       = _int(year_var)
+            min_p      = _int(min_p_var)
+            max_p      = _int(max_p_var)
+            play_time  = _int(time_var)
+            weight     = _float(weight_var)
+            description = desc_text.get("1.0", "end-1c").strip()
+            comment    = comment_var.get().strip()
+
+            # Resolve BGG ID
+            bgg_id_str = bgg_id_var.get().strip()
+            if bgg_id_str:
+                try:
+                    bgg_id = int(bgg_id_str)
+                except ValueError:
+                    err_var.set("BGG ID must be a whole number.")
+                    return
+            else:
+                # Auto-assign: one below the lowest existing ID (or -1)
+                with db.connect() as c:
+                    row = c.execute("SELECT MIN(bgg_id) FROM games").fetchone()
+                    lowest = row[0] if row[0] is not None else 0
+                bgg_id = min(lowest, 0) - 1
+
+            game_row = {
+                "bgg_id":       bgg_id,
+                "name":         name,
+                "year":         year,
+                "image_url":    None,
+                "thumbnail_url": None,
+                "image_path":   None,
+                "min_players":  min_p,
+                "max_players":  max_p,
+                "min_playtime": play_time,
+                "max_playtime": play_time,
+                "playing_time": play_time,
+                "min_age":      None,
+                "weight":       weight,
+                "avg_rating":   None,
+                "my_rating":    None,
+                "description":  description or None,
+                "categories":   None,
+                "mechanics":    None,
+                "designers":    None,
+                "publishers":   None,
+                "best_players": None,
+                "my_comment":   comment or None,
+                "own":          1,
+                "last_synced":  db.now_iso(),
+            }
+            with db.connect() as c:
+                db.upsert_game(c, game_row)
+
+            dialog.destroy()
+            self.refresh_games()
+            self.status(f"Added \"{name}\" to the library.")
+
+        btn_frame = ttk.Frame(dialog)
+        btn_frame.grid(row=10, column=0, columnspan=3,
+                       pady=(4, 12), padx=12, sticky="e")
+        ttk.Button(btn_frame, text="Cancel",
+                   command=dialog.destroy).pack(side="left", padx=(0, 6))
+        ttk.Button(btn_frame, text="Add Game",
+                   command=save).pack(side="left")
+
+        dialog.columnconfigure(1, weight=1)
+        dialog.grab_set()
+        name_entry.focus_set()
 
     def _fetch_and_cache_images_bg(self, bgg_ids: list[int]) -> None:
         """Download box-art for every game that is missing an image.
