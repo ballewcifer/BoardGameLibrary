@@ -353,8 +353,9 @@ class App(tk.Tk):
         ttk.Button(bar, text="Clear", command=lambda: self.search_var.set("")).pack(side="left", padx=(4, 0))
 
         # ── view toggle (right side of the search row) ────────────────────────
+        # Pack order matters: side="right" places items right-to-left, so the
+        # separator goes first (far right), then buttons, then the label (far left).
         ttk.Separator(bar, orient="vertical").pack(side="right", fill="y", padx=(8, 4))
-        ttk.Label(bar, text="View:").pack(side="right", padx=(0, 4))
 
         def _view_btn(text, mode):
             active = self._view_mode == mode
@@ -373,6 +374,8 @@ class App(tk.Tk):
 
         self._btn_table = _view_btn("≡  Table", "table")
         self._btn_cards = _view_btn("⊞  Cards", "cards")
+        # Label packs last so it appears to the LEFT of the buttons
+        ttk.Label(bar, text="View:").pack(side="right", padx=(0, 4))
 
         # --- filter bar (second row, light-blue background) ---
         fbar = ttk.Frame(self, style="Filter.TFrame", padding=(8, 4, 8, 6))
