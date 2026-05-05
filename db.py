@@ -245,6 +245,25 @@ def log_play(
     return cur.lastrowid
 
 
+def get_play(c: sqlite3.Connection, play_id: int) -> Optional[sqlite3.Row]:
+    return c.execute("SELECT * FROM plays WHERE id = ?", (play_id,)).fetchone()
+
+
+def update_play(
+    c: sqlite3.Connection,
+    play_id: int,
+    game_id: int,
+    played_at: str,
+    player_names: str = "",
+    winner: str = "",
+    notes: str = "",
+) -> None:
+    c.execute(
+        "UPDATE plays SET game_id=?, played_at=?, player_names=?, winner=?, notes=? WHERE id=?",
+        (game_id, played_at, player_names.strip(), winner.strip(), notes.strip(), play_id),
+    )
+
+
 def delete_play(c: sqlite3.Connection, play_id: int) -> None:
     c.execute("DELETE FROM plays WHERE id = ?", (play_id,))
 

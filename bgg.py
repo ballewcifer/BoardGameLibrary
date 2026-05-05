@@ -409,9 +409,10 @@ def _maybe_protocol(url: Optional[str]) -> Optional[str]:
 
 
 def import_collection_csv(csv_path: Path) -> list[GameDetails]:
-    """Parse a BGG 'Export collection' CSV file and return GameDetails for each
-    *owned* game. The export's column set varies by year; we look up fields by
-    several possible header names.
+    """Parse a BGG 'Export collection' CSV file and return GameDetails for every
+    row. The export's column set varies by year; we look up fields by several
+    possible header names. Owned, want-to-buy, wishlist, etc. are all imported
+    — the user chose what to include when they exported.
     """
     games: list[GameDetails] = []
     with open(csv_path, "r", encoding="utf-8-sig", newline="") as f:
@@ -423,11 +424,6 @@ def import_collection_csv(csv_path: Path) -> list[GameDetails]:
             try:
                 bgg_id = int(obj_id)
             except ValueError:
-                continue
-
-            own_raw = _pick(row, "own")
-            # If the CSV includes non-owned items (wishlist etc.), skip them.
-            if own_raw is not None and own_raw not in ("", "1"):
                 continue
 
             name = _pick(row, "objectname", "name", "originalname") or f"#{bgg_id}"

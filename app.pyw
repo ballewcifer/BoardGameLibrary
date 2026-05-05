@@ -474,12 +474,13 @@ class App(tk.Tk):
             self._card_frame.pack(fill="both", expand=True)
 
     def _build_table_widget(self, parent: ttk.Frame) -> None:
-        cols = ("fav", "name", "year", "players", "time", "weight", "rating", "best", "status", "plays")
+        cols = ("fav", "insert", "name", "year", "players", "time", "weight", "rating", "best", "status", "plays")
         self.games_tree = ttk.Treeview(parent, columns=cols, show="headings", selectmode="browse")
 
         col_defs = [
             ("fav",     "★",           34,  "center", False),
-            ("name",    "Name",        280, "w",      True),
+            ("insert",  "\U0001f5f3",  34,  "center", False),
+            ("name",    "Name",        260, "w",      True),
             ("year",    "Year",         54, "center", False),
             ("players", "Players",      72, "center", False),
             ("time",    "Time",         84, "center", False),
@@ -743,6 +744,7 @@ class App(tk.Tk):
                 elif c == "status":  return 0 if g["bgg_id"] in open_loans else 1
                 elif c == "plays":   return play_counts.get(g["bgg_id"], 0)
                 elif c == "fav":     return 0 if g["is_favorite"] else 1
+                elif c == "insert":  return 0 if g["has_insert"] else 1
                 return ""
             games = sorted(games, key=_key, reverse=self._sort_rev)
 
@@ -768,6 +770,7 @@ class App(tk.Tk):
                 tags=tags,
                 values=(
                     "★" if g["is_favorite"] else "",
+                    "\U0001f5f3" if g["has_insert"] else "",
                     g["name"],
                     g["year"] or "—",
                     fmt_players(g["min_players"], g["max_players"]),
@@ -788,9 +791,9 @@ class App(tk.Tk):
             self._sort_rev = False
 
         _labels = {
-            "fav": "★", "name": "Name", "year": "Year", "players": "Players",
-            "time": "Time", "weight": "Complexity", "rating": "BGG ★",
-            "best": "Best At", "status": "Status", "plays": "Plays",
+            "fav": "★", "insert": "\U0001f5f3", "name": "Name", "year": "Year",
+            "players": "Players", "time": "Time", "weight": "Complexity",
+            "rating": "BGG ★", "best": "Best At", "status": "Status", "plays": "Plays",
         }
         for c, lbl in _labels.items():
             arrow = (" ▲" if not self._sort_rev else " ▼") if c == col else ""
@@ -997,10 +1000,14 @@ class App(tk.Tk):
         form.pack(fill="x")
         ttk.Label(form, text="First name:").pack(side="left")
         self.first_name_var = tk.StringVar()
-        ttk.Entry(form, textvariable=self.first_name_var, width=18).pack(side="left", padx=(4, 8))
+        first_entry = ttk.Entry(form, textvariable=self.first_name_var, width=18)
+        first_entry.pack(side="left", padx=(4, 8))
+        first_entry.bind("<Return>", lambda *_: self.on_add_member())
         ttk.Label(form, text="Last name:").pack(side="left")
         self.last_name_var = tk.StringVar()
-        ttk.Entry(form, textvariable=self.last_name_var, width=18).pack(side="left", padx=(4, 8))
+        last_entry = ttk.Entry(form, textvariable=self.last_name_var, width=18)
+        last_entry.pack(side="left", padx=(4, 8))
+        last_entry.bind("<Return>", lambda *_: self.on_add_member())
         ttk.Button(form, text="Add member", command=self.on_add_member).pack(side="left")
         ttk.Button(form, text="Remove selected", command=self.on_delete_member).pack(side="left", padx=(8, 0))
 
@@ -1260,7 +1267,7 @@ class App(tk.Tk):
             self.status("Import failed.")
             return
         if not games:
-            messagebox.showinfo("Nothing imported", "No owned games were found in that CSV.")
+            messagebox.showinfo("Nothing imported", "No games were found in that CSV.")
             self.status("Nothing imported.")
             return
 
@@ -1654,6 +1661,8 @@ class App(tk.Tk):
         controls.pack(fill="x", pady=(0, 6))
 
         ttk.Button(controls, text="Log Play...", command=lambda: self.on_log_play(None)).pack(side="left")
+        ttk.Button(controls, text="Edit selected",
+                   command=self.on_edit_play).pack(side="left", padx=(6, 0))
 
         ttk.Label(controls, text="  Filter by game:").pack(side="left")
         self.plays_game_var = tk.StringVar(value="All games")
@@ -1687,6 +1696,7 @@ class App(tk.Tk):
         self.plays_tree.configure(yscrollcommand=vsb.set)
         self.plays_tree.pack(side="left", fill="both", expand=True)
         vsb.pack(side="left", fill="y")
+        self.plays_tree.bind("<Double-1>", lambda *_: self.on_edit_play())
 
     def refresh_plays(self) -> None:
         self.plays_tree.delete(*self.plays_tree.get_children())
@@ -1720,16 +1730,22 @@ class App(tk.Tk):
                 ),
             )
 
-    def on_log_play(self, game) -> None:
-        """Open the Log Play dialog. If game is None, show a game picker first."""
+    def on_log_play(self, game, *, play=None) -> None:
+        """Open the Log Play dialog.
+
+        game  — pre-select this game in the dropdown (or None for first game).
+        play  — if given (a plays DB row), pre-fill all fields for editing.
+        """
         with db.connect() as c:
             all_games = db.list_games(c)
         if not all_games:
             messagebox.showinfo("No games", "Import your collection first.")
             return
 
+        editing = play is not None
+
         dialog = tk.Toplevel(self)
-        dialog.title("Log a Play")
+        dialog.title("Edit Play" if editing else "Log a Play")
         dialog.transient(self)
         dialog.resizable(False, False)
 
@@ -1738,25 +1754,30 @@ class App(tk.Tk):
         ttk.Label(dialog, text="Game:", font=("Segoe UI", 9, "bold")).grid(row=0, column=0, **pad)
         game_names = [g["name"] for g in all_games]
         game_id_map = {g["name"]: g["bgg_id"] for g in all_games}
-        initial = game["name"] if game else game_names[0]
+        if editing:
+            initial = next((g["name"] for g in all_games if g["bgg_id"] == play["game_id"]),
+                           game_names[0])
+        else:
+            initial = game["name"] if game else game_names[0]
         game_var = tk.StringVar(value=initial)
         ttk.Combobox(dialog, textvariable=game_var, values=game_names,
                      state="readonly", width=34).grid(row=0, column=1, **pad)
 
         ttk.Label(dialog, text="Date played:", font=("Segoe UI", 9, "bold")).grid(row=1, column=0, **pad)
-        date_var = tk.StringVar(value=datetime.now().strftime("%Y-%m-%d"))
+        date_val = play["played_at"][:10] if editing else datetime.now().strftime("%Y-%m-%d")
+        date_var = tk.StringVar(value=date_val)
         ttk.Entry(dialog, textvariable=date_var, width=14).grid(row=1, column=1, sticky="w", padx=12, pady=4)
 
         ttk.Label(dialog, text="Players (comma-separated):", font=("Segoe UI", 9, "bold")).grid(row=2, column=0, **pad)
-        players_var = tk.StringVar()
+        players_var = tk.StringVar(value=play["player_names"] or "" if editing else "")
         ttk.Entry(dialog, textvariable=players_var, width=36).grid(row=2, column=1, **pad)
 
         ttk.Label(dialog, text="Winner:", font=("Segoe UI", 9, "bold")).grid(row=3, column=0, **pad)
-        winner_var = tk.StringVar()
+        winner_var = tk.StringVar(value=play["winner"] or "" if editing else "")
         ttk.Entry(dialog, textvariable=winner_var, width=36).grid(row=3, column=1, **pad)
 
         ttk.Label(dialog, text="Notes (optional):", font=("Segoe UI", 9, "bold")).grid(row=4, column=0, **pad)
-        notes_var = tk.StringVar()
+        notes_var = tk.StringVar(value=play["notes"] or "" if editing else "")
         ttk.Entry(dialog, textvariable=notes_var, width=36).grid(row=4, column=1, **pad)
 
         def save_play() -> None:
@@ -1769,21 +1790,40 @@ class App(tk.Tk):
                 messagebox.showerror("Error", "Enter a date.")
                 return
             with db.connect() as c:
-                db.log_play(c, gid, played,
-                            players_var.get().strip(),
-                            winner_var.get().strip(),
-                            notes_var.get().strip())
+                if editing:
+                    db.update_play(c, play["id"], gid, played,
+                                   players_var.get().strip(),
+                                   winner_var.get().strip(),
+                                   notes_var.get().strip())
+                else:
+                    db.log_play(c, gid, played,
+                                players_var.get().strip(),
+                                winner_var.get().strip(),
+                                notes_var.get().strip())
             dialog.destroy()
             self.refresh_plays()
             self.refresh_games()   # update play-count badges
-            self.status(f"Logged play for {game_var.get()}.")
+            action = "Updated" if editing else "Logged"
+            self.status(f"{action} play for {game_var.get()}.")
 
         btn_frame = ttk.Frame(dialog)
         btn_frame.grid(row=5, column=0, columnspan=2, pady=(8, 12), padx=12, sticky="e")
         ttk.Button(btn_frame, text="Cancel", command=dialog.destroy).pack(side="left", padx=(0, 6))
-        ttk.Button(btn_frame, text="Save Play", command=save_play).pack(side="left")
+        ttk.Button(btn_frame, text="Save Changes" if editing else "Save Play",
+                   command=save_play).pack(side="left")
 
         dialog.grab_set()
+
+    def on_edit_play(self) -> None:
+        """Edit the currently selected play log entry."""
+        sel = self.plays_tree.selection()
+        if not sel:
+            return
+        play_id = int(sel[0])
+        with db.connect() as c:
+            play = db.get_play(c, play_id)
+        if play:
+            self.on_log_play(None, play=play)
 
     def on_delete_play(self) -> None:
         sel = self.plays_tree.selection()
