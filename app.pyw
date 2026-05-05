@@ -1647,16 +1647,17 @@ class App(tk.Tk):
     def on_download_images(self) -> None:
         with db.connect() as c:
             rows = c.execute("SELECT bgg_id, image_path, best_players FROM games").fetchall()
-        # Fetch pages for games missing image OR missing best_players data.
+        # Only trigger downloads for games that are actually missing an image file.
+        # Best-at data is collected as a bonus during the same page scrape, but
+        # should NOT force 263 requests when every image already exists on disk.
         needs_fetch = [
             r["bgg_id"] for r in rows
-            if (not r["image_path"] or not Path(r["image_path"]).exists())
-            or not r["best_players"]
+            if not r["image_path"] or not Path(r["image_path"]).exists()
         ]
         if not needs_fetch:
-            messagebox.showinfo("Images", "All games already have images and Best-at data.")
+            messagebox.showinfo("Images", "All games already have images.")
             return
-        self.status(f"Fetching BGG page data for {len(needs_fetch)} games in the background...")
+        self.status(f"Downloading images for {len(needs_fetch)} games in the background…")
         threading.Thread(
             target=self._fetch_and_cache_images_bg,
             args=(needs_fetch,),
@@ -2036,10 +2037,10 @@ class App(tk.Tk):
                                 "UPDATE games SET best_players = ? WHERE bgg_id = ?",
                                 (page.best_players, bgg_id),
                             )
-                except Exception:
+                except Exception as exc:
                     if need_image:
                         img_failed += 1
-                        last_error = f"Page scrape failed for #{bgg_id}"
+                        last_error = f"#{bgg_id}: {exc}"
                     # best-at is a bonus — never block on failure
 
             done += 1
