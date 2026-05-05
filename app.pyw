@@ -366,15 +366,25 @@ class App(tk.Tk):
         entry.pack(side="left", padx=(4, 0))
         ttk.Button(bar, text="Clear", command=lambda: self.search_var.set("")).pack(side="left", padx=(4, 0))
 
-        # ── view toggle (right side of the search row) ────────────────────────
-        # Pack order matters: side="right" places items right-to-left, so the
-        # separator goes first (far right), then buttons, then the label (far left).
-        ttk.Separator(bar, orient="vertical").pack(side="right", fill="y", padx=(8, 4))
+        # --- filter bar (second row, light-blue background) ---
+        fbar = ttk.Frame(self, style="Filter.TFrame", padding=(8, 4, 8, 6))
+        fbar.pack(side="top", fill="x")
+
+        def flabel(text): return ttk.Label(fbar, text=text, style="Filter.TLabel")
+        def fcheck(text, var, cmd): return ttk.Checkbutton(fbar, text=text, variable=var,
+                                                           command=cmd, style="Filter.TCheckbutton")
+
+        # ── right-aligned items packed FIRST so they reserve space before
+        #    the left-packed filter widgets fill in the remaining row. ────────
+        self._count_label = ttk.Label(fbar, text="", style="Filter.TLabel")
+        self._count_label.pack(side="right", padx=(0, 8))
+
+        ttk.Separator(fbar, orient="vertical").pack(side="right", fill="y", padx=(8, 4))
 
         def _view_btn(text, mode):
             active = self._view_mode == mode
             btn = tk.Button(
-                bar, text=text,
+                fbar, text=text,
                 bg=C_NAVY if active else C_WHITE,
                 fg=C_WHITE if active else C_NAVY,
                 activebackground=C_BLUE, activeforeground=C_WHITE,
@@ -389,16 +399,9 @@ class App(tk.Tk):
         self._btn_table = _view_btn("≡  Table", "table")
         self._btn_cards = _view_btn("⊞  Cards", "cards")
         # Label packs last so it appears to the LEFT of the buttons
-        ttk.Label(bar, text="View:").pack(side="right", padx=(0, 4))
+        ttk.Label(fbar, text="View:", style="Filter.TLabel").pack(side="right", padx=(8, 4))
 
-        # --- filter bar (second row, light-blue background) ---
-        fbar = ttk.Frame(self, style="Filter.TFrame", padding=(8, 4, 8, 6))
-        fbar.pack(side="top", fill="x")
-
-        def flabel(text): return ttk.Label(fbar, text=text, style="Filter.TLabel")
-        def fcheck(text, var, cmd): return ttk.Checkbutton(fbar, text=text, variable=var,
-                                                           command=cmd, style="Filter.TCheckbutton")
-
+        # ── left-aligned filter widgets ───────────────────────────────────────
         flabel("Players:").pack(side="left")
         self.players_var = tk.StringVar(value="Any")
         players_cb = ttk.Combobox(
@@ -451,9 +454,6 @@ class App(tk.Tk):
         fcheck("Favorites only", self.favorites_var, self.refresh_games).pack(side="left", padx=(0, 12))
 
         ttk.Button(fbar, text="Reset filters", command=self._reset_filters).pack(side="left")
-
-        self._count_label = ttk.Label(fbar, text="", style="Filter.TLabel")
-        self._count_label.pack(side="right", padx=(0, 4))
 
     def _build_tabs(self) -> None:
         self.nb = ttk.Notebook(self)
