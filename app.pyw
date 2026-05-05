@@ -2595,9 +2595,8 @@ class App(tk.Tk):
         """Return a collection id to import into.
 
         - If no collections exist: creates 'My Collection' and returns its id.
-        - If exactly 1 collection: returns its id immediately (no dialog).
-        - If 2+ collections: shows a small dialog asking which collection
-          (with an option to create a new one).
+        - If 1+ collections: shows a dialog so the user can pick an existing
+          collection OR create a new one (e.g. a friend's collection).
         """
         with db.connect() as c:
             cols = db.list_collections(c)
@@ -2606,10 +2605,7 @@ class App(tk.Tk):
             with db.connect() as c:
                 return db.get_or_create_default_collection(c)
 
-        if len(cols) == 1:
-            return cols[0]["id"]
-
-        # 2+ collections — ask the user
+        # Always ask — even with 1 collection — so the user can create a new one
         result: list[Optional[int]] = [None]
         dlg = tk.Toplevel(parent or self)
         dlg.title("Import into…")
