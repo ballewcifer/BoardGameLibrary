@@ -917,21 +917,30 @@ class App(tk.Tk):
         card.configure(width=180)
 
         # --- image canvas: art centered, star text overlaid top-right.
-        #     Canvas text has no widget background so the star is transparent. ---
-        _CW, _CH = 164, THUMB_SIZE[1]
+        #     Canvas text has no widget background so the star is transparent.
+        #     <Configure> keeps image centered and star in the corner as the
+        #     canvas expands to fill the card width. ---
+        _CH = THUMB_SIZE[1]
         img_canvas = tk.Canvas(
-            card, width=_CW, height=_CH,
+            card, height=_CH,
             bg=C_BG, highlightthickness=0, bd=0,
         )
         img_canvas.pack(fill="x")
 
-        _img_id = img_canvas.create_image(_CW // 2, _CH // 2, anchor="center")
+        _img_id = img_canvas.create_image(0, _CH // 2, anchor="center")
         _star_id = img_canvas.create_text(
-            _CW - 3, 3, anchor="ne",
+            0, 2, anchor="ne",
             text="★" if is_fav else "☆",
             font=("Segoe UI", 13),
             fill="#f5a623" if is_fav else "#aaa",
         )
+
+        def _on_canvas_resize(event, c=img_canvas, iid=_img_id, sid=_star_id, ch=_CH):
+            w = event.width
+            c.coords(iid, w // 2, ch // 2)
+            c.coords(sid, w - 2, 2)
+
+        img_canvas.bind("<Configure>", _on_canvas_resize)
         img_canvas.tag_bind(_star_id, "<Button-1>",
                             lambda e, g=game: self.on_toggle_favorite(g))
         img_canvas.tag_bind(_star_id, "<Enter>", lambda e: img_canvas.configure(cursor="hand2"))
