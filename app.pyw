@@ -28,6 +28,17 @@ APP_CREATED   = "May 5, 2026"
 APP_AUTHOR    = "Ballewcifer"
 APP_CONTACT   = "ballewcifer@gmail.com"
 
+# ── SSL certificate fix ────────────────────────────────────────────────────────
+# Point urllib at the certifi CA bundle so HTTPS works in both the frozen
+# PyInstaller app (where the system cert store is bypassed) and bare Python
+# installs where the Windows trust store might not include BGG's issuer chain.
+try:
+    import certifi as _certifi
+    os.environ.setdefault("SSL_CERT_FILE",      _certifi.where())
+    os.environ.setdefault("REQUESTS_CA_BUNDLE", _certifi.where())
+except ImportError:
+    pass
+
 
 def _open_url(url: str) -> None:
     """Open a URL in the system default browser.
@@ -920,8 +931,7 @@ class App(tk.Tk):
         card = ttk.Frame(self.games_inner, padding=8, relief="solid", borderwidth=1)
         card.configure(width=180)
 
-        # --- image canvas: fixed size so star position is always exact.
-        #     Canvas text has no widget background — star is transparent over art. ---
+        # --- image canvas (fixed size, centred in card) ---
         _CW, _CH = THUMB_SIZE[0], THUMB_SIZE[1]  # 140 × 140
         img_canvas = tk.Canvas(
             card, width=_CW, height=_CH,
@@ -930,18 +940,20 @@ class App(tk.Tk):
         img_canvas.pack(anchor="center")  # centred in card, not stretched
 
         _img_id = img_canvas.create_image(_CW // 2, _CH // 2, anchor="center")
-        _star_id = img_canvas.create_text(
-            _CW - 2, 2, anchor="ne",
+        self._set_card_image(img_canvas, _img_id, game)
+
+        # --- favorite star — placed at the top-right corner of the card frame
+        #     so its position is identical on every card regardless of image. ---
+        star_btn = tk.Button(
+            card,
             text="★" if is_fav else "☆",
             font=("Segoe UI", 13),
-            fill="#f5a623" if is_fav else "#aaa",
+            fg="#f5a623" if is_fav else "#aaa",
+            bg=C_BG, activebackground=C_BG,
+            relief="flat", bd=0, highlightthickness=0, cursor="hand2",
+            command=lambda g=game: self.on_toggle_favorite(g),
         )
-        img_canvas.tag_bind(_star_id, "<Button-1>",
-                            lambda e, g=game: self.on_toggle_favorite(g))
-        img_canvas.tag_bind(_star_id, "<Enter>", lambda e: img_canvas.configure(cursor="hand2"))
-        img_canvas.tag_bind(_star_id, "<Leave>", lambda e: img_canvas.configure(cursor=""))
-
-        self._set_card_image(img_canvas, _img_id, game)
+        star_btn.place(relx=1.0, rely=0.0, anchor="ne", x=-3, y=3)
 
         # --- name + year ---
         ttk.Label(
