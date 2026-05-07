@@ -1523,26 +1523,34 @@ class App(tk.Tk):
         )
         if not path:
             return
-        self.status(f"Reading {Path(path).name}...")
-        try:
-            games = bgg.import_collection_csv(Path(path))
-        except Exception as e:
-            messagebox.showerror("Import failed", f"Could not read CSV:\n{e}")
-            self.status("Import failed.")
-            return
-        if not games:
-            messagebox.showinfo("Nothing imported", "No games were found in that CSV.")
-            self.status("Nothing imported.")
-            return
+        csv_path = Path(path)
+        self.status(f"Reading {csv_path.name}…")
 
-        col_id = self._pick_import_collection(parent=self)
-        if col_id is None:
-            return  # user cancelled
-        self._save_games_to_db(games, col_id)
-        self._refresh_collection_ui()
-        self.refresh_games()
-        self.status(f"Imported {len(games)} games. Downloading thumbnails in the background...")
-        threading.Thread(target=self._download_thumbnails_bg, args=(games,), daemon=True).start()
+        def _bg():
+            try:
+                games = bgg.import_collection_csv(csv_path)
+            except Exception as e:
+                self.after(0, lambda: messagebox.showerror("Import failed", f"Could not read CSV:\n{e}"))
+                self._post_status("Import failed.")
+                return
+            if not games:
+                self.after(0, lambda: messagebox.showinfo("Nothing imported", "No games were found in that CSV."))
+                self._post_status("Nothing to import.")
+                return
+            self.after(0, lambda g=games: _finish(g))
+
+        def _finish(games):
+            col_id = self._pick_import_collection(parent=self)
+            if col_id is None:
+                self.status("Import cancelled.")
+                return
+            self._save_games_to_db(games, col_id)
+            self._refresh_collection_ui()
+            self.refresh_games()
+            self.status(f"Imported {len(games)} games. Downloading thumbnails in the background…")
+            threading.Thread(target=self._download_thumbnails_bg, args=(games,), daemon=True).start()
+
+        threading.Thread(target=_bg, daemon=True).start()
 
     def on_import_from_bgg(self) -> None:
         """Show a dialog asking for a BGG username + token, then import the collection."""
@@ -2669,6 +2677,8 @@ class App(tk.Tk):
         dlg.transient(parent or self)
         dlg.resizable(False, False)
         dlg.configure(bg=C_BG)
+        dlg.lift()
+        dlg.focus_force()
 
         ttk.Label(dlg, text="Add imported games to:", padding=(16, 14, 16, 4)).pack(anchor="w")
 
