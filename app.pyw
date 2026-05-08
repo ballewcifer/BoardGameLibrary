@@ -106,8 +106,8 @@ class App(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title("Board Game Library")
-        self.geometry("1100x720")
-        self.minsize(820, 520)
+        self.geometry("1280x720")
+        self.minsize(900, 520)
 
         db.init_db()
         IMAGES_DIR.mkdir(parents=True, exist_ok=True)
