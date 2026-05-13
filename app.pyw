@@ -329,6 +329,8 @@ class App(tk.Tk):
         file_menu.add_separator()
         file_menu.add_command(label="Download Images",        command=self.on_download_images)
         file_menu.add_separator()
+        file_menu.add_command(label="Settings…",             command=self.on_open_settings)
+        file_menu.add_separator()
         file_menu.add_command(label="Exit",                   command=self.destroy)
 
         # ── Library ───────────────────────────────────────────────────────────
@@ -463,19 +465,16 @@ class App(tk.Tk):
         self.members_tab = ttk.Frame(self.nb)
         self.history_tab = ttk.Frame(self.nb)
         self.plays_tab = ttk.Frame(self.nb)
-        self.settings_tab = ttk.Frame(self.nb)
 
         self.nb.add(self.games_tab, text="Games")
         self.nb.add(self.members_tab, text="Members")
         self.nb.add(self.history_tab, text="History")
         self.nb.add(self.plays_tab, text="Plays")
-        self.nb.add(self.settings_tab, text="Settings")
 
         self._build_games_tab()
         self._build_members_tab()
         self._build_history_tab()
         self._build_plays_tab()
-        self._build_settings_tab()
 
     def _build_status_bar(self) -> None:
         self.status_var = tk.StringVar(value="Ready.")
@@ -1015,8 +1014,10 @@ class App(tk.Tk):
 
         btn_row2 = ttk.Frame(card)
         btn_row2.pack(pady=(3, 0), fill="x")
+        ttk.Button(btn_row2, text="Edit",
+                   command=lambda g=game: self.on_edit_game(g)).pack(side="left", expand=True, fill="x")
         ttk.Button(btn_row2, text="Log Play",
-                   command=lambda g=game: self.on_log_play(g)).pack(side="left", expand=True, fill="x")
+                   command=lambda g=game: self.on_log_play(g)).pack(side="left", expand=True, fill="x", padx=(2, 0))
         ttk.Button(btn_row2, text="Delete",
                    command=lambda g=game: self.on_delete_game(g)).pack(side="left", expand=True, fill="x", padx=(2, 0))
 
@@ -1187,29 +1188,45 @@ class App(tk.Tk):
                 ),
             )
 
-    # ---------- settings tab ----------
+    # ---------- settings dialog ----------
 
-    def _build_settings_tab(self) -> None:
-        frame = ttk.Frame(self.settings_tab, padding=12)
+    def on_open_settings(self) -> None:
+        """Open the Settings dialog from File → Settings…"""
+        win = tk.Toplevel(self)
+        win.title("Settings")
+        win.transient(self)
+        win.resizable(False, False)
+        win.configure(bg=C_BG)
+        win.lift()
+        win.focus_force()
+
+        frame = ttk.Frame(win, padding=20)
         frame.pack(fill="both", expand=True)
 
         ttk.Label(frame, text="BGG username:").grid(row=0, column=0, sticky="w", pady=4)
-        self.username_var = tk.StringVar(value=self.settings.get("bgg_username", ""))
-        ttk.Entry(frame, textvariable=self.username_var, width=30).grid(row=0, column=1, sticky="w")
+        username_var = tk.StringVar(value=self.settings.get("bgg_username", ""))
+        self.username_var = username_var          # keep ref for import dialog
+        ttk.Entry(frame, textvariable=username_var, width=32).grid(row=0, column=1, sticky="w", padx=(8, 0))
         ttk.Label(
             frame,
-            text="Used by File → Import from BGG… to know whose collection to fetch.",
-        ).grid(row=1, column=1, sticky="w", pady=(0, 8))
+            text="Used by File → Import from BGG…",
+            foreground="#888",
+        ).grid(row=1, column=1, sticky="w", padx=(8, 0), pady=(0, 12))
 
-        ttk.Button(frame, text="Save", command=self.on_save_settings).grid(row=2, column=0, sticky="w", pady=(4, 0))
+        def save() -> None:
+            self.settings["bgg_username"] = username_var.get().strip()
+            config.save(self.settings)
+            self.status("Settings saved.")
+            win.destroy()
 
         # ── danger zone ───────────────────────────────────────────────────────
-        tk.Frame(frame, bg=C_PALE, height=1).grid(row=3, column=0, columnspan=2, sticky="ew", pady=(24, 0))
+        tk.Frame(frame, bg=C_PALE, height=1).grid(
+            row=2, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         tk.Label(
             frame, text="Danger zone",
             bg=C_BG, fg="#b71c1c",
             font=("Segoe UI", 9, "bold"),
-        ).grid(row=4, column=0, sticky="w", pady=(8, 4))
+        ).grid(row=3, column=0, sticky="w", pady=(8, 4))
 
         tk.Button(
             frame, text="Clear collection…",
@@ -1218,18 +1235,22 @@ class App(tk.Tk):
             relief="flat", font=("Segoe UI", 9, "bold"),
             padx=12, pady=4, cursor="hand2",
             command=self.on_clear_collection,
-        ).grid(row=5, column=0, sticky="w")
+        ).grid(row=4, column=0, sticky="w")
         tk.Label(
             frame,
-            text="Removes all games, images, play logs, and loan history.\nMembers and settings are kept.",
+            text="Removes all games, images, play logs,\nand loan history. Members are kept.",
             bg=C_BG, fg="#888",
             font=("Segoe UI", 8), justify="left",
-        ).grid(row=5, column=1, sticky="w", padx=(12, 0))
+        ).grid(row=4, column=1, sticky="w", padx=(12, 0))
 
-    def on_save_settings(self) -> None:
-        self.settings["bgg_username"] = self.username_var.get().strip()
-        config.save(self.settings)
-        self.status("Settings saved.")
+        # ── buttons ───────────────────────────────────────────────────────────
+        btn_row = ttk.Frame(frame)
+        btn_row.grid(row=5, column=0, columnspan=2, sticky="e", pady=(20, 0))
+        ttk.Button(btn_row, text="Cancel", command=win.destroy).pack(side="left", padx=(0, 6))
+        ttk.Button(btn_row, text="Save", command=save).pack(side="left")
+
+        frame.columnconfigure(1, weight=1)
+        win.grab_set()
 
     def on_clear_collection(self) -> None:
         if not messagebox.askyesno(
@@ -1417,7 +1438,8 @@ class App(tk.Tk):
                 return
             self.settings["bgg_username"] = uname
             config.save(self.settings)
-            self.username_var.set(uname)
+            if hasattr(self, "username_var"):
+                self.username_var.set(uname)
             dialog.destroy()
             self.status(f"Importing collection for {uname}…")
             threading.Thread(
