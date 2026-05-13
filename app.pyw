@@ -464,15 +464,6 @@ class App(tk.Tk):
         status_cb.pack(side="left", padx=(4, 12))
         status_cb.bind("<<ComboboxSelected>>", lambda *_: self.refresh_games())
 
-        flabel("Type:").pack(side="left")
-        self.game_type_var = tk.StringVar(value="All")
-        type_cb = ttk.Combobox(
-            fbar, textvariable=self.game_type_var, width=12, state="readonly",
-            values=["All", "Games only", "Expansions only"],
-        )
-        type_cb.pack(side="left", padx=(4, 12))
-        type_cb.bind("<<ComboboxSelected>>", lambda *_: self.refresh_games())
-
         self.favorites_var = tk.BooleanVar(value=False)
         fcheck("Favorites only", self.favorites_var, self.refresh_games).pack(side="left", padx=(0, 12))
 
@@ -629,7 +620,6 @@ class App(tk.Tk):
         self.time_var.set("Any")
         self.weight_var.set("Any")
         self.status_filter_var.set("Any")
-        self.game_type_var.set("All")
         self.favorites_var.set(False)
         self.search_var.set("")
 
@@ -741,13 +731,6 @@ class App(tk.Tk):
             if status_val == "Checked out" and g["bgg_id"] not in open_loans:
                 continue
 
-            # --- type filter (game vs expansion) ---
-            type_val = self.game_type_var.get()
-            if type_val == "Games only" and g["is_expansion"]:
-                continue
-            if type_val == "Expansions only" and not g["is_expansion"]:
-                continue
-
             # --- favorites filter ---
             if self.favorites_var.get() and not g["is_favorite"]:
                 continue
@@ -790,7 +773,6 @@ class App(tk.Tk):
             any(v != "Any" for v in [self.players_var.get(), self.best_at_var.get(),
                                       self.time_var.get(), self.weight_var.get(),
                                       self.status_filter_var.get()])
-            or self.game_type_var.get() != "All"
             or self.exact_players_var.get()
             or self.favorites_var.get()
             or bool(self.search_var.get())
@@ -1742,23 +1724,13 @@ class App(tk.Tk):
                                                f"Could not fetch game data:\n{err}")])
                     return
             else:
-                # No token — use the public /thing endpoint (no auth needed),
-                # fall back to page-scrape for image+best_players, then bare stub.
-                details = bgg.fetch_thing_public(bgg_id)
-                # Preserve the name the user searched for if the API returns empty
-                if details and not details.name:
-                    details.name = name
+                # No token — scrape the full public BGG game page.
+                # GEEK.geekitemPreload embedded JSON has all the same data as
+                # the XML API: year, players, playtime, weight, description,
+                # categories, mechanics, designers, publishers, best-players.
+                details = bgg.fetch_game_details_from_page(bgg_id, fallback_name=name)
                 if not details:
-                    try:
-                        page = bgg.get_bgg_page_data(bgg_id)
-                        details = bgg.GameDetails(
-                            bgg_id=bgg_id,
-                            name=name,
-                            image_url=page.image_url,
-                            best_players=page.best_players,
-                        )
-                    except Exception:
-                        details = bgg.GameDetails(bgg_id=bgg_id, name=name)
+                    details = bgg.GameDetails(bgg_id=bgg_id, name=name)
             self.after(0, lambda d=details: [wait.destroy(),
                                              self._open_game_edit_dialog(d, is_new=is_new)])
 

@@ -629,21 +629,142 @@ def get_image_url_from_api(bgg_id: int) -> Optional[str]:
     return None
 
 
-def fetch_thing_public(bgg_id: int) -> Optional[GameDetails]:
-    """Fetch full game details via the public BGG XML API without a token.
+def fetch_game_details_from_page(bgg_id: int, *, fallback_name: str = "") -> Optional[GameDetails]:
+    """Scrape full game details from a BGG game page without any API token.
 
-    The /xmlapi2/thing endpoint is publicly accessible — no Bearer token
-    required.  Returns None on any error so callers can fall back gracefully.
+    BGG embeds all game data as a JSON blob (GEEK.geekitemPreload) in every
+    public game page.  This single request returns name, year, player counts,
+    playtime, weight, description, categories, mechanics, designers, publishers,
+    best-players, and an image URL — everything the XML API provides.
+    Returns None on any error so callers can fall back gracefully.
     """
-    url = f"{BASE}/thing?id={bgg_id}"
+    import json as _json
+    import html as _html
+
+    page_url = f"https://boardgamegeek.com/boardgame/{bgg_id}"
     try:
-        root = _fetch_xml(url)          # no token=
-        item = root.find("item")
-        if item is None:
+        req = urllib.request.Request(page_url, headers={
+            "User-Agent":      BROWSER_UA,
+            "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+        })
+        with urllib.request.urlopen(req, timeout=20, context=_ssl_ctx()) as resp:
+            html_text = resp.read(500_000).decode("utf-8", errors="ignore")
+    except Exception:
+        return None
+
+    # Extract the embedded JSON blob via brace-counting
+    m = re.search(r"GEEK\.geekitemPreload\s*=\s*(\{)", html_text)
+    if not m:
+        return None
+    try:
+        start = m.start(1)
+        depth = 0
+        raw_json = ""
+        for i, ch in enumerate(html_text[start:], start):
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    raw_json = html_text[start: i + 1]
+                    break
+        if not raw_json:
             return None
-        details = _parse_thing(item)
-        # If name came back empty (shouldn't happen) keep it non-empty
-        return details if details.name else None
+        preload = _json.loads(raw_json)
+        item = preload.get("item", preload)
+
+        # ── basic fields ──────────────────────────────────────────────────────
+        g_name = item.get("name") or fallback_name or f"#{bgg_id}"
+        g_year = item.get("yearpublished")
+        g_min_players  = item.get("minplayers")
+        g_max_players  = item.get("maxplayers")
+        g_min_playtime = item.get("minplaytime")
+        g_max_playtime = item.get("maxplaytime")
+        g_playing_time = item.get("playingtime")
+        g_min_age      = item.get("minage")
+
+        # Description: strip HTML tags and unescape HTML entities
+        raw_desc = item.get("description") or ""
+        raw_desc = re.sub(r"<[^>]+>", "", raw_desc).strip()
+        g_description = _html.unescape(raw_desc) or None
+
+        # Expansion flag
+        is_expansion = item.get("type", "boardgame") == "boardgameexpansion"
+
+        # ── stats ─────────────────────────────────────────────────────────────
+        stats = item.get("stats") or {}
+        g_avg_rating = stats.get("average")
+        g_weight     = stats.get("averageweight")
+
+        # ── links (categories / mechanics / designers / publishers) ───────────
+        links = item.get("links") or {}
+        def _names(key):
+            return [x.get("name", "") for x in links.get(key, []) if x.get("name")]
+        g_categories = _names("boardgamecategory")
+        g_mechanics  = _names("boardgamemechanic")
+        g_designers  = _names("boardgamedesigner")
+        g_publishers = _names("boardgamepublisher")
+
+        # ── best-players from poll ────────────────────────────────────────────
+        best_list = (item.get("polls") or {}).get("userplayers", {}).get("best", [])
+        parts: list[str] = []
+        for entry in best_list:
+            lo, hi = entry.get("min"), entry.get("max")
+            if lo is None:
+                continue
+            parts.append(str(lo) if (hi is None or hi == lo) else f"{lo}-{hi}")
+        g_best_players = ", ".join(parts) or None
+
+        # ── image URL ─────────────────────────────────────────────────────────
+        images = item.get("images") or {}
+        g_image_url: Optional[str] = None
+        for key in ("square200", "previewthumb", "thumb", "medium", "large"):
+            raw = images.get(key)
+            if raw:
+                g_image_url = raw if raw.startswith("http") else "https:" + raw
+                break
+        if not g_image_url:
+            m2 = re.search(
+                r"https://cf\.geekdo-images\.com/[^\s\"'<>]+__itemrep[^\s\"'<>]+",
+                html_text,
+            )
+            if m2:
+                g_image_url = m2.group(0)
+
+        def _int(v):
+            try:
+                return int(v) if v is not None else None
+            except (TypeError, ValueError):
+                return None
+
+        def _float(v):
+            try:
+                return float(v) if v is not None else None
+            except (TypeError, ValueError):
+                return None
+
+        return GameDetails(
+            bgg_id=bgg_id,
+            name=g_name,
+            year=_int(g_year),
+            min_players=_int(g_min_players),
+            max_players=_int(g_max_players),
+            min_playtime=_int(g_min_playtime),
+            max_playtime=_int(g_max_playtime),
+            playing_time=_int(g_playing_time),
+            min_age=_int(g_min_age),
+            description=g_description,
+            avg_rating=_float(g_avg_rating),
+            weight=_float(g_weight),
+            categories=g_categories,
+            mechanics=g_mechanics,
+            designers=g_designers,
+            publishers=g_publishers,
+            best_players=g_best_players,
+            image_url=g_image_url,
+            is_expansion=is_expansion,
+        )
     except Exception:
         return None
 
