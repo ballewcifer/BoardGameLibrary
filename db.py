@@ -36,7 +36,8 @@ CREATE TABLE IF NOT EXISTS games (
     own             INTEGER DEFAULT 1,
     last_synced     TEXT,
     is_favorite     INTEGER DEFAULT 0,
-    has_insert      INTEGER DEFAULT 0
+    has_insert      INTEGER DEFAULT 0,
+    is_expansion    INTEGER DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS users (
@@ -73,8 +74,9 @@ CREATE INDEX IF NOT EXISTS idx_plays_game ON plays(game_id);
 # Columns added after the initial release — applied via ALTER TABLE so
 # existing databases are updated without losing data.
 MIGRATIONS = [
-    "ALTER TABLE games ADD COLUMN is_favorite INTEGER DEFAULT 0",
-    "ALTER TABLE games ADD COLUMN has_insert   INTEGER DEFAULT 0",
+    "ALTER TABLE games ADD COLUMN is_favorite    INTEGER DEFAULT 0",
+    "ALTER TABLE games ADD COLUMN has_insert     INTEGER DEFAULT 0",
+    "ALTER TABLE games ADD COLUMN is_expansion   INTEGER DEFAULT 0",
 ]
 
 
@@ -113,7 +115,7 @@ def upsert_game(c: sqlite3.Connection, g: dict) -> None:
         "min_players", "max_players", "min_playtime", "max_playtime",
         "playing_time", "min_age", "weight", "avg_rating", "my_rating",
         "description", "categories", "mechanics", "designers", "publishers",
-        "best_players", "my_comment", "own", "last_synced",
+        "best_players", "my_comment", "own", "last_synced", "is_expansion",
     ]
     placeholders = ", ".join(["?"] * len(cols))
     # Don't overwrite is_favorite / has_insert on re-sync.
@@ -148,6 +150,11 @@ def list_games(c: sqlite3.Connection, search: str = "") -> list[sqlite3.Row]:
 
 def get_game(c: sqlite3.Connection, bgg_id: int) -> Optional[sqlite3.Row]:
     return c.execute("SELECT * FROM games WHERE bgg_id = ?", (bgg_id,)).fetchone()
+
+
+def delete_game(c: sqlite3.Connection, bgg_id: int) -> None:
+    """Remove a game and all its related loans/plays (CASCADE handles FK rows)."""
+    c.execute("DELETE FROM games WHERE bgg_id = ?", (bgg_id,))
 
 
 # ---------- users ----------

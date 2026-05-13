@@ -464,6 +464,15 @@ class App(tk.Tk):
         status_cb.pack(side="left", padx=(4, 12))
         status_cb.bind("<<ComboboxSelected>>", lambda *_: self.refresh_games())
 
+        flabel("Type:").pack(side="left")
+        self.game_type_var = tk.StringVar(value="All")
+        type_cb = ttk.Combobox(
+            fbar, textvariable=self.game_type_var, width=12, state="readonly",
+            values=["All", "Games only", "Expansions only"],
+        )
+        type_cb.pack(side="left", padx=(4, 12))
+        type_cb.bind("<<ComboboxSelected>>", lambda *_: self.refresh_games())
+
         self.favorites_var = tk.BooleanVar(value=False)
         fcheck("Favorites only", self.favorites_var, self.refresh_games).pack(side="left", padx=(0, 12))
 
@@ -620,6 +629,7 @@ class App(tk.Tk):
         self.time_var.set("Any")
         self.weight_var.set("Any")
         self.status_filter_var.set("Any")
+        self.game_type_var.set("All")
         self.favorites_var.set(False)
         self.search_var.set("")
 
@@ -731,6 +741,13 @@ class App(tk.Tk):
             if status_val == "Checked out" and g["bgg_id"] not in open_loans:
                 continue
 
+            # --- type filter (game vs expansion) ---
+            type_val = self.game_type_var.get()
+            if type_val == "Games only" and g["is_expansion"]:
+                continue
+            if type_val == "Expansions only" and not g["is_expansion"]:
+                continue
+
             # --- favorites filter ---
             if self.favorites_var.get() and not g["is_favorite"]:
                 continue
@@ -773,6 +790,7 @@ class App(tk.Tk):
             any(v != "Any" for v in [self.players_var.get(), self.best_at_var.get(),
                                       self.time_var.get(), self.weight_var.get(),
                                       self.status_filter_var.get()])
+            or self.game_type_var.get() != "All"
             or self.exact_players_var.get()
             or self.favorites_var.get()
             or bool(self.search_var.get())
@@ -921,6 +939,8 @@ class App(tk.Tk):
 
         fav_lbl = "Remove from Favorites" if game["is_favorite"] else "Add to Favorites"
         menu.add_command(label=fav_lbl,        command=lambda: self.on_toggle_favorite(game))
+        menu.add_separator()
+        menu.add_command(label="Delete Game…", command=lambda: self.on_delete_game(game))
         menu.tk_popup(event.x_root, event.y_root)
 
     def _build_card(self, game, loan, play_counts: dict) -> ttk.Frame:
@@ -1033,7 +1053,9 @@ class App(tk.Tk):
         btn_row2 = ttk.Frame(card)
         btn_row2.pack(pady=(3, 0), fill="x")
         ttk.Button(btn_row2, text="Log Play",
-                   command=lambda g=game: self.on_log_play(g)).pack(fill="x")
+                   command=lambda g=game: self.on_log_play(g)).pack(side="left", expand=True, fill="x")
+        ttk.Button(btn_row2, text="Delete",
+                   command=lambda g=game: self.on_delete_game(g)).pack(side="left", expand=True, fill="x", padx=(2, 0))
 
         return card
 
@@ -1720,15 +1742,12 @@ class App(tk.Tk):
                                                f"Could not fetch game data:\n{err}")])
                     return
             else:
-                # No token — try the public XML API first (no auth required for
-                # the /thing endpoint in most regions), then fall back to a
-                # lightweight page-scrape for at least image URL + best_players,
-                # and finally fall back to a bare stub the user can complete.
-                try:
-                    details_list = bgg.fetch_things([bgg_id], token=None)
-                    details = details_list[0] if details_list else None
-                except Exception:
-                    details = None
+                # No token — use the public /thing endpoint (no auth needed),
+                # fall back to page-scrape for image+best_players, then bare stub.
+                details = bgg.fetch_thing_public(bgg_id)
+                # Preserve the name the user searched for if the API returns empty
+                if details and not details.name:
+                    details.name = name
                 if not details:
                     try:
                         page = bgg.get_bgg_page_data(bgg_id)
@@ -2031,6 +2050,7 @@ class App(tk.Tk):
                     "my_comment": g.my_comment,
                     "own": 1,
                     "last_synced": db.now_iso(),
+                    "is_expansion": int(g.is_expansion),
                 }
                 # Don't clobber image_path on a re-sync.
                 existing = db.get_game(c, g.bgg_id)
@@ -2123,6 +2143,23 @@ class App(tk.Tk):
         self.refresh_members()
         self.refresh_history()
         self.status(f"Checked in \"{game['name']}\".")
+
+    # ---------- delete game ----------
+
+    def on_delete_game(self, game) -> None:
+        name = game["name"]
+        if not messagebox.askyesno(
+            "Delete Game",
+            f'Remove "{name}" from your library?\n\n'
+            "This will also delete all check-out history and play logs for this game.",
+            icon="warning",
+        ):
+            return
+        with db.connect() as c:
+            db.delete_game(c, game["bgg_id"])
+        self.refresh_games()
+        self.refresh_history()
+        self.status(f'Deleted "{name}".')
 
     # ---------- favorite / insert toggles ----------
 

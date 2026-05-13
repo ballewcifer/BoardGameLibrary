@@ -97,6 +97,7 @@ class GameDetails:
     best_players: Optional[str] = None
     my_rating: Optional[float] = None
     my_comment: Optional[str] = None
+    is_expansion: bool = False
 
 
 def _http_get(url: str, timeout: int = 30, token: Optional[str] = None) -> tuple[int, bytes]:
@@ -278,6 +279,7 @@ def import_from_username(
 
 def _parse_thing(item: ET.Element) -> GameDetails:
     bgg_id = int(item.get("id", "0"))
+    is_expansion = item.get("type", "") == "boardgameexpansion"
     name = ""
     for n in item.findall("name"):
         if n.get("type") == "primary":
@@ -341,6 +343,7 @@ def _parse_thing(item: ET.Element) -> GameDetails:
         designers=designers,
         publishers=publishers,
         best_players=best_players,
+        is_expansion=is_expansion,
     )
 
 
@@ -624,6 +627,25 @@ def get_image_url_from_api(bgg_id: int) -> Optional[str]:
     except Exception:
         pass
     return None
+
+
+def fetch_thing_public(bgg_id: int) -> Optional[GameDetails]:
+    """Fetch full game details via the public BGG XML API without a token.
+
+    The /xmlapi2/thing endpoint is publicly accessible — no Bearer token
+    required.  Returns None on any error so callers can fall back gracefully.
+    """
+    url = f"{BASE}/thing?id={bgg_id}"
+    try:
+        root = _fetch_xml(url)          # no token=
+        item = root.find("item")
+        if item is None:
+            return None
+        details = _parse_thing(item)
+        # If name came back empty (shouldn't happen) keep it non-empty
+        return details if details.name else None
+    except Exception:
+        return None
 
 
 # Keep old name as a thin alias so existing call-sites still work.
