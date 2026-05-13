@@ -114,6 +114,7 @@ class App(tk.Tk):
         self.settings = config.load()
         self._image_cache: dict[str, ImageTk.PhotoImage] = {}
         self._placeholder_img: Optional[ImageTk.PhotoImage] = None
+        self._search_after_id: Optional[str] = None
         self._view_mode: str = self.settings.get("view_mode", "cards")
         self._sort_col: Optional[str] = None
         self._sort_rev: bool = False
@@ -363,7 +364,11 @@ class App(tk.Tk):
         # ── search ────────────────────────────────────────────────────────────
         ttk.Label(bar, text="Search:").pack(side="left")
         self.search_var = tk.StringVar()
-        self.search_var.trace_add("write", lambda *_: self.refresh_games())
+        def _on_search_changed(*_):
+            if self._search_after_id:
+                self.after_cancel(self._search_after_id)
+            self._search_after_id = self.after(250, self.refresh_games)
+        self.search_var.trace_add("write", _on_search_changed)
         entry = ttk.Entry(bar, textvariable=self.search_var, width=30)
         entry.pack(side="left", padx=(4, 0))
         ttk.Button(bar, text="Clear", command=lambda: self.search_var.set("")).pack(side="left", padx=(4, 0))
@@ -758,7 +763,13 @@ class App(tk.Tk):
             or bool(self.search_var.get())
         )
 
+    _CARD_CAP = 100   # max cards rendered at once; table view has no limit
+
     def _refresh_card_view(self, games, open_loans, play_counts) -> None:
+        # Hide the canvas window during the destroy+create loop so the
+        # geometry manager doesn't recalculate layout on every widget change.
+        self.games_canvas.itemconfigure(self.games_window_id, state="hidden")
+
         for card in self._cards:
             card.destroy()
         self._cards.clear()
@@ -767,16 +778,37 @@ class App(tk.Tk):
             msg = (
                 "No games match your filters."
                 if self._filters_active()
-                else 'No games yet. Use "Import from BGG..." or "Import collection CSV..." to get started.'
+                else 'No games yet. Use File → Import from BGG… or Import collection CSV… to get started.'
             )
             empty = ttk.Label(self.games_inner, text=msg, padding=20)
             empty.grid(row=0, column=0)
             self._cards.append(empty)
+            self.games_canvas.itemconfigure(self.games_window_id, state="normal")
             return
 
-        for game in games:
+        total_matched = len(games)
+        capped = total_matched > self._CARD_CAP
+        visible = games[:self._CARD_CAP]
+
+        for game in visible:
             self._cards.append(self._build_card(game, open_loans.get(game["bgg_id"]), play_counts))
+
+        if capped:
+            note = ttk.Label(
+                self.games_inner,
+                text=(
+                    f"Showing {self._CARD_CAP} of {total_matched} games.\n"
+                    "Switch to Table view (top-right) or use filters to see all."
+                ),
+                padding=(12, 8),
+                foreground="#555",
+                font=("Segoe UI", 9),
+                justify="center",
+            )
+            self._cards.append(note)
+
         self._layout_cards(self.games_canvas.winfo_width())
+        self.games_canvas.itemconfigure(self.games_window_id, state="normal")
 
     def _refresh_table_view(self, games, open_loans, play_counts) -> None:
         self.games_tree.delete(*self.games_tree.get_children())
