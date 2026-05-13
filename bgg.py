@@ -35,7 +35,7 @@ THING_BATCH = 20
 # ── Built-in application token ────────────────────────────────────────────────
 # Register at https://boardgamegeek.com/applications to get a Bearer token,
 # then paste it here.  This single token works for all users of the app.
-BGG_APP_TOKEN: str = ""
+BGG_APP_TOKEN: str = "3761c334-250c-41c9-bfbd-e67414e0d735"
 
 
 def _ssl_ctx() -> ssl.SSLContext:

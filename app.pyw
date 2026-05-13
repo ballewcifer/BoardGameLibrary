@@ -1645,10 +1645,7 @@ class App(tk.Tk):
                                                f"Could not fetch game data:\n{err}")])
                     return
             else:
-                # No token — scrape the full public BGG game page.
-                # GEEK.geekitemPreload embedded JSON has all the same data as
-                # the XML API: year, players, playtime, weight, description,
-                # categories, mechanics, designers, publishers, best-players.
+                # No built-in token — fall back to page scrape for public data.
                 details = bgg.fetch_game_details_from_page(bgg_id, fallback_name=name)
                 if not details:
                     details = bgg.GameDetails(bgg_id=bgg_id, name=name)
