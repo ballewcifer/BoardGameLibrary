@@ -19,7 +19,7 @@ from PIL import Image, ImageTk
 import bgg
 import config
 import db
-from paths import IMAGES_DIR
+from paths import DATA_DIR, DB_PATH, CONFIG_PATH, IMAGES_DIR
 from version import __version__ as APP_VERSION
 
 THUMB_SIZE = (140, 140)
@@ -329,6 +329,9 @@ class App(tk.Tk):
         file_menu.add_command(label="Import collection CSV…", command=self.on_import_csv)
         file_menu.add_separator()
         file_menu.add_command(label="Download Images",        command=self.on_download_images)
+        file_menu.add_separator()
+        file_menu.add_command(label="Export Library…",        command=self.on_export_data)
+        file_menu.add_command(label="Import Library…",        command=self.on_import_data)
         file_menu.add_separator()
         file_menu.add_command(label="Settings…",             command=self.on_open_settings)
         file_menu.add_separator()
@@ -2512,6 +2515,145 @@ class App(tk.Tk):
         ttk.Button(btn_frame, text="Set Image", command=confirm).pack(side="right")
         dialog.bind("<Return>", lambda *_: confirm())
         dialog.grab_set()
+
+    # ---------- export / import library ----------
+
+    def on_export_data(self) -> None:
+        """Export the entire library (database + images + settings) to a ZIP file."""
+        import zipfile as _zf
+
+        default_name = f"BoardGameLibrary-{datetime.now():%Y%m%d-%H%M%S}.zip"
+        dest_path = filedialog.asksaveasfilename(
+            title="Export Board Game Library",
+            defaultextension=".zip",
+            filetypes=[("ZIP archive", "*.zip")],
+            initialfile=default_name,
+        )
+        if not dest_path:
+            return
+
+        def _bg():
+            try:
+                imgs = list(IMAGES_DIR.iterdir()) if IMAGES_DIR.exists() else []
+                total = len(imgs)
+                with _zf.ZipFile(dest_path, "w", _zf.ZIP_DEFLATED) as zf:
+                    # Sentinel so we can validate on import
+                    zf.writestr("boardgamelibrary.marker", "Board Game Library Backup v1")
+                    if DB_PATH.exists():
+                        zf.write(DB_PATH, "library.db")
+                    if CONFIG_PATH.exists():
+                        zf.write(CONFIG_PATH, "settings.json")
+                    for i, img in enumerate(imgs):
+                        if img.is_file():
+                            self._post_status(f"Exporting image {i + 1}/{total}…")
+                            zf.write(img, f"images/{img.name}")
+
+                p = dest_path
+                self.after(0, lambda: [
+                    self.status(f"Exported to {Path(p).name}."),
+                    messagebox.showinfo(
+                        "Export complete",
+                        f"Library exported successfully:\n{p}",
+                    ),
+                ])
+            except Exception as exc:
+                e = str(exc)
+                self.after(0, lambda: [
+                    messagebox.showerror("Export failed", f"Could not export library:\n{e}"),
+                    self.status("Export failed."),
+                ])
+
+        self.status("Exporting library…")
+        threading.Thread(target=_bg, daemon=True).start()
+
+    def on_import_data(self) -> None:
+        """Import a library ZIP created by Export Library…, replacing all local data."""
+        import zipfile as _zf
+
+        src_path = filedialog.askopenfilename(
+            title="Import Board Game Library",
+            filetypes=[("ZIP archive", "*.zip"), ("All files", "*.*")],
+        )
+        if not src_path:
+            return
+
+        # Validate the ZIP before asking for confirmation
+        try:
+            with _zf.ZipFile(src_path, "r") as zf:
+                if "boardgamelibrary.marker" not in zf.namelist():
+                    messagebox.showerror(
+                        "Invalid file",
+                        "This doesn't appear to be a Board Game Library backup.\n"
+                        "Use File → Export Library… to create one.",
+                    )
+                    return
+        except Exception as exc:
+            messagebox.showerror("Invalid file", f"Could not open the file:\n{exc}")
+            return
+
+        if not messagebox.askyesno(
+            "Import Library",
+            "This will REPLACE all current data:\n\n"
+            "  • Games, members, loans and play history\n"
+            "  • Downloaded images\n"
+            "  • Settings (username)\n\n"
+            "This cannot be undone. Continue?",
+            icon="warning",
+        ):
+            return
+
+        def _bg():
+            try:
+                with _zf.ZipFile(src_path, "r") as zf:
+                    entries = [n for n in zf.namelist() if n != "boardgamelibrary.marker"]
+                    total = len(entries)
+                    for i, name in enumerate(entries):
+                        self._post_status(f"Importing {i + 1}/{total}: {Path(name).name}…")
+                        dest = DATA_DIR / name
+                        dest.parent.mkdir(parents=True, exist_ok=True)
+                        dest.write_bytes(zf.read(name))
+
+                # Remap absolute image_path values to this machine's IMAGES_DIR.
+                # The source machine may have a different APPDATA / home directory.
+                with db.connect() as c:
+                    rows = c.execute(
+                        "SELECT bgg_id, image_path FROM games WHERE image_path IS NOT NULL"
+                    ).fetchall()
+                    for row in rows:
+                        local = IMAGES_DIR / Path(row["image_path"]).name
+                        if local.exists():
+                            c.execute(
+                                "UPDATE games SET image_path = ? WHERE bgg_id = ?",
+                                (str(local), row["bgg_id"]),
+                            )
+                        else:
+                            c.execute(
+                                "UPDATE games SET image_path = NULL WHERE bgg_id = ?",
+                                (row["bgg_id"],),
+                            )
+
+                def _finish():
+                    self._image_cache.clear()
+                    self._placeholder_img = None
+                    self.settings = config.load()
+                    db.init_db()          # apply any pending migrations
+                    self.refresh_all()
+                    self.status("Library imported successfully.")
+                    messagebox.showinfo(
+                        "Import complete",
+                        "Library imported successfully — all data has been refreshed.",
+                    )
+
+                self.after(0, _finish)
+            except Exception as exc:
+                e = str(exc)
+                self.after(0, lambda: [
+                    messagebox.showerror("Import failed", f"Could not import library:\n{e}"),
+                    self.status("Import failed."),
+                ])
+
+        self.status("Importing library…")
+        threading.Thread(target=_bg, daemon=True).start()
 
     # ---------- refresh ----------
 
