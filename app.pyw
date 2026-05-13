@@ -529,27 +529,47 @@ class App(tk.Tk):
         self.games_tree = ttk.Treeview(parent, columns=cols, show="headings", selectmode="browse")
 
         col_defs = [
-            ("fav",     "★",           34,  "center", False),
-            ("insert",  "\U0001f5f3",  34,  "center", False),
-            ("name",    "Name",        260, "w",      True),
-            ("year",    "Year",         54, "center", False),
-            ("players", "Players",      72, "center", False),
-            ("time",    "Time",         84, "center", False),
-            ("weight",  "Complexity",   84, "center", False),
-            ("rating",  "BGG ★",        62, "center", False),
-            ("best",    "Best At",      72, "center", False),
-            ("status",  "Status",      140, "center", False),
-            ("plays",   "Plays",        50, "center", False),
+            ("fav",     "★",           34,  "center"),
+            ("insert",  "\U0001f5f3",  34,  "center"),
+            ("name",    "Name",        260, "w"     ),
+            ("year",    "Year",         54, "center"),
+            ("players", "Players",      72, "center"),
+            ("time",    "Time",         84, "center"),
+            ("weight",  "Complexity",   84, "center"),
+            ("rating",  "BGG ★",        62, "center"),
+            ("best",    "Best At",      72, "center"),
+            ("status",  "Status",      140, "center"),
+            ("plays",   "Plays",        50, "center"),
         ]
-        for cid, heading, width, anchor, stretch in col_defs:
+        # All columns use stretch=False so Tkinter never overrides a manual
+        # column resize.  We auto-size the name column ourselves below.
+        self._fixed_col_ids = [c for c, *_ in col_defs if c != "name"]
+        for cid, heading, width, anchor in col_defs:
             self.games_tree.heading(cid, text=heading,
                                     command=lambda c=cid: self._sort_table(c))
-            self.games_tree.column(cid, width=width, anchor=anchor, stretch=stretch)
+            self.games_tree.column(cid, width=width, anchor=anchor, stretch=False,
+                                   minwidth=30 if cid != "name" else 80)
 
         vsb = ttk.Scrollbar(parent, orient="vertical", command=self.games_tree.yview)
         self.games_tree.configure(yscrollcommand=vsb.set)
         self.games_tree.pack(side="left", fill="both", expand=True)
         vsb.pack(side="right", fill="y")
+
+        # Auto-resize the name column when the *window* width changes.
+        # We skip Configure events that come from column drags (those don't
+        # change the Treeview's overall width) by checking event.width.
+        self._tree_last_width: int = 0
+
+        def _on_tree_configure(event: tk.Event) -> None:
+            w = event.width
+            if w == self._tree_last_width:
+                return           # column drag or unrelated event — leave it alone
+            self._tree_last_width = w
+            fixed = sum(self.games_tree.column(c, "width") for c in self._fixed_col_ids)
+            name_w = max(80, w - fixed - 4)   # 4 = border fudge
+            self.games_tree.column("name", width=name_w)
+
+        self.games_tree.bind("<Configure>", _on_tree_configure)
 
         self.games_tree.bind("<Double-1>",  self._on_table_double_click)
         self.games_tree.bind("<Return>",    self._on_table_return)
