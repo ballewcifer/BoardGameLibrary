@@ -1720,8 +1720,26 @@ class App(tk.Tk):
                                                f"Could not fetch game data:\n{err}")])
                     return
             else:
-                # No token — open a minimal stub the user can fill in by hand
-                details = bgg.GameDetails(bgg_id=bgg_id, name=name)
+                # No token — try the public XML API first (no auth required for
+                # the /thing endpoint in most regions), then fall back to a
+                # lightweight page-scrape for at least image URL + best_players,
+                # and finally fall back to a bare stub the user can complete.
+                try:
+                    details_list = bgg.fetch_things([bgg_id], token=None)
+                    details = details_list[0] if details_list else None
+                except Exception:
+                    details = None
+                if not details:
+                    try:
+                        page = bgg.get_bgg_page_data(bgg_id)
+                        details = bgg.GameDetails(
+                            bgg_id=bgg_id,
+                            name=name,
+                            image_url=page.image_url,
+                            best_players=page.best_players,
+                        )
+                    except Exception:
+                        details = bgg.GameDetails(bgg_id=bgg_id, name=name)
             self.after(0, lambda d=details: [wait.destroy(),
                                              self._open_game_edit_dialog(d, is_new=is_new)])
 
