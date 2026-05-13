@@ -2,15 +2,10 @@
 
 Two ways to populate the library:
 
-1. CSV import (works without an API token).
-   On BGG: open your collection page → "Export collection" → CSV.
-   Pass the file path to `import_collection_csv`.
+1. Import from BGG (File → Import from BGG…) — uses the built-in app token.
+2. CSV import (File → Import collection CSV…) — no token needed.
 
-2. XMLAPI2 (requires a registered-application Bearer token as of late 2025).
-   Register at https://boardgamegeek.com/applications, then call
-   `fetch_collection` / `fetch_things` with `token=...`.
-
-Box / thumbnail images on BGG's CDN (cf.geekdo-images.com) are still
+Box / thumbnail images on BGG's CDN (cf.geekdo-images.com) are publicly
 fetchable without authentication.
 """
 from __future__ import annotations
@@ -36,6 +31,11 @@ BROWSER_UA = (
     "Chrome/124.0.0.0 Safari/537.36"
 )
 THING_BATCH = 20
+
+# ── Built-in application token ────────────────────────────────────────────────
+# Register at https://boardgamegeek.com/applications to get a Bearer token,
+# then paste it here.  This single token works for all users of the app.
+BGG_APP_TOKEN: str = ""
 
 
 def _ssl_ctx() -> ssl.SSLContext:

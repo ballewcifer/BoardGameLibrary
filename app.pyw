@@ -185,12 +185,11 @@ class App(tk.Tk):
             ).pack(anchor="w", padx=(16, 0))
 
         # ── Step 1 ────────────────────────────────────────────────────────────
-        section(body, "1", "Get a free BGG API token  (recommended)")
-        bullet(body, "Log into BoardGameGeek, then visit the link below.")
-        bullet(body, 'Click "Register a new application", give it any name, submit.')
-        bullet(body, "Copy the Bearer token shown on that page.")
-        bullet(body, 'Open the Settings tab → paste the token → click Save.')
-        link_btn(body, "boardgamegeek.com/applications", "https://boardgamegeek.com/applications")
+        section(body, "1", "Import from BGG  (easiest)")
+        bullet(body, 'Use File → Import from BGG… and enter your BGG username.')
+        bullet(body, "Your BGG collection must be set to public.")
+        link_btn(body, "boardgamegeek.com/collection/user/YOUR_USERNAME",
+                 "https://boardgamegeek.com/collection")
 
         # divider
         tk.Frame(body, bg=C_PALE, height=1).pack(fill="x", pady=(14, 0))
@@ -199,51 +198,33 @@ class App(tk.Tk):
         tk.Frame(body, bg=C_PALE, height=1).pack(fill="x", pady=(0, 4))
 
         # ── Step 1 alt ────────────────────────────────────────────────────────
-        section(body, "1b", "Export your collection as a CSV  (no token needed)")
+        section(body, "1b", "Export your collection as a CSV")
         bullet(body, "Log into BoardGameGeek and open your collection.")
         bullet(body, 'Click the export / download icon → choose CSV format.')
         bullet(body, 'Use File → Import collection CSV… to load it.')
         bullet(body, "Note: your CSV may not include image URLs — use File → Download Images after importing.")
-        link_btn(body, "boardgamegeek.com/collection/user/YOUR_USERNAME",
-                 "https://boardgamegeek.com/collection/user/Ballewcifer")
 
         # ── Step 2 ────────────────────────────────────────────────────────────
-        section(body, "2", "Import your collection")
-        bullet(body, 'With a token: use File → Import from BGG…, enter your username.')
-        bullet(body, 'With a CSV: use File → Import collection CSV…')
-        bullet(body, "Images download automatically — no extra steps needed.")
-
-        # ── Step 3 ────────────────────────────────────────────────────────────
-        section(body, "3", "You're done!")
+        section(body, "2", "You're done!")
         bullet(body, "Browse your games, check them out to members, and log plays.")
-        bullet(body, 'Use the Settings tab any time to update your username or token.')
+        bullet(body, 'Use Library → Add Game… to manually add games not on BGG.')
 
         # ── footer ────────────────────────────────────────────────────────────
         tk.Frame(win, bg=C_BLUE, height=1).pack(fill="x")
         footer = tk.Frame(win, bg=C_PALE, pady=10, padx=28)
         footer.pack(fill="x")
 
-        def close(go_settings: bool = False) -> None:
+        def close() -> None:
             self.settings["welcome_shown"] = True
             config.save(self.settings)
             win.destroy()
-            if go_settings:
-                self.nb.select(self.settings_tab)
-
-        tk.Button(
-            footer, text="Open Settings to add my token",
-            bg=C_BLUE, fg=C_WHITE, activebackground=C_NAVY, activeforeground=C_WHITE,
-            relief="flat", font=("Segoe UI", 9, "bold"),
-            padx=14, pady=5, cursor="hand2",
-            command=lambda: close(go_settings=True),
-        ).pack(side="left")
 
         tk.Button(
             footer, text="Get Started",
             bg=C_NAVY, fg=C_WHITE, activebackground=C_BLUE, activeforeground=C_WHITE,
             relief="flat", font=("Segoe UI", 9, "bold"),
             padx=14, pady=5, cursor="hand2",
-            command=lambda: close(go_settings=False),
+            command=close,
         ).pack(side="right")
 
         win.grab_set()
@@ -1215,58 +1196,20 @@ class App(tk.Tk):
         ttk.Label(frame, text="BGG username:").grid(row=0, column=0, sticky="w", pady=4)
         self.username_var = tk.StringVar(value=self.settings.get("bgg_username", ""))
         ttk.Entry(frame, textvariable=self.username_var, width=30).grid(row=0, column=1, sticky="w")
+        ttk.Label(
+            frame,
+            text="Used by File → Import from BGG… to know whose collection to fetch.",
+        ).grid(row=1, column=1, sticky="w", pady=(0, 8))
 
-        ttk.Label(frame, text="BGG API token:").grid(row=1, column=0, sticky="w", pady=4)
-        self.token_var = tk.StringVar(value=self.settings.get("bgg_token", ""))
-        ttk.Entry(frame, textvariable=self.token_var, width=60, show="•").grid(row=1, column=1, sticky="w")
-
-        # How-to-get-a-token help block
-        help_frame = tk.Frame(frame, bg="#eaf4fd", relief="solid", bd=1)
-        help_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(12, 0), ipadx=10, ipady=8)
-
-        tk.Label(
-            help_frame,
-            text="How to get a free BGG API token",
-            bg="#eaf4fd", fg=C_NAVY,
-            font=("Segoe UI", 9, "bold"),
-            justify="left",
-        ).pack(anchor="w")
-
-        tk.Label(
-            help_frame,
-            text=(
-                "BGG's XML API (used by 'Import from BGG...' and 'Download Images') now requires\n"
-                "a Bearer token.  Getting one is free and takes about 2 minutes:\n\n"
-                "  1.  Log into BoardGameGeek in your browser.\n"
-                "  2.  Go to:  boardgamegeek.com/applications\n"
-                "  3.  Click 'Register a new application'.\n"
-                "  4.  Fill in a name (e.g. 'My Library') and any description.  Submit.\n"
-                "  5.  Copy the Bearer token shown and paste it into the field above.\n"
-                "  6.  Click Save, then use File → Import from BGG…"
-            ),
-            bg="#eaf4fd", fg=C_TEXT,
-            font=("Segoe UI", 9),
-            justify="left",
-        ).pack(anchor="w", pady=(4, 0))
-
-        tk.Button(
-            help_frame,
-            text="Open boardgamegeek.com/applications  ↗",
-            bg="#eaf4fd", fg=C_BLUE,
-            relief="flat", cursor="hand2",
-            font=("Segoe UI", 9, "underline"),
-            command=lambda: _open_url("https://boardgamegeek.com/applications"),
-        ).pack(anchor="w", pady=(4, 0))
-
-        ttk.Button(frame, text="Save", command=self.on_save_settings).grid(row=3, column=0, sticky="w", pady=(12, 0))
+        ttk.Button(frame, text="Save", command=self.on_save_settings).grid(row=2, column=0, sticky="w", pady=(4, 0))
 
         # ── danger zone ───────────────────────────────────────────────────────
-        tk.Frame(frame, bg=C_PALE, height=1).grid(row=4, column=0, columnspan=2, sticky="ew", pady=(24, 0))
+        tk.Frame(frame, bg=C_PALE, height=1).grid(row=3, column=0, columnspan=2, sticky="ew", pady=(24, 0))
         tk.Label(
             frame, text="Danger zone",
             bg=C_BG, fg="#b71c1c",
             font=("Segoe UI", 9, "bold"),
-        ).grid(row=5, column=0, sticky="w", pady=(8, 4))
+        ).grid(row=4, column=0, sticky="w", pady=(8, 4))
 
         tk.Button(
             frame, text="Clear collection…",
@@ -1275,17 +1218,16 @@ class App(tk.Tk):
             relief="flat", font=("Segoe UI", 9, "bold"),
             padx=12, pady=4, cursor="hand2",
             command=self.on_clear_collection,
-        ).grid(row=6, column=0, sticky="w")
+        ).grid(row=5, column=0, sticky="w")
         tk.Label(
             frame,
             text="Removes all games, images, play logs, and loan history.\nMembers and settings are kept.",
             bg=C_BG, fg="#888",
             font=("Segoe UI", 8), justify="left",
-        ).grid(row=6, column=1, sticky="w", padx=(12, 0))
+        ).grid(row=5, column=1, sticky="w", padx=(12, 0))
 
     def on_save_settings(self) -> None:
         self.settings["bgg_username"] = self.username_var.get().strip()
-        self.settings["bgg_token"] = self.token_var.get().strip()
         config.save(self.settings)
         self.status("Settings saved.")
 
@@ -1431,8 +1373,7 @@ class App(tk.Tk):
         threading.Thread(target=_bg, daemon=True).start()
 
     def on_import_from_bgg(self) -> None:
-        """Show a dialog asking for a BGG username + token, then import the collection."""
-        token = self.settings.get("bgg_token", "").strip()
+        """Show a dialog asking for a BGG username, then import the collection."""
         username = self.settings.get("bgg_username", "").strip()
 
         dialog = tk.Toplevel(self)
@@ -1440,8 +1381,9 @@ class App(tk.Tk):
         dialog.resizable(False, False)
         dialog.transient(self)
         dialog.configure(bg=C_BG)
+        dialog.lift()
+        dialog.focus_force()
 
-        # Username row
         ttk.Label(dialog, text="BGG username:", padding=(16, 14, 16, 2)).pack(anchor="w")
         uname_var = tk.StringVar(value=username)
         entry = ttk.Entry(dialog, textvariable=uname_var, width=34)
@@ -1449,45 +1391,27 @@ class App(tk.Tk):
         entry.focus_set()
         entry.select_range(0, "end")
 
-        # Token status / warning
-        if token:
-            msg_text  = "✓  API token found in Settings — full import will run."
-            msg_color = "#2e7d32"
-        else:
-            msg_text  = (
-                "⚠  No API token found.\n\n"
-                "BGG now requires a free Bearer token for all API access.\n"
-                "Go to Settings → click the link → register → paste token → Save.\n"
-                "Then come back here to import."
-            )
-            msg_color = "#b71c1c"
-
         tk.Label(
-            dialog, text=msg_text,
-            bg=C_BG, fg=msg_color,
-            font=("Segoe UI", 9),
-            justify="left",
-            wraplength=340,
-            padx=16, pady=4,
+            dialog,
+            text="Your BGG collection must be set to public.",
+            bg=C_BG, fg="#555", font=("Segoe UI", 9),
+            padx=16,
         ).pack(anchor="w")
 
         btn_frame = ttk.Frame(dialog)
         btn_frame.pack(padx=16, pady=(8, 14), fill="x")
-
-        def go_settings() -> None:
-            dialog.destroy()
-            self.nb.select(self.settings_tab)
 
         def do_import() -> None:
             uname = uname_var.get().strip()
             if not uname:
                 messagebox.showerror("Username required", "Enter your BGG username.", parent=dialog)
                 return
-            tok = self.settings.get("bgg_token", "").strip()
+            tok = bgg.BGG_APP_TOKEN or self.settings.get("bgg_token", "").strip()
             if not tok:
                 messagebox.showerror(
-                    "API token required",
-                    "BGG requires a Bearer token.\nOpen Settings to add one.",
+                    "Not configured",
+                    "The app's BGG API token has not been set yet.\n"
+                    "Please contact the library administrator.",
                     parent=dialog,
                 )
                 return
@@ -1503,10 +1427,7 @@ class App(tk.Tk):
             ).start()
 
         ttk.Button(btn_frame, text="Cancel", command=dialog.destroy).pack(side="left")
-        if not token:
-            ttk.Button(btn_frame, text="Open Settings", command=go_settings).pack(side="right")
-        else:
-            ttk.Button(btn_frame, text="Import", command=do_import).pack(side="right")
+        ttk.Button(btn_frame, text="Import", command=do_import).pack(side="right")
         dialog.bind("<Return>", lambda *_: do_import())
         dialog.grab_set()
 
@@ -1528,7 +1449,8 @@ class App(tk.Tk):
         except PermissionError as exc:
             self.after(0, lambda err=str(exc): messagebox.showerror(
                 "Token rejected",
-                f"BGG rejected the token:\n{err}\n\nCheck it in Settings and try again.",
+                f"BGG rejected the API token:\n{err}\n\n"
+                "The built-in token may have expired. Contact the library administrator.",
             ))
             self._post_status("Import failed: token rejected.")
         except Exception as exc:
@@ -1540,15 +1462,14 @@ class App(tk.Tk):
             self._post_status("Import from BGG failed.")
 
     def on_sync_api(self) -> None:
-        token = self.settings.get("bgg_token", "")
+        token = bgg.BGG_APP_TOKEN or self.settings.get("bgg_token", "")
         username = self.settings.get("bgg_username", "")
         if not token:
             messagebox.showinfo(
-                "API token needed",
-                "BGG's XML API requires a free Bearer token.\n\n"
-                "Go to Settings for step-by-step instructions.",
+                "Not configured",
+                "The app's BGG API token has not been set yet.\n"
+                "Contact the library administrator.",
             )
-            self.nb.select(self.settings_tab)
             return
         if not username:
             messagebox.showerror("Username missing", "Set your BGG username in Settings.")
@@ -1708,7 +1629,7 @@ class App(tk.Tk):
         wait.grab_set()
         wait.update()
 
-        tok = self.settings.get("bgg_token", "").strip() or None
+        tok = (bgg.BGG_APP_TOKEN or self.settings.get("bgg_token", "")).strip() or None
 
         def _bg():
             details = None
