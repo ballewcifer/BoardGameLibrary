@@ -696,8 +696,8 @@ class App(tk.Tk):
                 tree.heading(col, text=col)
             tree.column("Game",     width=220)
             tree.column("Borrower", width=160)
-            tree.column("Since",    width=100)
-            tree.column("Due",      width=100)
+            tree.column("Since",    width=100, anchor="center")
+            tree.column("Due",      width=100, anchor="center")
             tree.tag_configure("overdue", foreground="#b71c1c", font=("Segoe UI", 9, "bold"))
             for row in checked_out:
                 since = row["checked_out_at"][:10]
@@ -3189,7 +3189,7 @@ class App(tk.Tk):
         self.plays_tree.column("game",     width=190)
         self.plays_tree.column("date",     width=100, anchor="center")
         self.plays_tree.column("players",  width=160)
-        self.plays_tree.column("winner",   width=110)
+        self.plays_tree.column("winner",   width=110, anchor="center")
         self.plays_tree.column("duration", width=80,  anchor="center")
         self.plays_tree.column("scores",   width=150)
         self.plays_tree.column("notes",    width=150)
