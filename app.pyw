@@ -2751,7 +2751,10 @@ class App(tk.Tk):
         controls = ttk.Frame(frame)
         controls.pack(fill="x", pady=(0, 6))
 
-        ttk.Button(controls, text="Log Play...", command=lambda: self.on_log_play(None)).pack(side="left")
+        ttk.Button(controls, text="Log Play...", command=lambda: self.on_log_play(
+            {"name": self.plays_game_var.get()}
+            if self.plays_game_var.get() != "All games" else None
+        )).pack(side="left")
         ttk.Button(controls, text="Edit selected",
                    command=self.on_edit_play).pack(side="left", padx=(6, 0))
 
