@@ -2650,6 +2650,46 @@ class App(tk.Tk):
                   font=("Segoe UI", 8)).grid(
             row=11, column=0, columnspan=2, padx=12, sticky="w")
 
+        # --- lock-status row (editing an existing game only) ---
+        _FIELD_DISPLAY = {
+            "name": "Name", "year": "Year",
+            "min_players": "Min players", "max_players": "Max players",
+            "playing_time": "Play time", "min_playtime": "Play time",
+            "max_playtime": "Play time",
+            "weight": "Complexity", "description": "Description",
+            "my_comment": "Comment",
+        }
+        lock_lbl_var = tk.StringVar()
+        lock_frame = ttk.Frame(dlg)
+        lock_frame.grid(row=12, column=0, columnspan=2,
+                        padx=12, pady=(0, 2), sticky="w")
+        ttk.Label(lock_frame, textvariable=lock_lbl_var,
+                  foreground="#555", font=("Segoe UI", 8)).pack(side="left")
+
+        def _refresh_lock_label() -> None:
+            if is_new:
+                return
+            with db.connect() as c:
+                mf = db.get_manual_fields(c, d.bgg_id)
+            if mf:
+                names = sorted({_FIELD_DISPLAY.get(f, f) for f in mf},
+                               key=str.casefold)
+                lock_lbl_var.set(f"🔒 Protected from sync: {', '.join(names)}")
+                _clear_btn.pack(side="left", padx=(6, 0))
+            else:
+                lock_lbl_var.set("")
+                _clear_btn.pack_forget()
+
+        def _clear_locks() -> None:
+            with db.connect() as c:
+                db.set_manual_fields(c, d.bgg_id, set())
+            _refresh_lock_label()
+
+        _clear_btn = ttk.Button(lock_frame, text="Clear overrides",
+                                command=_clear_locks)
+        if not is_new:
+            _refresh_lock_label()
+
         def save() -> None:
             name = name_var.get().strip()
             if not name:
@@ -2685,6 +2725,7 @@ class App(tk.Tk):
             existing_image_path = None
             existing_image_url  = None
             existing_thumb_url  = None
+            existing            = None
             with db.connect() as c:
                 existing = db.get_game(c, bgg_id)
                 if existing:
@@ -2719,6 +2760,36 @@ class App(tk.Tk):
                 "last_synced":   db.now_iso(),
             }
             with db.connect() as c:
+                # Auto-lock any fields the user explicitly changed vs the DB.
+                if not is_new and existing:
+                    manual = db.get_manual_fields(c, bgg_id)
+                    field_checks = [
+                        ("name",        game_row["name"],        existing["name"]),
+                        ("year",        game_row["year"],         existing["year"]),
+                        ("min_players", game_row["min_players"],  existing["min_players"]),
+                        ("max_players", game_row["max_players"],  existing["max_players"]),
+                        ("description", game_row["description"],  existing["description"]),
+                        ("my_comment",  game_row["my_comment"],   existing["my_comment"]),
+                    ]
+                    for field, new_val, old_val in field_checks:
+                        if new_val != old_val:
+                            manual.add(field)
+                    # Weight: round to 2 dp to avoid float-precision false positives.
+                    new_w = game_row["weight"]
+                    old_w = existing["weight"]
+                    if (new_w is None) != (old_w is None) or (
+                        new_w is not None and old_w is not None
+                        and round(new_w, 2) != round(old_w, 2)
+                    ):
+                        manual.add("weight")
+                    # Playtime: all three columns move together.
+                    old_pt = (existing["playing_time"]
+                              if existing["playing_time"] is not None
+                              else existing["min_playtime"])
+                    if pt_val != old_pt:
+                        manual.update({"playing_time", "min_playtime", "max_playtime"})
+                    db.set_manual_fields(c, bgg_id, manual)
+
                 db.upsert_game(c, game_row)
                 # Save tags separately (not part of upsert to avoid clobbering on sync)
                 db.set_tags(c, bgg_id, tags_var.get().strip())
@@ -2729,7 +2800,7 @@ class App(tk.Tk):
             self.status(f"{verb} \"{name}\".")
 
         btn_row = ttk.Frame(dlg, padding=(12, 4, 12, 12))
-        btn_row.grid(row=12, column=0, columnspan=2, sticky="e")
+        btn_row.grid(row=13, column=0, columnspan=2, sticky="e")
         ttk.Button(btn_row, text="Cancel", command=dlg.destroy).pack(side="left", padx=(0, 6))
         ttk.Button(btn_row, text="Save Game" if is_new else "Save Changes",
                    command=save).pack(side="left")
@@ -2861,11 +2932,14 @@ class App(tk.Tk):
                     "last_synced": db.now_iso(),
                     "is_expansion": int(g.is_expansion),
                 }
-                # Don't clobber image_path on a re-sync.
+                # Don't clobber image_path or manually-locked fields on re-sync.
                 existing = db.get_game(c, g.bgg_id)
-                if existing and existing["image_path"]:
-                    row["image_path"] = existing["image_path"]
-                db.upsert_game(c, row)
+                skip: set = set()
+                if existing:
+                    if existing["image_path"]:
+                        row["image_path"] = existing["image_path"]
+                    skip = db.get_manual_fields(c, g.bgg_id)
+                db.upsert_game(c, row, skip_fields=skip)
 
     def _download_thumbnails_bg(self, games: list[bgg.GameDetails]) -> None:
         IMAGES_DIR.mkdir(parents=True, exist_ok=True)
