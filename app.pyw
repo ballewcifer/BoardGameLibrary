@@ -228,6 +228,12 @@ class App(tk.Tk):
         if not self.settings.get("welcome_shown"):
             self.after(300, self._show_welcome_dialog)
 
+        # Auto-sync with BGG on startup if a username is configured
+        username = self.settings.get("bgg_username", "").strip()
+        token    = bgg.BGG_APP_TOKEN or self.settings.get("bgg_token", "").strip()
+        if username and token:
+            self.after(1500, lambda: self._auto_sync_bgg(username, token))
+
     # ---------- first-run welcome ----------
 
     def _show_welcome_dialog(self) -> None:
@@ -1266,7 +1272,7 @@ class App(tk.Tk):
                 bg="#b5d6a7", font=("Segoe UI", 8), padx=6, pady=2,
             ).pack(pady=(6, 0), fill="x")
 
-        # --- action buttons ---
+        # --- action buttons (2 per row keeps them wide enough to read) ---
         btn_row = ttk.Frame(card)
         btn_row.pack(pady=(6, 0), fill="x")
         if out_to:
@@ -1284,10 +1290,38 @@ class App(tk.Tk):
                    command=lambda g=game: self.on_edit_game(g)).pack(side="left", expand=True, fill="x")
         ttk.Button(btn_row2, text="Log Play",
                    command=lambda g=game: self.on_log_play(g)).pack(side="left", expand=True, fill="x", padx=(2, 0))
-        ttk.Button(btn_row2, text="Delete",
-                   command=lambda g=game: self.on_delete_game(g)).pack(side="left", expand=True, fill="x", padx=(2, 0))
+
+        # Right-click anywhere on the card for the full action menu (incl. Delete)
+        def _card_right_click(event, g=game):
+            self._show_card_context_menu(event, g)
+        for widget in (card, header, img_canvas, btn_row, btn_row2):
+            widget.bind("<Button-3>", _card_right_click)
 
         return card, (img_canvas, _img_id, game)
+
+    def _show_card_context_menu(self, event: tk.Event, game) -> None:
+        """Right-click context menu for a game card — mirrors the table-view menu."""
+        with db.connect() as c:
+            loan = c.execute(
+                "SELECT * FROM loans WHERE game_id = ? AND returned_at IS NULL",
+                (game["bgg_id"],),
+            ).fetchone()
+
+        menu = tk.Menu(self, tearoff=0)
+        if loan:
+            menu.add_command(label="Check In",  command=lambda: self.on_check_in(game))
+        else:
+            menu.add_command(label="Check Out", command=lambda: self.on_check_out(game))
+        menu.add_command(label="Log Play…",     command=lambda: self.on_log_play(game))
+        menu.add_separator()
+        menu.add_command(label="Details…",      command=lambda: self.show_details(game))
+        menu.add_command(label="Edit Game…",    command=lambda: self.on_edit_game(game))
+        menu.add_command(label="Set Image…",    command=lambda: self.on_set_image(game))
+        fav_lbl = "Remove from Favorites" if game["is_favorite"] else "Add to Favorites"
+        menu.add_command(label=fav_lbl,         command=lambda: self.on_toggle_favorite(game))
+        menu.add_separator()
+        menu.add_command(label="Delete Game…",  command=lambda: self.on_delete_game(game))
+        menu.tk_popup(event.x_root, event.y_root)
 
     def _set_card_image(self, canvas: tk.Canvas, img_id: int, game) -> None:
         path = game["image_path"]
@@ -1965,6 +1999,38 @@ class App(tk.Tk):
                 f"Could not import collection for '{username}':\n{err}",
             ))
             self._post_status("Import from BGG failed.")
+
+    def _auto_sync_bgg(self, username: str, token: str) -> None:
+        """Silent background sync triggered automatically on startup.
+
+        Uses the same import_from_username path but never shows error dialogs —
+        failures are reported only in the status bar so they don't interrupt the user.
+        """
+        self.status(f"Auto-syncing with BGG for {username}…")
+        threading.Thread(
+            target=self._auto_sync_bgg_bg,
+            args=(username, token),
+            daemon=True,
+        ).start()
+
+    def _auto_sync_bgg_bg(self, username: str, token: str) -> None:
+        try:
+            games = bgg.import_from_username(username, token=token, on_status=self._post_status)
+            if not games:
+                self._post_status("BGG auto-sync: no games found.")
+                return
+            self._save_games_to_db(games)
+            self.after(0, self.refresh_games)
+            n = len(games)
+            self._post_status(f"BGG auto-sync complete: {n} game{'s' if n != 1 else ''} updated.")
+            # Download any missing images in the background
+            needs_img = [g for g in games
+                         if not g.thumbnail_url and not g.image_url]
+            if any(not g.thumbnail_url and not g.image_url for g in games):
+                pass  # nothing to do
+            self._download_thumbnails_bg(games)
+        except Exception as exc:
+            self._post_status(f"BGG auto-sync failed: {exc}")
 
     def on_sync_api(self) -> None:
         token = bgg.BGG_APP_TOKEN or self.settings.get("bgg_token", "")
