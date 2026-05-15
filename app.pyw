@@ -2720,9 +2720,11 @@ class App(tk.Tk):
     def on_delete_game(self, game) -> None:
         name = game["name"]
         if not messagebox.askyesno(
-            "Delete Game",
-            f'Remove "{name}" from your library?\n\n'
-            "This will also delete all check-out history and play logs for this game.",
+            "Remove from Library?",
+            f'Remove "{name}" from Board Game Library?\n\n'
+            "This will delete its check-out history and play logs from this app only.\n\n"
+            "⚠  This does NOT delete the game from BGG. If it is still in your BGG\n"
+            "collection, it will be added back the next time you sync.",
             icon="warning",
         ):
             return
