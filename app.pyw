@@ -884,8 +884,6 @@ class App(tk.Tk):
             or bool(self.search_var.get())
         )
 
-    _CARD_CAP = 100   # max cards rendered at once; table view has no limit
-
     def _refresh_card_view(self, games, open_loans, play_counts) -> None:
         # Hide the canvas window during the destroy+create loop so the
         # geometry manager doesn't recalculate layout on every widget change.
@@ -907,26 +905,8 @@ class App(tk.Tk):
             self.games_canvas.itemconfigure(self.games_window_id, state="normal")
             return
 
-        total_matched = len(games)
-        capped = total_matched > self._CARD_CAP
-        visible = games[:self._CARD_CAP]
-
-        for game in visible:
+        for game in games:
             self._cards.append(self._build_card(game, open_loans.get(game["bgg_id"]), play_counts))
-
-        if capped:
-            note = ttk.Label(
-                self.games_inner,
-                text=(
-                    f"Showing {self._CARD_CAP} of {total_matched} games.\n"
-                    "Switch to Table view (top-right) or use filters to see all."
-                ),
-                padding=(12, 8),
-                foreground="#555",
-                font=("Segoe UI", 9),
-                justify="center",
-            )
-            self._cards.append(note)
 
         self._layout_cards(self.games_canvas.winfo_width())
         self.games_canvas.itemconfigure(self.games_window_id, state="normal")
