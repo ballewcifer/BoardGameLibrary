@@ -586,23 +586,23 @@ class App(tk.Tk):
         self.nb = ttk.Notebook(self)
         self.nb.pack(side="top", fill="both", expand=True)
 
-        self.dashboard_tab = ttk.Frame(self.nb)
         self.games_tab = ttk.Frame(self.nb)
         self.members_tab = ttk.Frame(self.nb)
         self.history_tab = ttk.Frame(self.nb)
         self.plays_tab = ttk.Frame(self.nb)
+        self.dashboard_tab = ttk.Frame(self.nb)
 
-        self.nb.add(self.dashboard_tab, text="Dashboard")
         self.nb.add(self.games_tab, text="Games")
         self.nb.add(self.members_tab, text="Members")
         self.nb.add(self.history_tab, text="History")
         self.nb.add(self.plays_tab, text="Plays")
+        self.nb.add(self.dashboard_tab, text="Dashboard")
 
-        self._build_dashboard_tab()
         self._build_games_tab()
         self._build_members_tab()
         self._build_history_tab()
         self._build_plays_tab()
+        self._build_dashboard_tab()
 
     def _build_status_bar(self) -> None:
         self.status_var = tk.StringVar(value="Ready.")
@@ -658,22 +658,32 @@ class App(tk.Tk):
                       font=("Segoe UI", 11, "bold"), foreground=C_NAVY).pack(anchor="w", pady=(16, 4))
             ttk.Separator(parent, orient="horizontal").pack(fill="x", pady=(0, 8))
 
-        def stat_card(parent, label, value, color=C_NAVY):
-            f = tk.Frame(parent, bg=color, padx=16, pady=10, relief="flat")
+        def stat_card(parent, label, value, color=C_NAVY, tab=None):
+            f = tk.Frame(parent, bg=color, padx=16, pady=10, relief="flat",
+                         cursor="hand2" if tab else "")
             f.pack(side="left", expand=True, fill="both", padx=(0, 8))
-            tk.Label(f, text=str(value), bg=color, fg=C_WHITE,
-                     font=("Segoe UI", 22, "bold")).pack()
-            tk.Label(f, text=label, bg=color, fg=C_WHITE,
-                     font=("Segoe UI", 9)).pack()
+            val_lbl = tk.Label(f, text=str(value), bg=color, fg=C_WHITE,
+                               font=("Segoe UI", 22, "bold"))
+            val_lbl.pack()
+            txt_lbl = tk.Label(f, text=label, bg=color, fg=C_WHITE,
+                               font=("Segoe UI", 9))
+            txt_lbl.pack()
+            if tab is not None:
+                _jump = lambda e, t=tab: self.nb.select(t)
+                for w in (f, val_lbl, txt_lbl):
+                    w.bind("<Button-1>", _jump)
+                f.bind("<Enter>", lambda e, fr=f: fr.configure(relief="raised"))
+                f.bind("<Leave>", lambda e, fr=f: fr.configure(relief="flat"))
 
         # ── stat cards row ────────────────────────────────────────────────────
         cards_row = tk.Frame(inner, bg=C_BG)
         cards_row.pack(fill="x", pady=(0, 4))
-        stat_card(cards_row, "Games",         summary["total_games"],   "#1a237e")
-        stat_card(cards_row, "Total Plays",   summary["total_plays"],   "#1b5e20")
-        stat_card(cards_row, "Members",       summary["total_members"], "#4a148c")
-        stat_card(cards_row, "Checked Out",   summary["checked_out"],
-                  "#b71c1c" if summary["checked_out"] else "#37474f")
+        stat_card(cards_row, "Games",       summary["total_games"],   "#1a237e", tab=self.games_tab)
+        stat_card(cards_row, "Total Plays", summary["total_plays"],   "#1b5e20", tab=self.plays_tab)
+        stat_card(cards_row, "Members",     summary["total_members"], "#4a148c", tab=self.members_tab)
+        stat_card(cards_row, "Checked Out", summary["checked_out"],
+                  "#b71c1c" if summary["checked_out"] else "#37474f",
+                  tab=self.history_tab)
 
         # ── currently checked out ────────────────────────────────────────────
         section(inner, "Currently Checked Out")
