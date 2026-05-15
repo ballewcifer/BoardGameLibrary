@@ -396,50 +396,45 @@ def fetch_things(
     return out
 
 
-GEEKSEARCH_URL = "https://www.boardgamegeek.com/geeksearch.php"
-
-
 def search_games(
     query: str,
     *,
-    token: Optional[str] = None,  # unused — geeksearch is public
+    token: Optional[str] = None,  # unused — /xmlapi2/search is public
 ) -> list[tuple[int, str, Optional[int]]]:
     """Search BGG for board games matching *query*.
 
-    Uses BGG's internal geeksearch.php endpoint (the same one the website
-    uses) which returns JSON and requires no Bearer token.
+    Uses the official BGG XML API v2 /search endpoint which is public,
+    stable, and does not require a Bearer token or a browser User-Agent.
 
     Returns a list of (bgg_id, name, year) tuples sorted by year descending
-    so the most recent version of a game appears first.
+    so the most recent printing of a game appears first.
     """
-    import json as _json  # noqa: PLC0415
     params = urllib.parse.urlencode({
-        "action": "search",
-        "objecttype": "boardgame",
-        "q": query,
-        "showcount": "50",
+        "query": query,
+        "type": "boardgame,boardgameexpansion",
     })
-    url = f"{GEEKSEARCH_URL}?{params}"
-    req = urllib.request.Request(url, headers={
-        "User-Agent": BROWSER_UA,
-        "Accept": "application/json, text/javascript, */*",
-    })
+    url = f"{BASE}/search?{params}"
     try:
-        with urllib.request.urlopen(req, timeout=15, context=_ssl_ctx()) as resp:
-            data = _json.loads(resp.read())
+        root = _fetch_xml(url)
     except Exception as exc:
-        raise RuntimeError(f"BGG search failed: {exc}") from exc
+        raise RuntimeError(f"BGG Search failed: {exc}") from exc
 
     results: list[tuple[int, str, Optional[int]]] = []
-    for item in data.get("items", []):
-        bgg_id = int(item.get("objectid") or item.get("id") or 0)
+    for item in root.findall("item"):
+        bgg_id = int(item.get("id", "0"))
         if not bgg_id:
             continue
-        name = (item.get("name") or "").strip() or f"#{bgg_id}"
-        year_raw = item.get("yearpublished")
-        year = int(year_raw) if year_raw else None
+        name = ""
+        for n in item.findall("name"):
+            if n.get("type") == "primary":
+                name = n.get("value", "").strip()
+                break
+        if not name:
+            continue
+        year_el = item.find("yearpublished")
+        year = _i(year_el.get("value")) if year_el is not None else None
         results.append((bgg_id, name, year))
-    # already returned in rank order; stable-sort by year descending as tiebreak
+    # Sort newest first as a tiebreaker (API results are already ranked by relevance)
     results.sort(key=lambda x: (-(x[2] or 0),))
     return results
 
