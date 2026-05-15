@@ -212,6 +212,7 @@ class App(tk.Tk):
         self._sort_col: Optional[str] = None
         self._sort_rev: bool = False
         self._table_games: list = []
+        self._lazy_generation: int = 0   # incremented each refresh to cancel stale loaders
 
         self._apply_style()
         self.configure(bg=C_BG)
@@ -594,11 +595,20 @@ class App(tk.Tk):
 
         # ── card grid ─────────────────────────────────────────────────────────
         self._card_frame = ttk.Frame(wrapper)
-        self.games_canvas = tk.Canvas(self._card_frame, highlightthickness=0, background="#f5f5f5")
-        scroll = ttk.Scrollbar(self._card_frame, orient="vertical", command=self.games_canvas.yview)
-        self.games_canvas.configure(yscrollcommand=scroll.set)
-        self.games_canvas.pack(side="left", fill="both", expand=True)
+
+        # A–Z jump bar — rightmost strip (pack right-to-left so canvas gets remainder)
+        self._alpha_bar = tk.Frame(self._card_frame, bg=C_BG, width=22)
+        self._alpha_bar.pack(side="right", fill="y")
+        self._alpha_bar.pack_propagate(False)
+
+        scroll = ttk.Scrollbar(self._card_frame, orient="vertical")
         scroll.pack(side="right", fill="y")
+
+        self.games_canvas = tk.Canvas(self._card_frame, highlightthickness=0, background="#f5f5f5",
+                                      yscrollcommand=scroll.set)
+        scroll.configure(command=self.games_canvas.yview)
+        self.games_canvas.pack(side="left", fill="both", expand=True)
+
         self.games_inner = ttk.Frame(self.games_canvas)
         self.games_window_id = self.games_canvas.create_window((0, 0), window=self.games_inner, anchor="nw")
         self.games_inner.bind("<Configure>", lambda e: self.games_canvas.configure(scrollregion=self.games_canvas.bbox("all")))
@@ -905,11 +915,132 @@ class App(tk.Tk):
             self.games_canvas.itemconfigure(self.games_window_id, state="normal")
             return
 
+        lazy_queue: list[tuple] = []
         for game in games:
-            self._cards.append(self._build_card(game, open_loans.get(game["bgg_id"]), play_counts))
+            card, lazy = self._build_card(game, open_loans.get(game["bgg_id"]), play_counts)
+            self._cards.append(card)
+            lazy_queue.append(lazy)
 
         self._layout_cards(self.games_canvas.winfo_width())
         self.games_canvas.itemconfigure(self.games_window_id, state="normal")
+
+        # Kick off lazy image loading and rebuild the A-Z bar
+        self._lazy_generation += 1
+        threading.Thread(
+            target=self._lazy_load_images,
+            args=(lazy_queue, self._lazy_generation),
+            daemon=True,
+        ).start()
+        self.after(80, lambda g=games: self._update_alpha_bar(g))
+
+    # ---------- lazy image loading ----------
+
+    def _lazy_load_images(self, items: list[tuple], generation: int) -> None:
+        """Background thread: open PIL images and post each one back to the main thread.
+
+        PhotoImage creation is intentionally left to the main thread so we never
+        call Tkinter from a worker thread.
+        """
+        for canvas, img_id, game in items:
+            if self._lazy_generation != generation:
+                return   # a newer refresh has started — stop immediately
+
+            path = game["image_path"]
+            if not path or not Path(path).exists():
+                continue  # no file on disk; placeholder is fine
+
+            # If already cached (from a previous render) just reuse it
+            if path in self._image_cache:
+                tk_img = self._image_cache[path]
+                self.after(0, lambda c=canvas, i=img_id, im=tk_img:
+                           self._apply_lazy_image(c, i, im))
+                continue
+
+            # Disk I/O + PIL resize in the background
+            try:
+                pil_img = Image.open(path)
+                pil_img.thumbnail(THUMB_SIZE)
+            except (OSError, ValueError):
+                continue
+
+            self.after(0, lambda c=canvas, i=img_id, p=pil_img, pa=path:
+                       self._apply_lazy_image_from_pil(c, i, p, pa))
+
+    def _apply_lazy_image(self, canvas: tk.Canvas, img_id: int,
+                          tk_img: ImageTk.PhotoImage) -> None:
+        """Main thread: update a card's canvas with an already-created PhotoImage."""
+        try:
+            if canvas.winfo_exists():
+                canvas.itemconfigure(img_id, image=tk_img)
+                canvas._card_img_ref = tk_img
+        except tk.TclError:
+            pass
+
+    def _apply_lazy_image_from_pil(self, canvas: tk.Canvas, img_id: int,
+                                    pil_img: "Image.Image", path: str) -> None:
+        """Main thread: convert a PIL Image → PhotoImage, cache it, show it."""
+        try:
+            if not canvas.winfo_exists():
+                return
+            tk_img = ImageTk.PhotoImage(pil_img)
+            self._image_cache[path] = tk_img
+            canvas.itemconfigure(img_id, image=tk_img)
+            canvas._card_img_ref = tk_img
+        except tk.TclError:
+            pass
+
+    # ---------- A–Z jump bar ----------
+
+    def _update_alpha_bar(self, games: list) -> None:
+        """Rebuild the vertical A–Z strip from the current ordered game list."""
+        # Map letter → index of the first card starting with that letter
+        letter_idx: dict[str, int] = {}
+        for i, g in enumerate(games):
+            first = (g["name"] or "#")[0].upper()
+            if first.isalpha() and first not in letter_idx:
+                letter_idx[first] = i
+
+        for w in self._alpha_bar.winfo_children():
+            w.destroy()
+
+        # Top spacer so letters don't start flush with the very top edge
+        tk.Frame(self._alpha_bar, bg=C_BG, height=4).pack()
+
+        for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+            idx = letter_idx.get(letter)
+            active = idx is not None
+            lbl = tk.Label(
+                self._alpha_bar,
+                text=letter,
+                font=("Segoe UI", 7, "bold" if active else "normal"),
+                fg=C_BLUE if active else "#ccc",
+                bg=C_BG,
+                cursor="hand2" if active else "",
+                pady=1, padx=2,
+            )
+            lbl.pack(fill="x")
+            if active:
+                lbl.bind("<Button-1>",
+                         lambda e, i=idx: self._scroll_to_card(i))
+                lbl.bind("<Enter>", lambda e, lb=lbl: lb.configure(bg=C_PALE))
+                lbl.bind("<Leave>", lambda e, lb=lbl: lb.configure(bg=C_BG))
+
+    def _scroll_to_card(self, card_idx: int) -> None:
+        """Scroll the card canvas so the card at card_idx is near the top."""
+        if card_idx >= len(self._cards):
+            return
+        card = self._cards[card_idx]
+        try:
+            if not card.winfo_exists():
+                return
+            y = card.winfo_y()
+            total_h = self.games_inner.winfo_reqheight()
+            canvas_h = self.games_canvas.winfo_height()
+            if total_h > canvas_h:
+                fraction = max(0.0, min(1.0, (y - 6) / total_h))
+                self.games_canvas.yview_moveto(fraction)
+        except tk.TclError:
+            pass
 
     def _refresh_table_view(self, games, open_loans, play_counts) -> None:
         self.games_tree.delete(*self.games_tree.get_children())
@@ -1038,7 +1169,7 @@ class App(tk.Tk):
         menu.add_command(label="Delete Game…", command=lambda: self.on_delete_game(game))
         menu.tk_popup(event.x_root, event.y_root)
 
-    def _build_card(self, game, loan, play_counts: dict) -> ttk.Frame:
+    def _build_card(self, game, loan, play_counts: dict) -> tuple:
         out_to = None
         if loan is not None:
             out_to = f"{loan['first_name']} {loan['last_name']}".strip()
@@ -1074,7 +1205,10 @@ class App(tk.Tk):
         img_canvas.pack(anchor="center")  # centred in card, not stretched
 
         _img_id = img_canvas.create_image(_CW // 2, _CH // 2, anchor="center")
-        self._set_card_image(img_canvas, _img_id, game)
+        # Always start with a placeholder; the lazy loader will fill in the real image
+        ph = self._get_placeholder()
+        img_canvas.itemconfigure(_img_id, image=ph)
+        img_canvas._card_img_ref = ph
 
         # --- name + year ---
         ttk.Label(
@@ -1153,7 +1287,7 @@ class App(tk.Tk):
         ttk.Button(btn_row2, text="Delete",
                    command=lambda g=game: self.on_delete_game(g)).pack(side="left", expand=True, fill="x", padx=(2, 0))
 
-        return card
+        return card, (img_canvas, _img_id, game)
 
     def _set_card_image(self, canvas: tk.Canvas, img_id: int, game) -> None:
         path = game["image_path"]
