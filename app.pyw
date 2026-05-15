@@ -1727,33 +1727,27 @@ class App(tk.Tk):
         ttk.Entry(frame, textvariable=username_var, width=32).grid(row=0, column=1, sticky="w", padx=(8, 0))
         ttk.Label(
             frame,
-            text="Used by File → Import from BGG…",
+            text="Used by File → Import from BGG… and play sync",
             foreground="#888",
-        ).grid(row=1, column=1, sticky="w", padx=(8, 0), pady=(0, 4))
-
-        # ── BGG password ──────────────────────────────────────────────────────
-        ttk.Label(frame, text="BGG password:").grid(row=2, column=0, sticky="w", pady=4)
-        password_var = tk.StringVar(value=self.settings.get("bgg_password", ""))
-        pw_entry = ttk.Entry(frame, textvariable=password_var, width=32, show="●")
-        pw_entry.grid(row=2, column=1, sticky="w", padx=(8, 0))
-        ttk.Label(
-            frame,
-            text="Required for syncing plays to BGG",
-            foreground="#888",
-        ).grid(row=3, column=1, sticky="w", padx=(8, 0), pady=(0, 4))
+        ).grid(row=1, column=1, sticky="w", padx=(8, 0), pady=(0, 12))
 
         # ── sync plays toggle ─────────────────────────────────────────────────
         sync_var = tk.BooleanVar(value=bool(self.settings.get("bgg_sync_plays", False)))
-        sync_cb = ttk.Checkbutton(
+        ttk.Checkbutton(
             frame,
-            text="Post plays to BGG when logging a play",
+            text="Offer to post plays to BGG when logging a play",
             variable=sync_var,
-        )
-        sync_cb.grid(row=4, column=0, columnspan=2, sticky="w", padx=(0, 0), pady=(0, 12))
+        ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(0, 4))
+        ttk.Label(
+            frame,
+            text="You'll be asked for your BGG password each time — it is never stored.",
+            foreground="#888",
+        ).grid(row=3, column=0, columnspan=2, sticky="w", padx=(22, 0), pady=(0, 12))
 
         def save() -> None:
             self.settings["bgg_username"] = username_var.get().strip()
-            self.settings["bgg_password"] = password_var.get()   # keep as-is (may be empty)
+            # bgg_password is intentionally never stored
+            self.settings.pop("bgg_password", None)
             self.settings["bgg_sync_plays"] = sync_var.get()
             config.save(self.settings)
             self.status("Settings saved.")
@@ -1761,12 +1755,12 @@ class App(tk.Tk):
 
         # ── danger zone ───────────────────────────────────────────────────────
         tk.Frame(frame, bg=C_PALE, height=1).grid(
-            row=5, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+            row=4, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         tk.Label(
             frame, text="Danger zone",
             bg=C_BG, fg="#b71c1c",
             font=("Segoe UI", 9, "bold"),
-        ).grid(row=6, column=0, sticky="w", pady=(8, 4))
+        ).grid(row=5, column=0, sticky="w", pady=(8, 4))
 
         tk.Button(
             frame, text="Clear collection…",
@@ -1775,17 +1769,17 @@ class App(tk.Tk):
             relief="flat", font=("Segoe UI", 9, "bold"),
             padx=12, pady=4, cursor="hand2",
             command=self.on_clear_collection,
-        ).grid(row=7, column=0, sticky="w")
+        ).grid(row=6, column=0, sticky="w")
         tk.Label(
             frame,
             text="Removes all games, images, play logs,\nand loan history. Members are kept.",
             bg=C_BG, fg="#888",
             font=("Segoe UI", 8), justify="left",
-        ).grid(row=7, column=1, sticky="w", padx=(12, 0))
+        ).grid(row=6, column=1, sticky="w", padx=(12, 0))
 
         # ── buttons ───────────────────────────────────────────────────────────
         btn_row = ttk.Frame(frame)
-        btn_row.grid(row=8, column=0, columnspan=2, sticky="e", pady=(20, 0))
+        btn_row.grid(row=7, column=0, columnspan=2, sticky="e", pady=(20, 0))
         ttk.Button(btn_row, text="Cancel", command=win.destroy).pack(side="left", padx=(0, 6))
         ttk.Button(btn_row, text="Save", command=save).pack(side="left")
 
@@ -2804,6 +2798,46 @@ class App(tk.Tk):
         notes_var = tk.StringVar(value=play["notes"] or "" if editing else "")
         ttk.Entry(dialog, textvariable=notes_var, width=36).grid(row=4, column=1, **pad)
 
+        # ── optional BGG play sync ────────────────────────────────────────────
+        # Only shown for new plays (not edits) when sync is enabled in Settings.
+        bgg_username = self.settings.get("bgg_username", "").strip()
+        bgg_post_var = tk.BooleanVar(value=False)
+        bgg_pw_var   = tk.StringVar()
+        _bgg_pw_label: Optional[ttk.Label] = None
+        _bgg_pw_entry: Optional[ttk.Entry] = None
+
+        if not editing and bgg_username and self.settings.get("bgg_sync_plays"):
+            ttk.Separator(dialog, orient="horizontal").grid(
+                row=5, column=0, columnspan=2, sticky="ew", padx=12, pady=(8, 2))
+
+            ttk.Checkbutton(
+                dialog,
+                text=f"Also post this play to BGG  ({bgg_username})",
+                variable=bgg_post_var,
+            ).grid(row=6, column=0, columnspan=2, sticky="w", padx=12, pady=(0, 2))
+
+            _bgg_pw_label = ttk.Label(dialog, text="BGG password:")
+            _bgg_pw_label.grid(row=7, column=0, **pad)
+            _bgg_pw_entry = ttk.Entry(dialog, textvariable=bgg_pw_var, show="●", width=26)
+            _bgg_pw_entry.grid(row=7, column=1, **pad)
+            # Start hidden; reveal when checkbox is ticked
+            _bgg_pw_label.grid_remove()
+            _bgg_pw_entry.grid_remove()
+
+            def _toggle_pw_row(*_) -> None:
+                if bgg_post_var.get():
+                    _bgg_pw_label.grid()
+                    _bgg_pw_entry.grid()
+                    _bgg_pw_entry.focus_set()
+                else:
+                    _bgg_pw_label.grid_remove()
+                    _bgg_pw_entry.grid_remove()
+
+            bgg_post_var.trace_add("write", _toggle_pw_row)
+            btn_row_idx = 8
+        else:
+            btn_row_idx = 5
+
         def save_play() -> None:
             gid = game_id_map.get(game_var.get())
             if not gid:
@@ -2826,24 +2860,27 @@ class App(tk.Tk):
                                 players,
                                 winner_var.get().strip(),
                                 notes)
+            # Capture BGG fields before destroying the dialog
+            post_to_bgg = bgg_post_var.get()
+            bgg_pw      = bgg_pw_var.get()
             dialog.destroy()
             self.refresh_plays()
             self.refresh_games()   # update play-count badges
             action = "Updated" if editing else "Logged"
             self.status(f"{action} play for {game_var.get()}.")
-            # Optionally sync to BGG (new plays only, not edits)
-            if not editing and self.settings.get("bgg_sync_plays"):
-                uname = self.settings.get("bgg_username", "").strip()
-                pwd   = self.settings.get("bgg_password", "")
-                if uname and pwd:
+            # Optionally sync to BGG — password is used once and never stored
+            if not editing and post_to_bgg and bgg_username:
+                if bgg_pw:
                     threading.Thread(
                         target=self._sync_play_to_bgg_bg,
-                        args=(uname, pwd, gid, played, players, notes),
+                        args=(bgg_username, bgg_pw, gid, played, players, notes),
                         daemon=True,
                     ).start()
+                else:
+                    self.status("BGG sync skipped — no password entered.")
 
         btn_frame = ttk.Frame(dialog)
-        btn_frame.grid(row=5, column=0, columnspan=2, pady=(8, 12), padx=12, sticky="e")
+        btn_frame.grid(row=btn_row_idx, column=0, columnspan=2, pady=(8, 12), padx=12, sticky="e")
         ttk.Button(btn_frame, text="Cancel", command=dialog.destroy).pack(side="left", padx=(0, 6))
         ttk.Button(btn_frame, text="Save Changes" if editing else "Save Play",
                    command=save_play).pack(side="left")
