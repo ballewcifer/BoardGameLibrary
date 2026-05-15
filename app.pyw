@@ -3282,7 +3282,8 @@ class App(tk.Tk):
 
         ttk.Label(dialog, text="Winner:", font=("Segoe UI", 9, "bold")).grid(row=3, column=0, **pad)
         winner_var = tk.StringVar(value=play["winner"] or "" if editing else "")
-        _AutocompleteEntry(dialog, member_names, textvariable=winner_var,
+        _AutocompleteEntry(dialog, ["All", "None"] + member_names,
+                           textvariable=winner_var,
                            width=36).grid(row=3, column=1, **pad)
 
         ttk.Label(dialog, text="Duration (minutes):", font=("Segoe UI", 9, "bold")).grid(row=4, column=0, **pad)
