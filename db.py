@@ -53,16 +53,19 @@ CREATE TABLE IF NOT EXISTS loans (
     user_id         INTEGER NOT NULL REFERENCES users(id)     ON DELETE CASCADE,
     checked_out_at  TEXT NOT NULL,
     returned_at     TEXT,
+    due_date        TEXT,
     notes           TEXT
 );
 
 CREATE TABLE IF NOT EXISTS plays (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    game_id         INTEGER NOT NULL REFERENCES games(bgg_id) ON DELETE CASCADE,
-    played_at       TEXT NOT NULL,
-    player_names    TEXT,
-    winner          TEXT,
-    notes           TEXT
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id           INTEGER NOT NULL REFERENCES games(bgg_id) ON DELETE CASCADE,
+    played_at         TEXT NOT NULL,
+    player_names      TEXT,
+    winner            TEXT,
+    notes             TEXT,
+    duration_minutes  INTEGER,
+    scores            TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_loans_open
@@ -74,9 +77,13 @@ CREATE INDEX IF NOT EXISTS idx_plays_game ON plays(game_id);
 # Columns added after the initial release — applied via ALTER TABLE so
 # existing databases are updated without losing data.
 MIGRATIONS = [
-    "ALTER TABLE games ADD COLUMN is_favorite    INTEGER DEFAULT 0",
-    "ALTER TABLE games ADD COLUMN has_insert     INTEGER DEFAULT 0",
-    "ALTER TABLE games ADD COLUMN is_expansion   INTEGER DEFAULT 0",
+    "ALTER TABLE games ADD COLUMN is_favorite       INTEGER DEFAULT 0",
+    "ALTER TABLE games ADD COLUMN has_insert        INTEGER DEFAULT 0",
+    "ALTER TABLE games ADD COLUMN is_expansion      INTEGER DEFAULT 0",
+    "ALTER TABLE games ADD COLUMN tags              TEXT",
+    "ALTER TABLE loans ADD COLUMN due_date          TEXT",
+    "ALTER TABLE plays ADD COLUMN duration_minutes  INTEGER",
+    "ALTER TABLE plays ADD COLUMN scores            TEXT",
 ]
 
 
@@ -190,12 +197,18 @@ def open_loan_for_game(c: sqlite3.Connection, bgg_id: int) -> Optional[sqlite3.R
     ).fetchone()
 
 
-def check_out(c: sqlite3.Connection, bgg_id: int, user_id: int, notes: str = "") -> int:
+def check_out(
+    c: sqlite3.Connection,
+    bgg_id: int,
+    user_id: int,
+    notes: str = "",
+    due_date: Optional[str] = None,
+) -> int:
     if open_loan_for_game(c, bgg_id) is not None:
         raise ValueError("Game is already checked out.")
     cur = c.execute(
-        "INSERT INTO loans (game_id, user_id, checked_out_at, notes) VALUES (?, ?, ?, ?)",
-        (bgg_id, user_id, now_iso(), notes),
+        "INSERT INTO loans (game_id, user_id, checked_out_at, due_date, notes) VALUES (?, ?, ?, ?, ?)",
+        (bgg_id, user_id, now_iso(), due_date or None, notes),
     )
     return cur.lastrowid
 
@@ -244,10 +257,14 @@ def log_play(
     player_names: str = "",
     winner: str = "",
     notes: str = "",
+    duration_minutes: Optional[int] = None,
+    scores: Optional[str] = None,
 ) -> int:
     cur = c.execute(
-        "INSERT INTO plays (game_id, played_at, player_names, winner, notes) VALUES (?, ?, ?, ?, ?)",
-        (game_id, played_at, player_names.strip(), winner.strip(), notes.strip()),
+        "INSERT INTO plays (game_id, played_at, player_names, winner, notes, duration_minutes, scores) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (game_id, played_at, player_names.strip(), winner.strip(), notes.strip(),
+         duration_minutes, scores),
     )
     return cur.lastrowid
 
@@ -264,10 +281,14 @@ def update_play(
     player_names: str = "",
     winner: str = "",
     notes: str = "",
+    duration_minutes: Optional[int] = None,
+    scores: Optional[str] = None,
 ) -> None:
     c.execute(
-        "UPDATE plays SET game_id=?, played_at=?, player_names=?, winner=?, notes=? WHERE id=?",
-        (game_id, played_at, player_names.strip(), winner.strip(), notes.strip(), play_id),
+        "UPDATE plays SET game_id=?, played_at=?, player_names=?, winner=?, notes=?, "
+        "duration_minutes=?, scores=? WHERE id=?",
+        (game_id, played_at, player_names.strip(), winner.strip(), notes.strip(),
+         duration_minutes, scores, play_id),
     )
 
 
@@ -297,6 +318,130 @@ def play_counts(c: sqlite3.Connection) -> dict[int, int]:
     """Return {bgg_id: play_count} for all games that have been played."""
     rows = c.execute("SELECT game_id, COUNT(*) AS n FROM plays GROUP BY game_id").fetchall()
     return {r["game_id"]: r["n"] for r in rows}
+
+
+# ---------- tags ----------
+
+def set_tags(c: sqlite3.Connection, bgg_id: int, tags: str) -> None:
+    """Store a comma-separated tag string for a game."""
+    c.execute("UPDATE games SET tags = ? WHERE bgg_id = ?", (tags.strip() or None, bgg_id))
+
+
+def all_tags(c: sqlite3.Connection) -> list[str]:
+    """Return a sorted deduplicated list of every tag in use across all games."""
+    rows = c.execute("SELECT tags FROM games WHERE tags IS NOT NULL AND tags != ''").fetchall()
+    seen: set[str] = set()
+    for row in rows:
+        for t in row["tags"].split(","):
+            t = t.strip()
+            if t:
+                seen.add(t)
+    return sorted(seen, key=str.casefold)
+
+
+# ---------- dashboard helpers ----------
+
+def stats_summary(c: sqlite3.Connection) -> dict:
+    """Return aggregate counts useful for the dashboard."""
+    total_games   = c.execute("SELECT COUNT(*) FROM games").fetchone()[0]
+    total_plays   = c.execute("SELECT COUNT(*) FROM plays").fetchone()[0]
+    total_members = c.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+    checked_out   = c.execute(
+        "SELECT COUNT(*) FROM loans WHERE returned_at IS NULL"
+    ).fetchone()[0]
+    return {
+        "total_games":   total_games,
+        "total_plays":   total_plays,
+        "total_members": total_members,
+        "checked_out":   checked_out,
+    }
+
+
+def currently_checked_out(c: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Return all open loans with game name, borrower, checkout date, and due date."""
+    return c.execute(
+        """
+        SELECT loans.id, loans.checked_out_at, loans.due_date,
+               games.name AS game_name, games.bgg_id,
+               users.first_name, users.last_name
+        FROM loans
+        JOIN games ON games.bgg_id = loans.game_id
+        JOIN users ON users.id     = loans.user_id
+        WHERE loans.returned_at IS NULL
+        ORDER BY loans.checked_out_at ASC
+        """
+    ).fetchall()
+
+
+def recent_plays(c: sqlite3.Connection, limit: int = 10) -> list[sqlite3.Row]:
+    """Return the most recent play log entries."""
+    return c.execute(
+        """
+        SELECT plays.*, games.name AS game_name
+        FROM plays
+        JOIN games ON games.bgg_id = plays.game_id
+        ORDER BY plays.played_at DESC
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+
+
+def top_games_by_plays(c: sqlite3.Connection, limit: int = 5) -> list[sqlite3.Row]:
+    """Return games ranked by total play count."""
+    return c.execute(
+        """
+        SELECT games.bgg_id, games.name, COUNT(plays.id) AS play_count
+        FROM plays
+        JOIN games ON games.bgg_id = plays.game_id
+        GROUP BY plays.game_id
+        ORDER BY play_count DESC
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+
+
+def top_winners(c: sqlite3.Connection, limit: int = 5) -> list[sqlite3.Row]:
+    """Return members ranked by number of plays they've won."""
+    return c.execute(
+        """
+        SELECT winner, COUNT(*) AS win_count
+        FROM plays
+        WHERE winner IS NOT NULL AND winner != ''
+        GROUP BY winner
+        ORDER BY win_count DESC
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+
+
+def game_play_stats(c: sqlite3.Connection, bgg_id: int) -> dict:
+    """Return per-game play statistics for the Details popup."""
+    rows = c.execute(
+        "SELECT played_at, player_names, winner, duration_minutes "
+        "FROM plays WHERE game_id = ? ORDER BY played_at",
+        (bgg_id,),
+    ).fetchall()
+    if not rows:
+        return {"count": 0}
+    count = len(rows)
+    last_played = rows[-1]["played_at"][:10]
+    durations = [r["duration_minutes"] for r in rows if r["duration_minutes"]]
+    avg_duration = int(sum(durations) / len(durations)) if durations else None
+    # Win counts per player
+    win_counts: dict[str, int] = {}
+    for r in rows:
+        w = (r["winner"] or "").strip()
+        if w:
+            win_counts[w] = win_counts.get(w, 0) + 1
+    return {
+        "count":        count,
+        "last_played":  last_played,
+        "avg_duration": avg_duration,
+        "win_counts":   win_counts,
+    }
 
 
 if __name__ == "__main__":
