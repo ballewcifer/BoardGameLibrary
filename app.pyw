@@ -723,7 +723,7 @@ class App(tk.Tk):
         else:
             for r in recent:
                 date = r["played_at"][:10]
-                winner = f"  🏆 {r['winner']}" if r.get("winner") else ""
+                winner = f"  🏆 {r['winner']}" if r["winner"] else ""
                 ttk.Label(lf, text=f"{date}  {r['game_name']}{winner}",
                           font=("Segoe UI", 9)).pack(anchor="w", pady=1)
 
