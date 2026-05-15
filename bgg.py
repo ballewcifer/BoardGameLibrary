@@ -439,6 +439,104 @@ def search_games(
     return results
 
 
+# ---------- BGG play logging (write path) ----------
+
+def _bgg_login(username: str, password: str):
+    """POST credentials to BGG and return (CookieJar, opener) on success.
+
+    BGG's modern login endpoint accepts JSON and responds with a session cookie.
+    Returns (None, None) if authentication fails.
+    """
+    import json as _json
+    import http.cookiejar
+
+    jar = http.cookiejar.CookieJar()
+    opener = urllib.request.build_opener(
+        urllib.request.HTTPCookieProcessor(jar),
+        urllib.request.HTTPSHandler(context=_ssl_ctx()),
+    )
+    payload = _json.dumps({
+        "credentials": {"username": username, "password": password},
+    }).encode()
+    req = urllib.request.Request(
+        "https://boardgamegeek.com/login/api/v1",
+        data=payload,
+        headers={
+            "User-Agent":   BROWSER_UA,
+            "Content-Type": "application/json",
+            "Accept":       "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with opener.open(req, timeout=15) as resp:
+            if resp.status == 200:
+                return jar, opener
+    except Exception:
+        pass
+    return None, None
+
+
+def log_play_to_bgg(
+    username: str,
+    password: str,
+    bgg_id: int,
+    played_at: str,
+    player_names: str = "",
+    notes: str = "",
+) -> tuple[bool, str]:
+    """Log a play to the user's BGG profile.
+
+    Authenticates with BGG then POSTs to geekplay.php.
+    Returns (success: bool, message: str).
+    """
+    import json as _json
+
+    jar, opener = _bgg_login(username, password)
+    if jar is None:
+        return False, "BGG login failed — check username/password in Settings."
+
+    players = [p.strip() for p in player_names.split(",") if p.strip()]
+
+    # Build form data
+    data: dict[str, str] = {
+        "objectid":   str(bgg_id),
+        "objecttype": "thing",
+        "action":     "save",
+        "playdate":   played_at[:10],   # YYYY-MM-DD
+        "quantity":   "1",
+        "ajax":       "1",
+        "comments":   notes,
+    }
+    for i, name in enumerate(players):
+        data[f"players[{i}][name]"] = name
+        data[f"players[{i}][username]"] = ""
+
+    req = urllib.request.Request(
+        "https://boardgamegeek.com/geekplay.php",
+        data=urllib.parse.urlencode(data).encode(),
+        headers={
+            "User-Agent":      BROWSER_UA,
+            "Content-Type":    "application/x-www-form-urlencoded",
+            "X-Requested-With": "XMLHttpRequest",
+            "Referer":         f"https://boardgamegeek.com/boardgame/{bgg_id}",
+        },
+        method="POST",
+    )
+    try:
+        with opener.open(req, timeout=15) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+            result = _json.loads(body)
+            play_id = result.get("playid")
+            if play_id:
+                return True, f"Logged to BGG (play #{play_id})"
+            # BGG may return errors list
+            errors = result.get("error") or result.get("errors") or "unknown error"
+            return False, f"BGG rejected the play: {errors}"
+    except Exception as exc:
+        return False, f"BGG play log failed: {exc}"
+
+
 # ---------- CSV import (the no-token path) ----------
 
 def _pick(row: dict[str, str], *names: str) -> Optional[str]:
