@@ -1260,21 +1260,18 @@ class App(tk.Tk):
             )
             plays_lbl.pack(side="left")
 
-        # --- availability status ---
-        if out_to:
-            tk.Label(
-                card, text=f"Out: {out_to}",
-                bg="#f0c674", font=("Segoe UI", 8), padx=6, pady=2,
-            ).pack(pady=(6, 0), fill="x")
-        else:
-            tk.Label(
-                card, text="Available",
-                bg="#b5d6a7", font=("Segoe UI", 8), padx=6, pady=2,
-            ).pack(pady=(6, 0), fill="x")
+        # --- bottom-anchored section (packed before top content so buttons
+        #     are always pinned to the card's bottom edge regardless of how
+        #     much text/badges appear above them) ---
+        btn_row2 = ttk.Frame(card)
+        btn_row2.pack(side="bottom", fill="x", pady=(3, 0))
+        ttk.Button(btn_row2, text="Edit",
+                   command=lambda g=game: self.on_edit_game(g)).pack(side="left", expand=True, fill="x")
+        ttk.Button(btn_row2, text="Log Play",
+                   command=lambda g=game: self.on_log_play(g)).pack(side="left", expand=True, fill="x", padx=(2, 0))
 
-        # --- action buttons (2 per row keeps them wide enough to read) ---
         btn_row = ttk.Frame(card)
-        btn_row.pack(pady=(6, 0), fill="x")
+        btn_row.pack(side="bottom", fill="x", pady=(2, 0))
         if out_to:
             ttk.Button(btn_row, text="Check In",
                        command=lambda g=game: self.on_check_in(g)).pack(side="left", expand=True, fill="x")
@@ -1284,12 +1281,16 @@ class App(tk.Tk):
         ttk.Button(btn_row, text="Details",
                    command=lambda g=game: self.show_details(g)).pack(side="left", expand=True, fill="x", padx=(2, 0))
 
-        btn_row2 = ttk.Frame(card)
-        btn_row2.pack(pady=(3, 0), fill="x")
-        ttk.Button(btn_row2, text="Edit",
-                   command=lambda g=game: self.on_edit_game(g)).pack(side="left", expand=True, fill="x")
-        ttk.Button(btn_row2, text="Log Play",
-                   command=lambda g=game: self.on_log_play(g)).pack(side="left", expand=True, fill="x", padx=(2, 0))
+        if out_to:
+            tk.Label(
+                card, text=f"Out: {out_to}",
+                bg="#f0c674", font=("Segoe UI", 8), padx=6, pady=2,
+            ).pack(side="bottom", fill="x", pady=(4, 0))
+        else:
+            tk.Label(
+                card, text="Available",
+                bg="#b5d6a7", font=("Segoe UI", 8), padx=6, pady=2,
+            ).pack(side="bottom", fill="x", pady=(4, 0))
 
         # Right-click anywhere on the card for the full action menu (incl. Delete)
         def _card_right_click(event, g=game):
@@ -2036,18 +2037,84 @@ class App(tk.Tk):
             if not games:
                 self._post_status("BGG auto-sync: no games found.")
                 return
+            # Detect games in BGL that are no longer in the BGG collection
+            bgg_ids = {g.bgg_id for g in games}
+            with db.connect() as c:
+                all_bgl = db.list_games(c)
+            removed = [g for g in all_bgl if g["bgg_id"] not in bgg_ids]
             self._save_games_to_db(games)
             self.after(0, self.refresh_games)
             n = len(games)
             self._post_status(f"BGG auto-sync complete: {n} game{'s' if n != 1 else ''} updated.")
-            # Download any missing images in the background
-            needs_img = [g for g in games
-                         if not g.thumbnail_url and not g.image_url]
-            if any(not g.thumbnail_url and not g.image_url for g in games):
-                pass  # nothing to do
+            if removed:
+                self.after(0, lambda r=removed: self._prompt_bgg_removals(r))
             self._download_thumbnails_bg(games)
         except Exception as exc:
             self._post_status(f"BGG auto-sync failed: {exc}")
+
+    def _prompt_bgg_removals(self, removed: list) -> None:
+        """Main-thread dialog: offer to remove games no longer in the BGG collection."""
+        if not removed:
+            return
+
+        win = tk.Toplevel(self)
+        win.title("Games No Longer in BGG Collection")
+        win.transient(self)
+        win.resizable(False, True)
+        win.configure(bg=C_BG)
+
+        _n = len(removed)
+        _pl = "s" if _n != 1 else ""
+        _vb = "are" if _n != 1 else "is"
+        ttk.Label(
+            win,
+            text=(
+                f"{_n} game{_pl} in your library {_vb} no longer in your BGG collection.\n"
+                "Check the ones you want to remove from Board Game Library."
+            ),
+            wraplength=380, justify="left",
+        ).pack(padx=20, pady=(16, 8), anchor="w")
+
+        # Scrollable checklist
+        list_frame = tk.Frame(win, bg=C_BG)
+        list_frame.pack(fill="both", expand=True, padx=20)
+
+        vsb = ttk.Scrollbar(list_frame, orient="vertical")
+        vsb.pack(side="right", fill="y")
+        canvas = tk.Canvas(list_frame, bg=C_BG, highlightthickness=0,
+                           yscrollcommand=vsb.set, height=min(len(removed) * 28, 260))
+        canvas.pack(side="left", fill="both", expand=True)
+        vsb.configure(command=canvas.yview)
+
+        inner = tk.Frame(canvas, bg=C_BG)
+        canvas.create_window(0, 0, anchor="nw", window=inner)
+
+        check_vars: list[tuple] = []   # (game_row, BooleanVar)
+        for g in removed:
+            var = tk.BooleanVar(value=True)
+            ttk.Checkbutton(inner, text=g["name"], variable=var).pack(anchor="w", pady=1)
+            check_vars.append((g, var))
+
+        inner.update_idletasks()
+        canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def _do_remove() -> None:
+            to_del = [g for g, v in check_vars if v.get()]
+            if to_del:
+                with db.connect() as c:
+                    for g in to_del:
+                        db.delete_game(c, g["bgg_id"])
+                self.refresh_games()
+                n = len(to_del)
+                self.status(f"Removed {n} game{'s' if n != 1 else ''} from the library.")
+            win.destroy()
+
+        btn_row = ttk.Frame(win)
+        btn_row.pack(pady=12, padx=20, anchor="e")
+        ttk.Button(btn_row, text="Keep All", command=win.destroy).pack(side="left", padx=(0, 6))
+        ttk.Button(btn_row, text="Remove Selected", command=_do_remove).pack(side="left")
+
+        win.grab_set()
 
     def _sync_play_to_bgg_bg(
         self,
@@ -2098,11 +2165,19 @@ class App(tk.Tk):
                     d.my_rating = entry.my_rating
                     d.my_comment = entry.my_comment
 
+            # Detect games in BGL that are no longer in the BGG collection
+            bgg_ids = set(by_id.keys())
+            with db.connect() as c:
+                all_bgl = db.list_games(c)
+            removed = [g for g in all_bgl if g["bgg_id"] not in bgg_ids]
+
             self._save_games_to_db(list(by_id.values()))
             self._post_status("Saved to database. Downloading thumbnails...")
             self._download_thumbnails_bg(list(by_id.values()))
             self.after(0, self.refresh_games)
             self._post_status(f"Sync complete: {len(by_id)} games.")
+            if removed:
+                self.after(0, lambda r=removed: self._prompt_bgg_removals(r))
         except Exception as e:
             traceback.print_exc()
             self.after(0, lambda err=e: messagebox.showerror("Sync failed", str(err)))
