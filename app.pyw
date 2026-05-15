@@ -102,6 +102,99 @@ def fmt_date(iso: Optional[str]) -> str:
         return iso
 
 
+class _AutocompleteEntry(ttk.Entry):
+    """Entry widget that shows a dropdown of suggestions as the user types.
+
+    Supports comma-separated values: pressing a suggestion replaces only the
+    *last* comma-delimited token, so Players can be entered as
+    "Alice, Bob, ..." with autocomplete on each name.
+    """
+
+    def __init__(self, parent, suggestions: list[str], **kwargs):
+        self._suggestions = suggestions
+        self._var: tk.StringVar = kwargs.pop("textvariable", tk.StringVar())
+        super().__init__(parent, textvariable=self._var, **kwargs)
+        self._popup: Optional[tk.Toplevel] = None
+        self._lb:    Optional[tk.Listbox]  = None
+        self._var.trace_add("write", self._on_change)
+        self.bind("<FocusOut>", lambda e: self.after(150, self._hide))
+        self.bind("<Escape>",   lambda e: self._hide())
+        self.bind("<Down>",     self._focus_lb)
+
+    @property
+    def var(self) -> tk.StringVar:
+        return self._var
+
+    def _last_token(self) -> str:
+        text = self._var.get()
+        return text.rsplit(",", 1)[-1].strip()
+
+    def _on_change(self, *_) -> None:
+        token = self._last_token()
+        if not token:
+            self._hide()
+            return
+        matches = [s for s in self._suggestions if token.lower() in s.lower()]
+        if matches:
+            self._show(matches)
+        else:
+            self._hide()
+
+    def _show(self, matches: list[str]) -> None:
+        if self._popup is None:
+            self._popup = tk.Toplevel(self)
+            self._popup.wm_overrideredirect(True)
+            self._popup.wm_attributes("-topmost", True)
+            self._lb = tk.Listbox(
+                self._popup, selectmode="single",
+                font=("Segoe UI", 9), activestyle="none",
+                selectbackground=C_BLUE, selectforeground=C_WHITE,
+                relief="solid", borderwidth=1,
+            )
+            self._lb.pack(fill="both", expand=True)
+            self._lb.bind("<ButtonRelease-1>", self._pick)
+            self._lb.bind("<Return>",          self._pick)
+            self._lb.bind("<FocusOut>",        lambda e: self.after(150, self._hide))
+
+        self._lb.delete(0, "end")
+        for m in matches[:8]:
+            self._lb.insert("end", m)
+
+        count = min(len(matches), 8)
+        x = self.winfo_rootx()
+        y = self.winfo_rooty() + self.winfo_height()
+        w = max(self.winfo_width(), 200)
+        self._popup.wm_geometry(f"{w}x{count * 22}+{x}+{y}")
+        self._popup.deiconify()
+        self._popup.lift()
+
+    def _hide(self, *_) -> None:
+        if self._popup:
+            self._popup.withdraw()
+
+    def _focus_lb(self, event=None) -> None:
+        if self._lb and self._lb.size():
+            self._lb.focus_set()
+            self._lb.selection_set(0)
+
+    def _pick(self, event=None) -> None:
+        if not self._lb:
+            return
+        sel = self._lb.curselection()
+        if not sel:
+            return
+        picked = self._lb.get(sel[0])
+        current = self._var.get()
+        if "," in current:
+            prefix = current.rsplit(",", 1)[0].rstrip() + ", "
+        else:
+            prefix = ""
+        self._var.set(prefix + picked)
+        self.icursor("end")
+        self._hide()
+        self.focus_set()
+
+
 class App(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
@@ -530,7 +623,7 @@ class App(tk.Tk):
 
         col_defs = [
             ("fav",     "★",           34,  "center"),
-            ("insert",  "\U0001f5f3",  34,  "center"),
+            ("insert",  "📦",          34,  "center"),
             ("name",    "Name",        260, "w"     ),
             ("year",    "Year",         54, "center"),
             ("players", "Players",      72, "center"),
@@ -615,11 +708,16 @@ class App(tk.Tk):
         card_w = 180
         gap = 12
         cols = max(1, (container_width - gap) // (card_w + gap))
+        rows_used = 0
         for i, card in enumerate(self._cards):
             r, c = divmod(i, cols)
-            card.grid(row=r, column=c, padx=gap // 2, pady=gap // 2, sticky="n")
+            rows_used = max(rows_used, r + 1)
+            card.grid(row=r, column=c, padx=gap // 2, pady=gap // 2, sticky="nsew")
         for c in range(cols):
             self.games_inner.grid_columnconfigure(c, weight=1)
+        # Give each row uniform weight so cards in the same row share a height
+        for r in range(rows_used):
+            self.games_inner.grid_rowconfigure(r, weight=0)
 
     def _reset_filters(self) -> None:
         self.players_var.set("Any")
@@ -876,7 +974,7 @@ class App(tk.Tk):
                 tags=tags,
                 values=(
                     "★" if g["is_favorite"] else "",
-                    "\U0001f5f3" if g["has_insert"] else "",
+                    "\U0001f4e6" if g["has_insert"] else "",
                     g["name"],
                     g["year"] or "—",
                     fmt_players(g["min_players"], g["max_players"]),
@@ -897,7 +995,7 @@ class App(tk.Tk):
             self._sort_rev = False
 
         _labels = {
-            "fav": "★", "insert": "\U0001f5f3", "name": "Name", "year": "Year",
+            "fav": "★", "insert": "📦", "name": "Name", "year": "Year",
             "players": "Players", "time": "Time", "weight": "Complexity",
             "rating": "BGG ★", "best": "Best At", "status": "Status", "plays": "Plays",
         }
@@ -1017,21 +1115,20 @@ class App(tk.Tk):
         )
         ttk.Label(card, text=info, foreground="#444").pack(pady=(4, 0))
 
-        # --- best-at line ---
-        if game["best_players"]:
-            ttk.Label(
-                card,
-                text=f"★ Best at {game['best_players']}",
-                foreground="#b8860b",
-                font=("Segoe UI", 8),
-            ).pack()
+        # --- best-at line (always present so all cards are the same height) ---
+        ttk.Label(
+            card,
+            text=f"★ Best at {game['best_players']}" if game["best_players"] else "",
+            foreground="#b8860b",
+            font=("Segoe UI", 8),
+        ).pack()
 
         # --- badges row: insert + play count ---
         badge_row = ttk.Frame(card)
         badge_row.pack(pady=(3, 0))
         if has_insert:
             tk.Label(
-                badge_row, text="\U0001f5f3 Insert",
+                badge_row, text="\U0001f4e6 Insert",
                 bg="#d0e8ff", fg="#1a5276",
                 font=("Segoe UI", 8), padx=4, pady=1,
             ).pack(side="left", padx=(0, 4))
@@ -1136,6 +1233,11 @@ class App(tk.Tk):
         self.members_tree.column("out", width=120, anchor="center")
         self.members_tree.column("since", width=160, anchor="center")
         self.members_tree.pack(fill="both", expand=True, pady=(8, 0))
+        self.members_tree.bind("<Double-1>", self._on_member_double_click)
+
+        tip = ttk.Label(frame, text="Double-click a member to see their checkout history.",
+                        foreground="#888", font=("Segoe UI", 8))
+        tip.pack(anchor="w", pady=(4, 0))
 
     def refresh_members(self) -> None:
         self.members_tree.delete(*self.members_tree.get_children())
@@ -1193,6 +1295,87 @@ class App(tk.Tk):
         self.refresh_history()
         self.status(f"Removed {name}.")
 
+    def _on_member_double_click(self, event: tk.Event) -> None:
+        row = self.members_tree.identify_row(event.y)
+        if not row:
+            return
+        self.members_tree.selection_set(row)
+        self._show_member_checkouts(int(row))
+
+    def _show_member_checkouts(self, user_id: int) -> None:
+        """Open a popup showing all loan history for the given member."""
+        with db.connect() as c:
+            user = c.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+            loans = db.loan_history(c, user_id=user_id)
+        if not user:
+            return
+
+        name = f"{user['first_name']} {user['last_name']}"
+        win = tk.Toplevel(self)
+        win.title(f"Checkout History — {name}")
+        win.geometry("640x420")
+        win.minsize(500, 300)
+        win.transient(self)
+        win.configure(bg=C_BG)
+
+        # ── header ────────────────────────────────────────────────────────────
+        hdr = tk.Frame(win, bg=C_NAVY, pady=10)
+        hdr.pack(fill="x")
+        tk.Label(hdr, text=name, bg=C_NAVY, fg=C_WHITE,
+                 font=("Segoe UI", 11, "bold")).pack(anchor="w", padx=12)
+        tk.Label(hdr, text=f"Member since {fmt_date(user['created_at'])}",
+                 bg=C_NAVY, fg=C_SKY,
+                 font=("Segoe UI", 8)).pack(anchor="w", padx=12)
+
+        # ── loan table ────────────────────────────────────────────────────────
+        frame = ttk.Frame(win, padding=(8, 8, 8, 4))
+        frame.pack(fill="both", expand=True)
+
+        cols = ("game", "out", "returned", "notes")
+        tree = ttk.Treeview(frame, columns=cols, show="headings", selectmode="browse")
+        tree.heading("game",     text="Game")
+        tree.heading("out",      text="Checked out")
+        tree.heading("returned", text="Returned")
+        tree.heading("notes",    text="Notes")
+        tree.column("game",     width=240)
+        tree.column("out",      width=140, anchor="center")
+        tree.column("returned", width=140, anchor="center")
+        tree.column("notes",    width=150)
+
+        vsb = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=vsb.set)
+        tree.pack(side="left", fill="both", expand=True)
+        vsb.pack(side="left", fill="y")
+
+        # Colour open loans amber
+        tree.tag_configure("open", background="#fff8e1")
+
+        still_out = 0
+        for loan in loans:
+            is_open = loan["returned_at"] is None
+            if is_open:
+                still_out += 1
+            tree.insert("", "end",
+                        tags=("open",) if is_open else (),
+                        values=(
+                            loan["game_name"],
+                            fmt_date(loan["checked_out_at"]),
+                            fmt_date(loan["returned_at"]) or "⬤ still out",
+                            loan["notes"] or "",
+                        ))
+
+        summary = ttk.Label(
+            win,
+            text=f"{len(loans)} checkout{'s' if len(loans) != 1 else ''} total"
+                 + (f"  •  {still_out} currently out" if still_out else ""),
+            foreground="#555",
+            font=("Segoe UI", 8),
+        )
+        summary.pack(anchor="w", padx=10)
+
+        ttk.Button(win, text="Close", command=win.destroy).pack(pady=(4, 10))
+        win.grab_set()
+
     # ---------- history tab ----------
 
     def _build_history_tab(self) -> None:
@@ -1220,6 +1403,12 @@ class App(tk.Tk):
         self.history_tree.column("returned", width=140, anchor="center")
         self.history_tree.column("notes", width=200)
         self.history_tree.pack(fill="both", expand=True, pady=(8, 0))
+        self.history_tree.bind("<Double-1>",  self._on_history_double_click)
+        self.history_tree.bind("<Button-3>",  self._on_history_right_click)
+
+        tip2 = ttk.Label(frame, text="Double-click or right-click a row to edit check-out / check-in details.",
+                         foreground="#888", font=("Segoe UI", 8))
+        tip2.pack(anchor="w", pady=(4, 0))
 
     def refresh_history(self) -> None:
         self.history_tree.delete(*self.history_tree.get_children())
@@ -1234,14 +1423,139 @@ class App(tk.Tk):
             self.history_tree.insert(
                 "",
                 "end",
+                iid=str(r["id"]),   # loan primary key so we can edit the row
                 values=(
                     r["game_name"],
                     f"{r['first_name']} {r['last_name']}",
                     fmt_date(r["checked_out_at"]),
-                    fmt_date(r["returned_at"]) or "(out)",
+                    fmt_date(r["returned_at"]) or "⬤ still out",
                     r["notes"] or "",
                 ),
             )
+
+    def _on_history_double_click(self, event: tk.Event) -> None:
+        row = self.history_tree.identify_row(event.y)
+        if not row:
+            return
+        self.history_tree.selection_set(row)
+        self._edit_loan(int(row))
+
+    def _on_history_right_click(self, event: tk.Event) -> None:
+        row = self.history_tree.identify_row(event.y)
+        if not row:
+            return
+        self.history_tree.selection_set(row)
+        loan_id = int(row)
+        with db.connect() as c:
+            loan = c.execute("SELECT * FROM loans WHERE id = ?", (loan_id,)).fetchone()
+        if not loan:
+            return
+        menu = tk.Menu(self, tearoff=0)
+        if loan["returned_at"] is None:
+            menu.add_command(
+                label="Mark as Returned (now)",
+                command=lambda lid=loan_id: self._loan_mark_returned(lid),
+            )
+        else:
+            menu.add_command(
+                label="Mark as Still Out",
+                command=lambda lid=loan_id: self._loan_mark_out(lid),
+            )
+        menu.add_command(label="Edit details…", command=lambda lid=loan_id: self._edit_loan(lid))
+        menu.tk_popup(event.x_root, event.y_root)
+
+    def _loan_mark_returned(self, loan_id: int) -> None:
+        with db.connect() as c:
+            c.execute("UPDATE loans SET returned_at = ? WHERE id = ?",
+                      (db.now_iso(), loan_id))
+        self.refresh_history()
+        self.refresh_members()
+        self.refresh_games()
+        self.status("Loan marked as returned.")
+
+    def _loan_mark_out(self, loan_id: int) -> None:
+        with db.connect() as c:
+            c.execute("UPDATE loans SET returned_at = NULL WHERE id = ?", (loan_id,))
+        self.refresh_history()
+        self.refresh_members()
+        self.refresh_games()
+        self.status("Loan marked as still out.")
+
+    def _edit_loan(self, loan_id: int) -> None:
+        """Open a dialog to edit check-out date, return date, and notes for a loan."""
+        with db.connect() as c:
+            loan = c.execute(
+                """SELECT loans.*, games.name AS game_name,
+                          users.first_name, users.last_name
+                   FROM loans
+                   JOIN games ON games.bgg_id = loans.game_id
+                   JOIN users ON users.id     = loans.user_id
+                   WHERE loans.id = ?""",
+                (loan_id,),
+            ).fetchone()
+        if not loan:
+            return
+
+        win = tk.Toplevel(self)
+        win.title("Edit Checkout")
+        win.transient(self)
+        win.resizable(False, False)
+        win.configure(bg=C_BG)
+
+        frame = ttk.Frame(win, padding=16)
+        frame.pack(fill="both")
+
+        ttk.Label(frame,
+                  text=f"Game:    {loan['game_name']}",
+                  font=("Segoe UI", 9, "bold")).grid(row=0, column=0, columnspan=2,
+                                                      sticky="w", pady=(0, 2))
+        ttk.Label(frame,
+                  text=f"Member: {loan['first_name']} {loan['last_name']}",
+                  font=("Segoe UI", 9, "bold")).grid(row=1, column=0, columnspan=2,
+                                                      sticky="w", pady=(0, 10))
+
+        lpad = {"sticky": "w", "padx": (0, 10), "pady": 4}
+
+        ttk.Label(frame, text="Checked out (ISO date/time):").grid(row=2, column=0, **lpad)
+        out_var = tk.StringVar(value=(loan["checked_out_at"] or "")[:19])
+        ttk.Entry(frame, textvariable=out_var, width=22).grid(row=2, column=1, sticky="w")
+
+        ttk.Label(frame, text="Returned (leave blank if still out):").grid(row=3, column=0, **lpad)
+        ret_var = tk.StringVar(value=(loan["returned_at"] or "")[:19])
+        ttk.Entry(frame, textvariable=ret_var, width=22).grid(row=3, column=1, sticky="w")
+
+        ttk.Label(frame, text="Notes:").grid(row=4, column=0, **lpad)
+        notes_var = tk.StringVar(value=loan["notes"] or "")
+        ttk.Entry(frame, textvariable=notes_var, width=32).grid(row=4, column=1, sticky="w")
+
+        err_var = tk.StringVar()
+        ttk.Label(frame, textvariable=err_var, foreground="red",
+                  font=("Segoe UI", 8)).grid(row=5, column=0, columnspan=2, sticky="w")
+
+        def save() -> None:
+            out_val   = out_var.get().strip()   or None
+            ret_val   = ret_var.get().strip()   or None
+            notes_val = notes_var.get().strip() or None
+            if not out_val:
+                err_var.set("Checked-out date is required.")
+                return
+            with db.connect() as c:
+                c.execute(
+                    "UPDATE loans SET checked_out_at=?, returned_at=?, notes=? WHERE id=?",
+                    (out_val, ret_val, notes_val, loan_id),
+                )
+            win.destroy()
+            self.refresh_history()
+            self.refresh_members()
+            self.refresh_games()
+            self.status("Loan record updated.")
+
+        btn_row = ttk.Frame(frame)
+        btn_row.grid(row=6, column=0, columnspan=2, sticky="e", pady=(14, 0))
+        ttk.Button(btn_row, text="Cancel", command=win.destroy).pack(side="left", padx=(0, 6))
+        ttk.Button(btn_row, text="Save",   command=save).pack(side="left")
+
+        win.grab_set()
 
     # ---------- settings dialog ----------
 
@@ -2223,9 +2537,11 @@ class App(tk.Tk):
         """
         with db.connect() as c:
             all_games = db.list_games(c)
+            all_users = db.list_users(c)
         if not all_games:
             messagebox.showinfo("No games", "Import your collection first.")
             return
+        member_names = [f"{u['first_name']} {u['last_name']}" for u in all_users]
 
         editing = play is not None
 
@@ -2255,11 +2571,13 @@ class App(tk.Tk):
 
         ttk.Label(dialog, text="Players (comma-separated):", font=("Segoe UI", 9, "bold")).grid(row=2, column=0, **pad)
         players_var = tk.StringVar(value=play["player_names"] or "" if editing else "")
-        ttk.Entry(dialog, textvariable=players_var, width=36).grid(row=2, column=1, **pad)
+        _AutocompleteEntry(dialog, member_names, textvariable=players_var,
+                           width=36).grid(row=2, column=1, **pad)
 
         ttk.Label(dialog, text="Winner:", font=("Segoe UI", 9, "bold")).grid(row=3, column=0, **pad)
         winner_var = tk.StringVar(value=play["winner"] or "" if editing else "")
-        ttk.Entry(dialog, textvariable=winner_var, width=36).grid(row=3, column=1, **pad)
+        _AutocompleteEntry(dialog, member_names, textvariable=winner_var,
+                           width=36).grid(row=3, column=1, **pad)
 
         ttk.Label(dialog, text="Notes (optional):", font=("Segoe UI", 9, "bold")).grid(row=4, column=0, **pad)
         notes_var = tk.StringVar(value=play["notes"] or "" if editing else "")
@@ -2326,70 +2644,15 @@ class App(tk.Tk):
     def show_details(self, game) -> None:
         win = tk.Toplevel(self)
         win.title(game["name"])
-        win.geometry("640x560")
+        win.geometry("660x600")
+        win.minsize(500, 440)
+        win.transient(self)
 
-        top = ttk.Frame(win, padding=10)
-        top.pack(fill="x")
+        # ── fixed bottom section — always visible regardless of scroll position ─
+        bottom = ttk.Frame(win)
+        bottom.pack(side="bottom", fill="x")
 
-        if game["image_path"] and Path(game["image_path"]).exists():
-            try:
-                img = Image.open(game["image_path"])
-                img.thumbnail((220, 220))
-                tk_img = ImageTk.PhotoImage(img)
-                lbl = ttk.Label(top, image=tk_img)
-                lbl.image = tk_img
-                lbl.pack(side="left", padx=(0, 12))
-            except (OSError, ValueError):
-                pass
-
-        info = ttk.Frame(top)
-        info.pack(side="left", fill="both", expand=True)
-        title = ttk.Label(info, text=game["name"], font=("Segoe UI", 13, "bold"))
-        title.pack(anchor="w")
-        if game["year"]:
-            ttk.Label(info, text=f"Published {game['year']}", foreground="#666").pack(anchor="w")
-
-        rows: list[tuple[str, str]] = []
-        rows.append(("Players", fmt_players(game["min_players"], game["max_players"])))
-        rows.append(("Playing time", fmt_time(game["min_playtime"], game["max_playtime"], game["playing_time"])))
-        if game["min_age"]:
-            rows.append(("Min age", f"{game['min_age']}+"))
-        if game["best_players"]:
-            rows.append(("Best at", f"{game['best_players']} players"))
-        if game["weight"]:
-            rows.append(("Complexity", f"{game['weight']:.2f} / 5"))
-        if game["avg_rating"]:
-            rows.append(("BGG rating", f"{game['avg_rating']:.2f}"))
-        if game["my_rating"]:
-            rows.append(("My rating", f"{game['my_rating']:.1f}"))
-        if game["categories"]:
-            rows.append(("Categories", game["categories"]))
-        if game["mechanics"]:
-            rows.append(("Mechanics", game["mechanics"]))
-        if game["designers"]:
-            rows.append(("Designers", game["designers"]))
-        if game["publishers"]:
-            rows.append(("Publishers", game["publishers"]))
-
-        grid = ttk.Frame(info)
-        grid.pack(anchor="w", pady=(8, 0), fill="x")
-        for i, (k, v) in enumerate(rows):
-            ttk.Label(grid, text=f"{k}:", font=("Segoe UI", 9, "bold")).grid(row=i, column=0, sticky="nw", padx=(0, 8))
-            ttk.Label(grid, text=v, wraplength=320, justify="left").grid(row=i, column=1, sticky="w")
-
-        if game["my_comment"]:
-            ttk.Label(win, text="Your note:", font=("Segoe UI", 9, "bold"), padding=(10, 6, 10, 0)).pack(anchor="w")
-            ttk.Label(win, text=game["my_comment"], wraplength=600, justify="left", padding=(10, 0)).pack(anchor="w")
-
-        if game["description"]:
-            ttk.Label(win, text="Description:", font=("Segoe UI", 9, "bold"), padding=(10, 6, 10, 0)).pack(anchor="w")
-            text = tk.Text(win, wrap="word", height=8)
-            text.insert("1.0", game["description"])
-            text.configure(state="disabled")
-            text.pack(fill="both", expand=True, padx=10, pady=(0, 6))
-
-        # --- toggles row ---
-        toggles = ttk.Frame(win, padding=(10, 4))
+        toggles = ttk.Frame(bottom, padding=(10, 6))
         toggles.pack(fill="x")
 
         insert_var = tk.BooleanVar(value=bool(game["has_insert"]))
@@ -2398,7 +2661,7 @@ class App(tk.Tk):
                 db.set_insert(c, game["bgg_id"], insert_var.get())
             self.refresh_games()
         ttk.Checkbutton(
-            toggles, text="\U0001f5f3 Has 3D printed insert",
+            toggles, text="📦 Has 3D printed insert",
             variable=insert_var, command=on_insert_toggle,
         ).pack(side="left")
 
@@ -2412,14 +2675,111 @@ class App(tk.Tk):
             variable=fav_var, command=on_fav_toggle,
         ).pack(side="left", padx=(20, 0))
 
-        close_row = ttk.Frame(win)
-        close_row.pack(fill="x", pady=(0, 10))
-        ttk.Button(close_row, text="Log Play",
-                   command=lambda: self.on_log_play(game)).pack(side="left", padx=10)
-        ttk.Button(close_row, text="Set Image…",
+        tk.Frame(bottom, bg=C_PALE, height=1).pack(fill="x")
+        action_row = ttk.Frame(bottom, padding=(8, 6))
+        action_row.pack(fill="x")
+        ttk.Button(action_row, text="Log Play",
+                   command=lambda: self.on_log_play(game)).pack(side="left", padx=(2, 4))
+        ttk.Button(action_row, text="Set Image…",
                    command=lambda: self.on_set_image(game, refresh_callback=win.destroy)
                    ).pack(side="left")
-        ttk.Button(close_row, text="Close", command=win.destroy).pack(side="right", padx=10)
+        ttk.Button(action_row, text="Close",
+                   command=win.destroy).pack(side="right", padx=(0, 2))
+
+        # ── scrollable content area ────────────────────────────────────────────
+        canvas = tk.Canvas(win, highlightthickness=0, bg=C_BG)
+        vsb = ttk.Scrollbar(win, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=vsb.set)
+
+        content = ttk.Frame(canvas, padding=10)
+        cw_id = canvas.create_window((0, 0), window=content, anchor="nw")
+
+        def _on_content_configure(e):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+        content.bind("<Configure>", _on_content_configure)
+
+        def _on_canvas_configure(e):
+            canvas.itemconfigure(cw_id, width=e.width)
+        canvas.bind("<Configure>", _on_canvas_configure)
+
+        def _on_mousewheel(e):
+            if win.winfo_exists():
+                canvas.yview_scroll(int(-e.delta / 120), "units")
+        canvas.bind("<MouseWheel>", _on_mousewheel)
+        content.bind("<MouseWheel>", _on_mousewheel)
+
+        vsb.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+
+        # ── image + title row ─────────────────────────────────────────────────
+        top = ttk.Frame(content)
+        top.pack(fill="x", pady=(0, 6))
+
+        if game["image_path"] and Path(game["image_path"]).exists():
+            try:
+                img = Image.open(game["image_path"])
+                img.thumbnail((200, 200))
+                tk_img = ImageTk.PhotoImage(img)
+                lbl = ttk.Label(top, image=tk_img)
+                lbl.image = tk_img
+                lbl.pack(side="left", padx=(0, 14))
+            except (OSError, ValueError):
+                pass
+
+        info = ttk.Frame(top)
+        info.pack(side="left", fill="both", expand=True)
+        ttk.Label(info, text=game["name"], font=("Segoe UI", 13, "bold")).pack(anchor="w")
+        if game["year"]:
+            ttk.Label(info, text=f"Published {game['year']}", foreground="#666").pack(anchor="w")
+
+        detail_rows: list[tuple[str, str]] = []
+        detail_rows.append(("Players",     fmt_players(game["min_players"], game["max_players"])))
+        detail_rows.append(("Playing time", fmt_time(game["min_playtime"], game["max_playtime"], game["playing_time"])))
+        if game["min_age"]:
+            detail_rows.append(("Min age",    f"{game['min_age']}+"))
+        if game["best_players"]:
+            detail_rows.append(("Best at",    f"{game['best_players']} players"))
+        if game["weight"]:
+            detail_rows.append(("Complexity", f"{game['weight']:.2f} / 5"))
+        if game["avg_rating"]:
+            detail_rows.append(("BGG rating", f"{game['avg_rating']:.2f}"))
+        if game["my_rating"]:
+            detail_rows.append(("My rating",  f"{game['my_rating']:.1f}"))
+        if game["categories"]:
+            detail_rows.append(("Categories", game["categories"]))
+        if game["mechanics"]:
+            detail_rows.append(("Mechanics",  game["mechanics"]))
+        if game["designers"]:
+            detail_rows.append(("Designers",  game["designers"]))
+        if game["publishers"]:
+            detail_rows.append(("Publishers", game["publishers"]))
+
+        grid = ttk.Frame(info)
+        grid.pack(anchor="w", pady=(8, 0), fill="x")
+        for i, (k, v) in enumerate(detail_rows):
+            ttk.Label(grid, text=f"{k}:", font=("Segoe UI", 9, "bold")).grid(
+                row=i, column=0, sticky="nw", padx=(0, 8))
+            ttk.Label(grid, text=v, wraplength=320, justify="left").grid(
+                row=i, column=1, sticky="w")
+
+        if game["my_comment"]:
+            ttk.Label(content, text="Your note:",
+                      font=("Segoe UI", 9, "bold"), padding=(0, 6, 0, 0)).pack(anchor="w")
+            ttk.Label(content, text=game["my_comment"],
+                      wraplength=600, justify="left").pack(anchor="w")
+
+        if game["description"]:
+            ttk.Label(content, text="Description:",
+                      font=("Segoe UI", 9, "bold"), padding=(0, 6, 0, 0)).pack(anchor="w")
+            text_box = tk.Text(content, wrap="word", height=10,
+                               font=("Segoe UI", 9), relief="flat",
+                               bg=C_BG, bd=0)
+            text_box.insert("1.0", game["description"])
+            text_box.configure(state="disabled")
+            text_box.pack(fill="x", pady=(0, 6))
+            text_box.bind("<MouseWheel>", _on_mousewheel)
+
+        win.grab_set()
 
     # ---------- set image ----------
 
