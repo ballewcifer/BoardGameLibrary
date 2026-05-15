@@ -3,4 +3,4 @@
 All build scripts, the About dialog, and GitHub Actions read from here.
 Bump this string, commit, tag, and push — everything else follows.
 """
-__version__ = "4.2.1"
+__version__ = "4.3.0"
