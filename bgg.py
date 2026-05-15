@@ -439,6 +439,74 @@ def search_games(
     return results
 
 
+# ---------- BGG play history (read) ----------
+
+def fetch_plays(
+    username: str,
+    *,
+    token: Optional[str] = None,
+    on_status: Optional[Callable[[str], None]] = None,
+) -> list[dict]:
+    """Fetch all plays logged by *username* on BGG.
+
+    Paginates automatically (BGG returns 100 plays per page).
+    Returns a list of dicts with keys:
+        bgg_id, game_name, played_at (YYYY-MM-DD), quantity,
+        player_names (comma-str), notes
+    """
+    plays: list[dict] = []
+    page = 1
+    while True:
+        params = urllib.parse.urlencode({"username": username, "page": page})
+        url = f"{BASE}/plays?{params}"
+        if on_status:
+            on_status(f"Fetching BGG plays page {page}…")
+        try:
+            root = _fetch_xml(url, token=token)
+        except Exception as exc:
+            raise RuntimeError(f"BGG plays fetch failed: {exc}") from exc
+
+        items = root.findall("play")
+        if not items:
+            break
+        for play in items:
+            item_el = play.find("item")
+            if item_el is None:
+                continue
+            bgg_id_str = item_el.get("objectid", "")
+            try:
+                bgg_id = int(bgg_id_str)
+            except ValueError:
+                continue
+            game_name = item_el.get("name", "")
+            played_at = play.get("date", "")
+            quantity  = int(play.get("quantity", "1") or "1")
+            comments_el = play.find("comments")
+            notes = (comments_el.text or "").strip() if comments_el is not None else ""
+            players_el = play.find("players")
+            player_names = ""
+            if players_el is not None:
+                names = [
+                    p.get("name", "").strip()
+                    for p in players_el.findall("player")
+                    if p.get("name", "").strip()
+                ]
+                player_names = ", ".join(names)
+            for _ in range(max(quantity, 1)):
+                plays.append({
+                    "bgg_id":       bgg_id,
+                    "game_name":    game_name,
+                    "played_at":    played_at,
+                    "player_names": player_names,
+                    "notes":        notes,
+                })
+        # If fewer than 100 items returned we've hit the last page
+        if len(items) < 100:
+            break
+        page += 1
+    return plays
+
+
 # ---------- BGG play logging (write path) ----------
 
 def _bgg_login(username: str, password: str):
