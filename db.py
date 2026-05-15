@@ -84,6 +84,7 @@ MIGRATIONS = [
     "ALTER TABLE loans ADD COLUMN due_date          TEXT",
     "ALTER TABLE plays ADD COLUMN duration_minutes  INTEGER",
     "ALTER TABLE plays ADD COLUMN scores            TEXT",
+    "ALTER TABLE games ADD COLUMN manual_fields     TEXT",
 ]
 
 
@@ -116,7 +117,17 @@ def init_db(db_path: Path = DB_PATH) -> None:
 
 # ---------- games ----------
 
-def upsert_game(c: sqlite3.Connection, g: dict) -> None:
+def upsert_game(
+    c: sqlite3.Connection,
+    g: dict,
+    skip_fields: Optional[set] = None,
+) -> None:
+    """Insert or update a game row.
+
+    skip_fields: column names that must NOT be overwritten on conflict
+    (used by the BGG sync to honour manual field overrides).
+    is_favorite and has_insert are always protected.
+    """
     cols = [
         "bgg_id", "name", "year", "image_url", "thumbnail_url", "image_path",
         "min_players", "max_players", "min_playtime", "max_playtime",
@@ -125,8 +136,9 @@ def upsert_game(c: sqlite3.Connection, g: dict) -> None:
         "best_players", "my_comment", "own", "last_synced", "is_expansion",
     ]
     placeholders = ", ".join(["?"] * len(cols))
-    # Don't overwrite is_favorite / has_insert on re-sync.
-    updates = ", ".join(f"{col}=excluded.{col}" for col in cols if col != "bgg_id")
+    # is_favorite / has_insert are always protected; caller may add more.
+    protected = {"bgg_id"} | (skip_fields or set())
+    updates = ", ".join(f"{col}=excluded.{col}" for col in cols if col not in protected)
     sql = (
         f"INSERT INTO games ({', '.join(cols)}) VALUES ({placeholders}) "
         f"ON CONFLICT(bgg_id) DO UPDATE SET {updates}"
@@ -144,6 +156,24 @@ def set_favorite(c: sqlite3.Connection, bgg_id: int, value: bool) -> None:
 
 def set_insert(c: sqlite3.Connection, bgg_id: int, value: bool) -> None:
     c.execute("UPDATE games SET has_insert = ? WHERE bgg_id = ?", (int(value), bgg_id))
+
+
+def get_manual_fields(c: sqlite3.Connection, bgg_id: int) -> set:
+    """Return the set of field names that have been manually overridden."""
+    row = c.execute(
+        "SELECT manual_fields FROM games WHERE bgg_id = ?", (bgg_id,)
+    ).fetchone()
+    if row is None or not row["manual_fields"]:
+        return set()
+    return {f.strip() for f in row["manual_fields"].split(",") if f.strip()}
+
+
+def set_manual_fields(c: sqlite3.Connection, bgg_id: int, fields: set) -> None:
+    """Persist the set of manually overridden field names (empty set clears all)."""
+    val = ", ".join(sorted(fields)) if fields else None
+    c.execute(
+        "UPDATE games SET manual_fields = ? WHERE bgg_id = ?", (val, bgg_id)
+    )
 
 
 def list_games(c: sqlite3.Connection, search: str = "") -> list[sqlite3.Row]:
