@@ -3191,7 +3191,7 @@ class App(tk.Tk):
         self.plays_tree.column("players",  width=160)
         self.plays_tree.column("winner",   width=110, anchor="center")
         self.plays_tree.column("duration", width=80,  anchor="center")
-        self.plays_tree.column("scores",   width=150)
+        self.plays_tree.column("scores",   width=150, anchor="center")
         self.plays_tree.column("notes",    width=150)
 
         vsb = ttk.Scrollbar(frame, orient="vertical", command=self.plays_tree.yview)
