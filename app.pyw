@@ -882,6 +882,16 @@ class App(tk.Tk):
         if self._view_mode == "cards":
             self.games_canvas.yview_scroll(int(-event.delta / 120), "units")
 
+    def _bind_canvas_scroll(self, widget: tk.Widget) -> None:
+        """Recursively forward MouseWheel on every card widget to the games canvas.
+
+        bind_all is not always reliable on Windows when widgets are nested inside
+        a canvas window — explicit bindings ensure the scroll always works.
+        """
+        widget.bind("<MouseWheel>", self._on_mousewheel, add="+")
+        for child in widget.winfo_children():
+            self._bind_canvas_scroll(child)
+
     def _reflow_games(self, event: tk.Event) -> None:
         self.games_canvas.itemconfigure(self.games_window_id, width=event.width)
         self._layout_cards(event.width)
@@ -1502,6 +1512,9 @@ class App(tk.Tk):
         for widget in (card, header, img_canvas, btn_row, btn_row2):
             widget.bind("<Button-3>", _card_right_click)
 
+        # Ensure mouse-wheel scroll works when the cursor is over any part of the card.
+        self._bind_canvas_scroll(card)
+
         return card, (img_canvas, _img_id, game)
 
     def _show_card_context_menu(self, event: tk.Event, game) -> None:
@@ -1884,42 +1897,57 @@ class App(tk.Tk):
 
         lpad = {"sticky": "w", "padx": (0, 10), "pady": 4}
 
-        ttk.Label(frame, text="Checked out (ISO date/time):").grid(row=2, column=0, **lpad)
+        ttk.Label(frame, text="Checked out:").grid(row=2, column=0, **lpad)
         out_var = tk.StringVar(value=(loan["checked_out_at"] or "")[:19])
         ttk.Entry(frame, textvariable=out_var, width=22).grid(row=2, column=1, sticky="w")
+        ttk.Button(frame, text="Now",
+                   command=lambda: out_var.set(db.now_iso()[:19])
+                   ).grid(row=2, column=2, padx=(4, 0), sticky="w")
 
-        ttk.Label(frame, text="Returned (leave blank if still out):").grid(row=3, column=0, **lpad)
+        ttk.Label(frame, text="Returned (blank = still out):").grid(row=3, column=0, **lpad)
         ret_var = tk.StringVar(value=(loan["returned_at"] or "")[:19])
         ttk.Entry(frame, textvariable=ret_var, width=22).grid(row=3, column=1, sticky="w")
+        _ret_btns = ttk.Frame(frame)
+        _ret_btns.grid(row=3, column=2, padx=(4, 0), sticky="w")
+        ttk.Button(_ret_btns, text="Now",
+                   command=lambda: ret_var.set(db.now_iso()[:19])).pack(side="left", padx=(0, 2))
+        ttk.Button(_ret_btns, text="Clear",
+                   command=lambda: ret_var.set("")).pack(side="left")
 
-        ttk.Label(frame, text="Notes:").grid(row=4, column=0, **lpad)
+        ttk.Label(frame, text="Due date (YYYY-MM-DD):").grid(row=4, column=0, **lpad)
+        due_var = tk.StringVar(value=loan["due_date"] or "")
+        ttk.Entry(frame, textvariable=due_var, width=14).grid(row=4, column=1, sticky="w")
+
+        ttk.Label(frame, text="Notes:").grid(row=5, column=0, **lpad)
         notes_var = tk.StringVar(value=loan["notes"] or "")
-        ttk.Entry(frame, textvariable=notes_var, width=32).grid(row=4, column=1, sticky="w")
+        ttk.Entry(frame, textvariable=notes_var, width=32).grid(row=5, column=1, sticky="w")
 
         err_var = tk.StringVar()
         ttk.Label(frame, textvariable=err_var, foreground="red",
-                  font=("Segoe UI", 8)).grid(row=5, column=0, columnspan=2, sticky="w")
+                  font=("Segoe UI", 8)).grid(row=6, column=0, columnspan=3, sticky="w")
 
         def save() -> None:
             out_val   = out_var.get().strip()   or None
             ret_val   = ret_var.get().strip()   or None
+            due_val   = due_var.get().strip()   or None
             notes_val = notes_var.get().strip() or None
             if not out_val:
                 err_var.set("Checked-out date is required.")
                 return
             with db.connect() as c:
                 c.execute(
-                    "UPDATE loans SET checked_out_at=?, returned_at=?, notes=? WHERE id=?",
-                    (out_val, ret_val, notes_val, loan_id),
+                    "UPDATE loans SET checked_out_at=?, returned_at=?, due_date=?, notes=? WHERE id=?",
+                    (out_val, ret_val, due_val, notes_val, loan_id),
                 )
             win.destroy()
             self.refresh_history()
             self.refresh_members()
             self.refresh_games()
+            self.refresh_dashboard()
             self.status("Loan record updated.")
 
         btn_row = ttk.Frame(frame)
-        btn_row.grid(row=6, column=0, columnspan=2, sticky="e", pady=(14, 0))
+        btn_row.grid(row=7, column=0, columnspan=3, sticky="e", pady=(14, 0))
         ttk.Button(btn_row, text="Cancel", command=win.destroy).pack(side="left", padx=(0, 6))
         ttk.Button(btn_row, text="Save",   command=save).pack(side="left")
 

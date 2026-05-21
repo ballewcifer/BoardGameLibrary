@@ -101,7 +101,8 @@ class GameDetails:
 
 
 def _http_get(url: str, timeout: int = 30, token: Optional[str] = None) -> tuple[int, bytes]:
-    headers = {"User-Agent": USER_AGENT}
+    # BGG now returns 403 to non-browser UAs on all endpoints, including the XML API.
+    headers = {"User-Agent": BROWSER_UA}
     if token:
         headers["Authorization"] = f"Bearer {token}"
     req = urllib.request.Request(url, headers=headers)
