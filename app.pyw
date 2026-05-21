@@ -1480,7 +1480,7 @@ class App(tk.Tk):
         if out_to:
             overdue = (
                 loan is not None
-                and loan.get("due_date")
+                and loan["due_date"]
                 and loan["due_date"] < datetime.now().strftime("%Y-%m-%d")
             )
             avail_text = f"⚠ OVERDUE: {out_to}" if overdue else f"Out: {out_to}"
