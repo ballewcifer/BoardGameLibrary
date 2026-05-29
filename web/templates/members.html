@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Members — BGL{% endblock %}
+{% block content %}
+
+<div class="page-header">
+  <h1 class="page-title">Members</h1>
+  <button class="btn btn-primary btn-sm" onclick="openModal('modal-add-member')">+ Add Member</button>
+</div>
+
+{% if users %}
+<div class="member-list">
+  {% for u in users %}
+  <div class="member-card">
+    <div class="member-avatar">{{ u.first_name[0] }}{{ u.last_name[0] }}</div>
+    <div class="member-info">
+      <div class="member-name">{{ u.first_name }} {{ u.last_name }}</div>
+      <div class="muted" style="font-size:.8rem">Member since {{ u.created_at[:10] }}</div>
+      {% set games_out = open_map.get(u.id, []) %}
+      {% if games_out %}
+        <div class="muted" style="font-size:.8rem">Has out: {{ games_out|join(', ') }}</div>
+      {% endif %}
+    </div>
+    <div class="member-actions">
+      <a href="/history?user_id={{ u.id }}" class="btn btn-secondary btn-sm">History</a>
+      <form method="post" action="/members/{{ u.id }}/delete"
+            onsubmit="return confirm('Remove {{ u.first_name }} {{ u.last_name }}?')">
+        <button class="btn btn-danger btn-sm">Remove</button>
+      </form>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+  <p class="muted mt">No members yet. Add one to enable check-outs.</p>
+{% endif %}
+
+<!-- ── Add Member modal ──────────────────────────────────────────────────── -->
+<div id="modal-add-member" class="modal-backdrop" hidden>
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Add Member</h3>
+      <button class="modal-close" onclick="closeModal('modal-add-member')">✕</button>
+    </div>
+    <form method="post" action="/members/add">
+      <div class="modal-body">
+        <label class="form-label">First Name</label>
+        <input type="text" name="first_name" class="form-control" required autofocus>
+        <label class="form-label mt-sm">Last Name</label>
+        <input type="text" name="last_name" class="form-control" required>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-add-member')">Cancel</button>
+        <button type="submit" class="btn btn-primary">Add</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% endblock %}

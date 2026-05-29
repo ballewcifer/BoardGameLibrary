@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — BGL{% endblock %}
+{% block content %}
+
+<!-- Stat cards -->
+<div class="stat-grid">
+  <a href="/games" class="stat-card" style="--c:#1a237e">
+    <div class="stat-value">{{ summary.total_games }}</div>
+    <div class="stat-label">Games</div>
+  </a>
+  <a href="/plays" class="stat-card" style="--c:#1b5e20">
+    <div class="stat-value">{{ summary.total_plays }}</div>
+    <div class="stat-label">Total Plays</div>
+  </a>
+  <a href="/members" class="stat-card" style="--c:#4a148c">
+    <div class="stat-value">{{ summary.total_members }}</div>
+    <div class="stat-label">Members</div>
+  </a>
+  <a href="/history?status=active" class="stat-card" style="--c:{% if summary.checked_out %}#b71c1c{% else %}#37474f{% endif %}">
+    <div class="stat-value">{{ summary.checked_out }}</div>
+    <div class="stat-label">Checked Out</div>
+  </a>
+</div>
+
+<!-- Currently checked out -->
+{% if checked_out %}
+<section class="card mt">
+  <h2 class="section-title">Currently Checked Out</h2>
+  <table class="data-table">
+    <thead><tr><th>Game</th><th>Borrower</th><th>Since</th><th>Due</th><th></th></tr></thead>
+    <tbody>
+      {% for loan in checked_out %}
+      <tr {% if loan.overdue %}class="overdue"{% endif %}>
+        <td>{{ loan.game_name }}</td>
+        <td>{{ loan.first_name }} {{ loan.last_name }}</td>
+        <td class="center">{{ loan.checked_out_at[:10] }}</td>
+        <td class="center">{{ loan.due_date or '—' }}</td>
+        <td>
+          <form method="post" action="/history/{{ loan.id }}/return_now" style="display:inline">
+            <button class="btn btn-sm btn-outline">Return</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+<!-- Bottom two-column section -->
+<div class="two-col mt">
+
+  <section class="card">
+    <h2 class="section-title">Recent Plays</h2>
+    {% if recent %}
+      <ul class="simple-list">
+        {% for r in recent %}
+          <li>
+            <span class="muted">{{ r.played_at[:10] }}</span>
+            {{ r.game_name }}
+            {% if r.winner %}<span class="winner">🏆 {{ r.winner }}</span>{% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="muted">No plays logged yet.</p>
+    {% endif %}
+  </section>
+
+  <div>
+    <section class="card">
+      <h2 class="section-title">Most Played</h2>
+      {% if top_games %}
+        <ol class="simple-list ranked">
+          {% for r in top_games %}
+            <li>{{ r.name }} <span class="muted">({{ r.play_count }})</span></li>
+          {% endfor %}
+        </ol>
+      {% else %}
+        <p class="muted">No plays yet.</p>
+      {% endif %}
+    </section>
+
+    <section class="card mt-sm">
+      <h2 class="section-title">Top Winners</h2>
+      {% if top_wins %}
+        <ol class="simple-list ranked">
+          {% for r in top_wins %}
+            <li>{{ r.winner }} <span class="muted">({{ r.win_count }} win{{ 's' if r.win_count != 1 else '' }})</span></li>
+          {% endfor %}
+        </ol>
+      {% else %}
+        <p class="muted">No winners recorded yet.</p>
+      {% endif %}
+    </section>
+  </div>
+
+</div>
+{% endblock %}

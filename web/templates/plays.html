@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% block title %}Plays — BGL{% endblock %}
+{% block content %}
+
+<div class="page-header">
+  <h1 class="page-title">Play Log</h1>
+  <button class="btn btn-primary btn-sm" onclick="openModal('modal-log-play')">+ Log Play</button>
+</div>
+
+<!-- Game filter -->
+<div class="filter-bar">
+  <form method="get" action="/plays" class="filter-form">
+    <select name="game_id" class="filter-select" onchange="this.form.submit()">
+      <option value="">All Games</option>
+      {% for g in games %}
+        <option value="{{ g.bgg_id }}" {% if filter_game==g.bgg_id %}selected{% endif %}>{{ g.name }}</option>
+      {% endfor %}
+    </select>
+  </form>
+</div>
+
+<p class="result-count muted">{{ rows|length }} play{{ 's' if rows|length != 1 else '' }}</p>
+
+{% if rows %}
+<div class="card mt" style="overflow-x:auto">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Game</th>
+        <th class="center">Date</th>
+        <th>Players</th>
+        <th class="center">Winner</th>
+        <th class="center">Duration</th>
+        <th class="center">Scores</th>
+        <th>Notes</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in rows %}
+      <tr>
+        <td>{{ p.game_name }}</td>
+        <td class="center nowrap">{{ p.played_at[:10] }}</td>
+        <td>{{ p.player_names or '—' }}</td>
+        <td class="center">{{ p.winner or '—' }}</td>
+        <td class="center">{{ p.duration_minutes ~ ' min' if p.duration_minutes else '—' }}</td>
+        <td class="center">{{ p.scores or '—' }}</td>
+        <td class="muted">{{ p.notes or '' }}</td>
+        <td class="nowrap">
+          <button class="btn btn-sm btn-outline" onclick="openEditPlay({{ p|tojson }}, {{ games|tojson }})">Edit</button>
+          <form method="post" action="/plays/{{ p.id }}/delete" style="display:inline"
+                onsubmit="return confirm('Delete this play record?')">
+            <button class="btn btn-sm btn-danger">Del</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+  <p class="muted mt">No plays recorded yet.</p>
+{% endif %}
+
+<!-- ── Log Play modal ───────────────────────────────────────────────────── -->
+<div id="modal-log-play" class="modal-backdrop" hidden>
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Log a Play</h3>
+      <button class="modal-close" onclick="closeModal('modal-log-play')">✕</button>
+    </div>
+    <form method="post" action="/plays/add">
+      <div class="modal-body">
+        <label class="form-label">Game</label>
+        <select name="game_id" class="form-control" required>
+          <option value="">— select —</option>
+          {% for g in games %}
+            <option value="{{ g.bgg_id }}" {% if filter_game==g.bgg_id %}selected{% endif %}>{{ g.name }}</option>
+          {% endfor %}
+        </select>
+        <label class="form-label mt-sm">Date Played</label>
+        <input type="date" name="played_at" class="form-control"
+               value="{{ now.strftime('%Y-%m-%d') }}" required>
+        <label class="form-label mt-sm">Players (comma-separated)</label>
+        <input type="text" name="player_names" class="form-control">
+        <label class="form-label mt-sm">Winner</label>
+        <input type="text" name="winner" class="form-control" placeholder="Name, All, or None">
+        <label class="form-label mt-sm">Duration (minutes)</label>
+        <input type="number" name="duration_minutes" class="form-control" min="1">
+        <label class="form-label mt-sm">Scores</label>
+        <input type="text" name="scores" class="form-control" placeholder="Alice: 45, Bob: 37">
+        <label class="form-label mt-sm">Notes</label>
+        <input type="text" name="notes" class="form-control">
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-log-play')">Cancel</button>
+        <button type="submit" class="btn btn-primary">Log Play</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ── Edit Play modal ──────────────────────────────────────────────────── -->
+<div id="modal-edit-play" class="modal-backdrop" hidden>
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Edit Play</h3>
+      <button class="modal-close" onclick="closeModal('modal-edit-play')">✕</button>
+    </div>
+    <form id="edit-play-form" method="post" action="">
+      <div class="modal-body">
+        <label class="form-label">Game</label>
+        <select name="game_id" id="ep-game" class="form-control" required></select>
+        <label class="form-label mt-sm">Date Played</label>
+        <input type="date" name="played_at" id="ep-date" class="form-control" required>
+        <label class="form-label mt-sm">Players</label>
+        <input type="text" name="player_names" id="ep-players" class="form-control">
+        <label class="form-label mt-sm">Winner</label>
+        <input type="text" name="winner" id="ep-winner" class="form-control">
+        <label class="form-label mt-sm">Duration (min)</label>
+        <input type="number" name="duration_minutes" id="ep-duration" class="form-control" min="1">
+        <label class="form-label mt-sm">Scores</label>
+        <input type="text" name="scores" id="ep-scores" class="form-control">
+        <label class="form-label mt-sm">Notes</label>
+        <input type="text" name="notes" id="ep-notes" class="form-control">
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-edit-play')">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+function openEditPlay(play, games) {
+  const form = document.getElementById('edit-play-form');
+  form.action = '/plays/' + play.id + '/edit';
+
+  // Populate game select
+  const sel = document.getElementById('ep-game');
+  sel.innerHTML = '';
+  games.forEach(g => {
+    const o = document.createElement('option');
+    o.value = g.bgg_id;
+    o.textContent = g.name;
+    if (g.bgg_id === play.game_id) o.selected = true;
+    sel.appendChild(o);
+  });
+
+  document.getElementById('ep-date').value     = play.played_at ? play.played_at.slice(0,10) : '';
+  document.getElementById('ep-players').value  = play.player_names || '';
+  document.getElementById('ep-winner').value   = play.winner || '';
+  document.getElementById('ep-duration').value = play.duration_minutes || '';
+  document.getElementById('ep-scores').value   = play.scores || '';
+  document.getElementById('ep-notes').value    = play.notes || '';
+  openModal('modal-edit-play');
+}
+</script>
+{% endblock %}

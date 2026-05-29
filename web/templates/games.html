@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}Games — BGL{% endblock %}
+{% block content %}
+
+<!-- Search & filter bar -->
+<div class="filter-bar">
+  <form method="get" action="/games" class="filter-form">
+    <input type="search" name="q" value="{{ q }}" placeholder="Search games…" class="search-input">
+
+    <select name="status" class="filter-select">
+      <option value="all"       {% if status=='all'       %}selected{% endif %}>All</option>
+      <option value="available" {% if status=='available' %}selected{% endif %}>Available</option>
+      <option value="out"       {% if status=='out'       %}selected{% endif %}>Checked Out</option>
+    </select>
+
+    {% if all_tags %}
+    <select name="tag" class="filter-select">
+      <option value="">Any tag</option>
+      {% for t in all_tags %}
+        <option {% if tag_filter==t %}selected{% endif %}>{{ t }}</option>
+      {% endfor %}
+    </select>
+    {% endif %}
+
+    <label class="filter-check"><input type="checkbox" name="fav" value="1" {% if fav_only %}checked{% endif %}> ★ Only</label>
+    <label class="filter-check"><input type="checkbox" name="exp" value="1" {% if show_exp %}checked{% endif %}> Expansions</label>
+
+    <button type="submit" class="btn btn-primary btn-sm">Filter</button>
+  </form>
+
+  <button class="btn btn-secondary btn-sm" onclick="openModal('modal-add-game')">+ Add Game</button>
+</div>
+
+<p class="result-count muted">{{ games|length }} game{{ 's' if games|length != 1 else '' }}</p>
+
+<!-- Game cards grid -->
+<div class="game-grid">
+  {% for g in games %}
+  <a href="/games/{{ g.bgg_id }}" class="game-card {% if g.loan %}game-card--out{% endif %}">
+    {% if g.is_favorite %}<span class="fav-badge">★</span>{% endif %}
+    {% if g.is_expansion %}<span class="exp-badge">Expansion</span>{% endif %}
+
+    <div class="game-card-img">
+      {% if g.image_path %}
+        <img src="/img/{{ g.bgg_id }}" alt="{{ g.name }}" loading="lazy">
+      {% elif g.thumbnail_url %}
+        <img src="{{ g.thumbnail_url }}" alt="{{ g.name }}" loading="lazy">
+      {% else %}
+        <div class="game-card-no-img">🎲</div>
+      {% endif %}
+    </div>
+
+    <div class="game-card-body">
+      <div class="game-card-name">{{ g.name }}</div>
+      <div class="game-card-meta muted">
+        {% if g.year %}{{ g.year }} · {% endif %}
+        {% if g.min_players and g.max_players %}
+          {{ g.min_players }}–{{ g.max_players }}p ·
+        {% endif %}
+        {% if g.playing_time %}{{ g.playing_time }}m{% endif %}
+      </div>
+      {% if g.play_count %}
+        <div class="muted" style="font-size:.75rem">{{ g.play_count }} play{{ 's' if g.play_count != 1 else '' }}</div>
+      {% endif %}
+    </div>
+
+    <div class="game-card-footer">
+      {% if g.loan %}
+        <span class="badge badge-out">Out: {{ g.loan.first_name }}</span>
+      {% else %}
+        <span class="badge badge-in">Available</span>
+      {% endif %}
+    </div>
+  </a>
+  {% else %}
+  <p class="muted mt" style="grid-column:1/-1">No games found. Try a different search or <button class="btn-link" onclick="openModal('modal-add-game')">add one</button>.</p>
+  {% endfor %}
+</div>
+
+<!-- ── Add Game modal ────────────────────────────────────────────────────── -->
+<div id="modal-add-game" class="modal-backdrop" hidden>
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Add Game from BGG</h3>
+      <button class="modal-close" onclick="closeModal('modal-add-game')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="search-row">
+        <input type="text" id="bgg-search-input" placeholder="Search BoardGameGeek…" class="search-input">
+        <button class="btn btn-primary" onclick="bggSearch()">Search</button>
+      </div>
+      <div id="bgg-search-results" class="search-results"></div>
+
+      <!-- Confirm step (hidden until a result is picked) -->
+      <form id="add-game-form" method="post" action="/games/add" hidden>
+        <input type="hidden" name="bgg_id" id="add-bgg-id">
+        <div id="add-game-preview" class="game-preview"></div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="document.getElementById('add-game-form').hidden=true">Back</button>
+          <button type="submit" class="btn btn-primary">Add to Library</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+{% endblock %}

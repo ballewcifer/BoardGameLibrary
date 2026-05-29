@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% block title %}History — BGL{% endblock %}
+{% block content %}
+
+<div class="page-header">
+  <h1 class="page-title">Checkout History</h1>
+</div>
+
+<!-- Filters -->
+<div class="filter-bar">
+  <form method="get" action="/history" class="filter-form">
+    <select name="status" class="filter-select">
+      <option value="all"      {% if status=='all'      %}selected{% endif %}>All</option>
+      <option value="active"   {% if status=='active'   %}selected{% endif %}>Still Out</option>
+      <option value="returned" {% if status=='returned' %}selected{% endif %}>Returned</option>
+    </select>
+    <select name="user_id" class="filter-select">
+      <option value="">All Members</option>
+      {% for u in users %}
+        <option value="{{ u.id }}" {% if filter_user==u.id %}selected{% endif %}>
+          {{ u.first_name }} {{ u.last_name }}
+        </option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="btn btn-primary btn-sm">Filter</button>
+  </form>
+</div>
+
+<p class="result-count muted">{{ rows|length }} record{{ 's' if rows|length != 1 else '' }}</p>
+
+{% if rows %}
+<div class="card mt" style="overflow-x:auto">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Game</th>
+        <th>Member</th>
+        <th class="center">Checked Out</th>
+        <th class="center">Due</th>
+        <th class="center">Returned</th>
+        <th>Notes</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr {% if r.overdue %}class="overdue"{% endif %}>
+        <td>{{ r.game_name }}</td>
+        <td>{{ r.first_name }} {{ r.last_name }}</td>
+        <td class="center nowrap">{{ r.checked_out_at[:10] }}</td>
+        <td class="center nowrap">{{ r.due_date or '—' }}</td>
+        <td class="center nowrap">
+          {% if r.returned_at %}
+            {{ r.returned_at[:10] }}
+          {% else %}
+            {% if r.overdue %}<span class="text-danger">OVERDUE</span>{% else %}<em class="muted">Still out</em>{% endif %}
+          {% endif %}
+        </td>
+        <td class="muted">{{ r.notes or '' }}</td>
+        <td class="nowrap">
+          {% if not r.returned_at %}
+          <form method="post" action="/history/{{ r.id }}/return_now" style="display:inline">
+            <button class="btn btn-sm btn-secondary">Return Now</button>
+          </form>
+          {% endif %}
+          <button class="btn btn-sm btn-outline" onclick="openEditLoan({{ r|tojson }})">Edit</button>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+  <p class="muted mt">No records found.</p>
+{% endif %}
+
+<!-- ── Edit Loan modal ───────────────────────────────────────────────────── -->
+<div id="modal-edit-loan" class="modal-backdrop" hidden>
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Edit Checkout</h3>
+      <button class="modal-close" onclick="closeModal('modal-edit-loan')">✕</button>
+    </div>
+    <form id="edit-loan-form" method="post" action="">
+      <div class="modal-body">
+        <div id="edit-loan-title" class="mb" style="font-weight:600"></div>
+
+        <label class="form-label">Checked Out</label>
+        <div class="input-with-btn">
+          <input type="datetime-local" name="checked_out_at" id="edit-checked-out" class="form-control" required>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="setNow('edit-checked-out')">Now</button>
+        </div>
+
+        <label class="form-label mt-sm">Returned (leave blank = still out)</label>
+        <div class="input-with-btn">
+          <input type="datetime-local" name="returned_at" id="edit-returned" class="form-control">
+          <button type="button" class="btn btn-secondary btn-sm" onclick="setNow('edit-returned')">Now</button>
+          <button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById('edit-returned').value=''">Clear</button>
+        </div>
+
+        <label class="form-label mt-sm">Due Date</label>
+        <input type="date" name="due_date" id="edit-due-date" class="form-control">
+
+        <label class="form-label mt-sm">Notes</label>
+        <input type="text" name="notes" id="edit-notes" class="form-control">
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-edit-loan')">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+function openEditLoan(loan) {
+  document.getElementById('edit-loan-title').textContent =
+    loan.game_name + ' — ' + loan.first_name + ' ' + loan.last_name;
+  document.getElementById('edit-loan-form').action = '/history/' + loan.id + '/edit';
+  // Convert ISO string to datetime-local format (YYYY-MM-DDTHH:MM)
+  function toLocal(s) { return s ? s.slice(0, 16) : ''; }
+  document.getElementById('edit-checked-out').value = toLocal(loan.checked_out_at);
+  document.getElementById('edit-returned').value    = toLocal(loan.returned_at || '');
+  document.getElementById('edit-due-date').value    = loan.due_date || '';
+  document.getElementById('edit-notes').value       = loan.notes || '';
+  openModal('modal-edit-loan');
+}
+
+function setNow(id) {
+  const now = new Date();
+  const local = now.getFullYear() + '-' +
+    String(now.getMonth()+1).padStart(2,'0') + '-' +
+    String(now.getDate()).padStart(2,'0') + 'T' +
+    String(now.getHours()).padStart(2,'0') + ':' +
+    String(now.getMinutes()).padStart(2,'0');
+  document.getElementById(id).value = local;
+}
+</script>
+{% endblock %}

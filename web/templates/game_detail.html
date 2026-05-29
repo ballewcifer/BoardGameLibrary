@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+{% block title %}{{ game.name }} — BGL{% endblock %}
+{% block content %}
+
+<div class="detail-header">
+  <a href="/games" class="back-link">← Games</a>
+  {% if game.image_path %}
+    <img src="/img/{{ game.bgg_id }}" class="detail-img" alt="{{ game.name }}">
+  {% elif game.thumbnail_url %}
+    <img src="{{ game.thumbnail_url }}" class="detail-img" alt="{{ game.name }}">
+  {% endif %}
+  <div class="detail-info">
+    <h1 class="detail-title">
+      {{ game.name }}
+      {% if game.is_favorite %}<span class="fav-badge">★</span>{% endif %}
+      {% if game.is_expansion %}<span class="exp-badge">Expansion</span>{% endif %}
+    </h1>
+    <div class="detail-meta muted">
+      {% if game.year %}{{ game.year }}{% endif %}
+      {% if game.min_players and game.max_players %} · {{ game.min_players }}–{{ game.max_players }} players{% endif %}
+      {% if game.playing_time %} · {{ game.playing_time }} min{% endif %}
+      {% if game.weight %} · Complexity {{ "%.1f"|format(game.weight) }}/5{% endif %}
+    </div>
+    {% if game.avg_rating %}<div class="muted">BGG ★ {{ "%.1f"|format(game.avg_rating) }}</div>{% endif %}
+    {% if game.designers %}<div class="muted">By {{ game.designers }}</div>{% endif %}
+  </div>
+</div>
+
+<!-- Status banner -->
+<div class="status-banner {% if loan %}status-out{% if loan.overdue %} status-overdue{% endif %}{% else %}status-in{% endif %}">
+  {% if loan %}
+    {% if loan.overdue %}⚠ OVERDUE{% else %}Checked Out{% endif %}
+    — {{ loan.first_name }} {{ loan.last_name }} since {{ loan.checked_out_at[:10] }}
+    {% if loan.due_date %} · Due {{ loan.due_date }}{% endif %}
+    <form method="post" action="/games/{{ game.bgg_id }}/checkin" style="display:inline;margin-left:12px">
+      <button class="btn btn-sm btn-light">Check In</button>
+    </form>
+  {% else %}
+    Available
+    {% if users %}
+      <button class="btn btn-sm btn-light ml" onclick="openModal('modal-checkout')">Check Out</button>
+    {% endif %}
+  {% endif %}
+</div>
+
+<!-- Quick-action row -->
+<div class="action-row">
+  <form method="post" action="/games/{{ game.bgg_id }}/favorite">
+    <button class="btn btn-secondary btn-sm">{{ '★ Unfavorite' if game.is_favorite else '☆ Favorite' }}</button>
+  </form>
+  <button class="btn btn-secondary btn-sm" onclick="openModal('modal-log-play')">+ Log Play</button>
+</div>
+
+<!-- Play stats -->
+{% if stats and stats.count %}
+<section class="card mt">
+  <h2 class="section-title">Play Statistics</h2>
+  <div class="stat-row">
+    <div><strong>{{ stats.count }}</strong><br><span class="muted">Times played</span></div>
+    <div><strong>{{ stats.last_played }}</strong><br><span class="muted">Last played</span></div>
+    {% if stats.avg_duration %}<div><strong>{{ stats.avg_duration }} min</strong><br><span class="muted">Avg duration</span></div>{% endif %}
+  </div>
+  {% if stats.win_counts %}
+    <div class="mt-sm">
+      {% for name, cnt in stats.win_counts.items()|sort(attribute='1', reverse=True) %}
+        <span class="winner-chip">🏆 {{ name }} ({{ cnt }})</span>
+      {% endfor %}
+    </div>
+  {% endif %}
+</section>
+{% endif %}
+
+<!-- Tags -->
+{% if game.tags %}
+<div class="tags mt-sm">
+  {% for t in game.tags.split(',') %}
+    <span class="tag">{{ t.strip() }}</span>
+  {% endfor %}
+</div>
+{% endif %}
+
+<!-- Description -->
+{% if game.description %}
+<section class="card mt">
+  <h2 class="section-title">Description</h2>
+  <p class="description">{{ game.description[:600] }}{% if game.description|length > 600 %}…{% endif %}</p>
+</section>
+{% endif %}
+
+<!-- Play history -->
+{% if plays %}
+<section class="card mt">
+  <h2 class="section-title">Play History</h2>
+  <table class="data-table">
+    <thead><tr><th>Date</th><th>Players</th><th>Winner</th><th>Duration</th></tr></thead>
+    <tbody>
+      {% for p in plays %}
+      <tr>
+        <td class="center">{{ p.played_at[:10] }}</td>
+        <td>{{ p.player_names or '—' }}</td>
+        <td>{{ p.winner or '—' }}</td>
+        <td class="center">{{ p.duration_minutes ~ ' min' if p.duration_minutes else '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+<!-- ── Check-out modal ───────────────────────────────────────────────────── -->
+<div id="modal-checkout" class="modal-backdrop" hidden>
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Check Out — {{ game.name }}</h3>
+      <button class="modal-close" onclick="closeModal('modal-checkout')">✕</button>
+    </div>
+    <form method="post" action="/games/{{ game.bgg_id }}/checkout">
+      <div class="modal-body">
+        <label class="form-label">Member</label>
+        <select name="user_id" class="form-control" required>
+          <option value="">— select —</option>
+          {% for u in users %}
+            <option value="{{ u.id }}">{{ u.first_name }} {{ u.last_name }}</option>
+          {% endfor %}
+        </select>
+        <label class="form-label mt-sm">Due Date (optional)</label>
+        <input type="date" name="due_date" class="form-control">
+        <label class="form-label mt-sm">Notes</label>
+        <input type="text" name="notes" class="form-control" placeholder="Optional notes…">
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-checkout')">Cancel</button>
+        <button type="submit" class="btn btn-primary">Check Out</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ── Log Play modal ───────────────────────────────────────────────────── -->
+<div id="modal-log-play" class="modal-backdrop" hidden>
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Log Play — {{ game.name }}</h3>
+      <button class="modal-close" onclick="closeModal('modal-log-play')">✕</button>
+    </div>
+    <form method="post" action="/plays/add">
+      <input type="hidden" name="game_id" value="{{ game.bgg_id }}">
+      <div class="modal-body">
+        <label class="form-label">Date Played</label>
+        <input type="date" name="played_at" class="form-control" value="{{ today }}" required>
+        <label class="form-label mt-sm">Players (comma-separated)</label>
+        <input type="text" name="player_names" class="form-control" placeholder="Alice, Bob, Carol">
+        <label class="form-label mt-sm">Winner</label>
+        <input type="text" name="winner" class="form-control" placeholder="Alice">
+        <label class="form-label mt-sm">Duration (minutes)</label>
+        <input type="number" name="duration_minutes" class="form-control" min="1">
+        <label class="form-label mt-sm">Scores</label>
+        <input type="text" name="scores" class="form-control" placeholder="Alice: 45, Bob: 37">
+        <label class="form-label mt-sm">Notes</label>
+        <input type="text" name="notes" class="form-control">
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-log-play')">Cancel</button>
+        <button type="submit" class="btn btn-primary">Log Play</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% endblock %}
