@@ -1,0 +1,29 @@
+{
+  "expo": {
+    "name": "Board Game Library",
+    "slug": "board-game-library",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "scheme": "bgl",
+    "plugins": [
+      "expo-router",
+      "expo-sqlite"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.ballewcifer.boardgamelibrary"
+    },
+    "android": {
+      "package": "com.ballewcifer.boardgamelibrary",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#1a237e"
+      }
+    },
+    "extra": {
+      "eas": { "projectId": "your-eas-project-id" }
+    }
+  }
+}

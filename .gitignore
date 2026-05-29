@@ -23,3 +23,7 @@ installer/
 .idea/
 Thumbs.db
 .DS_Store
+
+# Mobile
+mobile/node_modules/
+mobile/.expo/
