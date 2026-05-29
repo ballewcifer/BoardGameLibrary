@@ -1,5 +1,6 @@
 /* ── Reset & base ─────────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+[hidden] { display: none !important; }
 
 :root {
   --navy:   #1a237e;
@@ -184,6 +185,14 @@ img { max-width: 100%; display: block; }
 .btn-outline   { background: transparent; border: 1px solid var(--border); color: var(--text); }
 .btn-danger    { background: #ffebee; color: var(--red); }
 .btn-light     { background: rgba(255,255,255,.2); color: var(--white); border: 1px solid rgba(255,255,255,.4); }
+
+/* Buttons inside coloured status banners — adapt to the banner's own colour */
+.status-banner .btn {
+  background: rgba(0,0,0,.1);
+  color: inherit;
+  border: 1px solid rgba(0,0,0,.18);
+}
+.status-banner .btn:hover { background: rgba(0,0,0,.18); }
 .btn-sm        { padding: 5px 10px; font-size: .8rem; }
 .btn-link      { background: none; border: none; color: var(--navy); cursor: pointer; padding: 0; font: inherit; text-decoration: underline; }
 
