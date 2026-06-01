@@ -6,9 +6,11 @@
 const BASE = 'https://boardgamegeek.com/xmlapi2';
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15';
 
-async function fetchXml(url: string, attempts = 8): Promise<Document> {
+async function fetchXml(url: string, attempts = 8, token?: string): Promise<Document> {
   for (let i = 0; i < attempts; i++) {
-    const res = await fetch(url, { headers: { 'User-Agent': UA } });
+    const headers: Record<string, string> = { 'User-Agent': UA };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const res = await fetch(url, { headers });
     if (res.status === 200) {
       const text = await res.text();
       return new DOMParser().parseFromString(text, 'text/xml');
@@ -128,10 +130,11 @@ export async function fetchGameDetails(bggId: number): Promise<GameDetails | nul
 
 // ── Collection sync ───────────────────────────────────────────────────────────
 
-export async function fetchCollection(username: string): Promise<GameDetails[]> {
+export async function fetchCollection(username: string, token?: string): Promise<GameDetails[]> {
   const doc = await fetchXml(
     `${BASE}/collection?username=${encodeURIComponent(username)}&own=1&stats=1`,
-    12
+    12,
+    token
   );
   const items = doc.querySelectorAll('item');
   const ids: number[] = [];

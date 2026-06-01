@@ -4,9 +4,10 @@ const KEY = 'bgl_settings';
 
 export interface Settings {
   bgg_username: string;
+  bgg_token: string;
 }
 
-const DEFAULTS: Settings = { bgg_username: '' };
+const DEFAULTS: Settings = { bgg_username: '', bgg_token: '' };
 
 export async function loadSettings(): Promise<Settings> {
   try {
