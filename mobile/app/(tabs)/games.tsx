@@ -27,6 +27,7 @@ export default function Games() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [bggUsername, setBggUsername]   = useState('');
   const [bggToken, setBggToken]         = useState('');
+  const [bggPassword, setBggPassword]   = useState('');
 
   const load = useCallback((q = search) => {
     setGames(db.listGames(q));
@@ -47,11 +48,12 @@ export default function Games() {
     const s = await loadSettings();
     setBggUsername(s.bgg_username);
     setBggToken(s.bgg_token);
+    setBggPassword(s.bgg_password);
     setSettingsOpen(true);
   };
 
   const saveAndClose = async () => {
-    await saveSettings({ bgg_username: bggUsername.trim(), bgg_token: bggToken.trim() });
+    await saveSettings({ bgg_username: bggUsername.trim(), bgg_token: bggToken.trim(), bgg_password: bggPassword });
     setSettingsOpen(false);
   };
 
@@ -62,8 +64,13 @@ export default function Games() {
       return;
     }
     setSyncing(true);
-    setSyncMessage('Fetching collection…');
+    setSyncMessage('Logging in to BGG…');
     try {
+      // Log in first so the session cookie is set for the collection request
+      if (settings.bgg_password) {
+        await bgg.loginBgg(settings.bgg_username, settings.bgg_password);
+      }
+      setSyncMessage('Fetching collection…');
       const collection = await bgg.fetchCollection(settings.bgg_username, settings.bgg_token || undefined);
       setSyncMessage(`Saving ${collection.length} games…`);
       for (const g of collection) {
@@ -194,18 +201,19 @@ export default function Games() {
             autoCorrect={false}
           />
 
-          <Text style={s.label}>BGG Token</Text>
+          <Text style={s.label}>BGG Password</Text>
           <TextInput
             style={s.input}
-            value={bggToken}
-            onChangeText={setBggToken}
-            placeholder="Bearer token from boardgamegeek.com/applications"
+            value={bggPassword}
+            onChangeText={setBggPassword}
+            placeholder="Your BGG password"
+            secureTextEntry
             autoCapitalize="none"
             autoCorrect={false}
           />
           <Text style={s.hint}>
-            A token is required to sync private collections. Get one at{'\n'}
-            boardgamegeek.com → Account → API tokens.
+            Used to log in and sync private collections.{'\n'}
+            Stored securely on your device, never sent anywhere except BGG.
           </Text>
 
           <TouchableOpacity style={s.sheetBtn} onPress={saveAndClose}>

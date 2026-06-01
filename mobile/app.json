@@ -10,7 +10,8 @@
     "plugins": [
       "expo-router",
       "expo-sqlite",
-      "expo-font"
+      "expo-font",
+      "expo-secure-store"
     ],
     "ios": {
       "supportsTablet": true,

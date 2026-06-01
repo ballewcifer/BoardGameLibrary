@@ -6,6 +6,26 @@
 const BASE = 'https://boardgamegeek.com/xmlapi2';
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15';
 
+/**
+ * Log in to BGG. On success the OS-level cookie jar stores the session
+ * cookie automatically — subsequent fetch calls will include it.
+ * Returns true on success, throws on failure.
+ */
+export async function loginBgg(username: string, password: string): Promise<void> {
+  const res = await fetch('https://boardgamegeek.com/login/api/v1', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'User-Agent': UA,
+    },
+    body: `credentials[username]=${encodeURIComponent(username)}&credentials[password]=${encodeURIComponent(password)}`,
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    throw new Error(`BGG login failed (HTTP ${res.status}). Check your username and password.`);
+  }
+}
+
 async function fetchXml(url: string, attempts = 8, token?: string): Promise<Document> {
   for (let i = 0; i < attempts; i++) {
     const headers: Record<string, string> = { 'User-Agent': UA };
