@@ -20,6 +20,7 @@ export default function TabLayout() {
       }} />
       <Tabs.Screen name="games" options={{
         title: 'Games',
+        headerShown: false,
         tabBarIcon: ({ color, size }) => <Ionicons name="dice" size={size} color={color} />,
       }} />
       <Tabs.Screen name="members" options={{

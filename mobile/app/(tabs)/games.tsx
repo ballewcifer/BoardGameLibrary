@@ -238,7 +238,7 @@ export default function Games() {
 
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f4f6fa' },
-  header: { backgroundColor: NAVY, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 52, paddingBottom: 12 },
+  header: { backgroundColor: NAVY, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 56, paddingBottom: 14 },
   headerTitle: { color: '#fff', fontSize: 20, fontWeight: '700' },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   headerBtn: { padding: 8 },
