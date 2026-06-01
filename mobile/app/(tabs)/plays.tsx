@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, Alert, Modal, TextInput, RefreshControl } from 'react-native';
+import { View, Text, FlatList, TouchableOpacity, StyleSheet, Alert, Modal, TextInput, Pressable, RefreshControl, ScrollView } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as db from '../../lib/db';
@@ -8,120 +8,142 @@ import type { Play, Game } from '../../lib/types';
 const NAVY = '#1a237e';
 
 export default function Plays() {
-  const [plays, setPlays] = useState<Play[]>([]);
-  const [games, setGames] = useState<Game[]>([]);
-  const [modal, setModal] = useState(false);
-  const [selectedGame, setSelectedGame] = useState<number | null>(null);
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
-  const [players, setPlayers] = useState('');
-  const [winner, setWinner] = useState('');
-  const [duration, setDuration] = useState('');
-  const [notes, setNotes] = useState('');
-  const [gameSearch, setGameSearch] = useState('');
+  const [plays, setPlays]           = useState<Play[]>([]);
+  const [games, setGames]           = useState<Game[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [modalOpen, setModalOpen]   = useState(false);
+
+  // Log play form
+  const [selGame, setSelGame]   = useState<Game | null>(null);
+  const [date, setDate]         = useState('');
+  const [players, setPlayers]   = useState('');
+  const [winner, setWinner]     = useState('');
+  const [duration, setDuration] = useState('');
+  const [notes, setNotes]       = useState('');
+  const [pickingGame, setPickingGame] = useState(false);
+  const [gameSearch, setGameSearch]   = useState('');
 
   const load = useCallback(() => {
     setPlays(db.listPlays());
     setGames(db.listGames());
   }, []);
   useFocusEffect(useCallback(() => { load(); }, [load]));
-  const onRefresh = () => { setRefreshing(true); load(); setRefreshing(false); };
 
-  const openModal = () => {
-    setSelectedGame(null); setDate(new Date().toISOString().slice(0, 10));
-    setPlayers(''); setWinner(''); setDuration(''); setNotes(''); setGameSearch('');
-    setModal(true);
+  const openLog = () => {
+    setDate(new Date().toISOString().slice(0, 10));
+    setPlayers(''); setWinner(''); setDuration(''); setNotes('');
+    setSelGame(null);
+    setModalOpen(true);
   };
 
   const savePlay = () => {
-    if (!selectedGame) { Alert.alert('Select a game first'); return; }
-    if (!date) { Alert.alert('Date is required'); return; }
-    db.logPlay(selectedGame, date, players, winner, notes, duration ? parseInt(duration) : undefined);
-    setModal(false);
+    if (!selGame) { Alert.alert('Select a game'); return; }
+    if (!date)    { Alert.alert('Date required'); return; }
+    db.logPlay(selGame.bgg_id, date, players, winner, notes,
+      duration ? parseInt(duration, 10) : undefined);
+    setModalOpen(false);
     load();
   };
 
   const deletePlay = (p: Play) => {
-    Alert.alert('Delete Play', 'Remove this play record?', [
+    Alert.alert('Delete play?', `Delete this play of ${p.game_name}?`, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: () => { db.deletePlay(p.id); load(); } },
     ]);
   };
 
-  const filteredGames = games.filter(g => g.name.toLowerCase().includes(gameSearch.toLowerCase()));
+  const filteredGames = games.filter(g =>
+    g.name.toLowerCase().includes(gameSearch.toLowerCase())
+  );
 
   return (
     <View style={s.container}>
-      <View style={s.topBar}>
-        <Text style={s.count}>{plays.length} play{plays.length !== 1 ? 's' : ''}</Text>
-        <TouchableOpacity style={s.addBtn} onPress={openModal}>
-          <Ionicons name="add" size={16} color="#fff" />
-          <Text style={s.addTxt}>Log Play</Text>
-        </TouchableOpacity>
-      </View>
+      <TouchableOpacity style={s.addBtn} onPress={openLog}>
+        <Ionicons name="add-circle-outline" size={18} color="#fff" />
+        <Text style={s.addBtnTxt}>Log Play</Text>
+      </TouchableOpacity>
+
+      <Text style={s.count}>{plays.length} play{plays.length !== 1 ? 's' : ''}</Text>
 
       <FlatList
         data={plays}
         keyExtractor={p => String(p.id)}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); setRefreshing(false); }} />}
+        contentContainerStyle={{ padding: 12 }}
+        ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
+        ListEmptyComponent={<Text style={s.empty}>No plays logged yet.</Text>}
         renderItem={({ item: p }) => (
           <View style={s.card}>
             <View style={s.cardTop}>
               <Text style={s.gameName} numberOfLines={1}>{p.game_name}</Text>
-              <Text style={s.dateVal}>{p.played_at.slice(0, 10)}</Text>
-            </View>
-            {p.player_names ? <Text style={s.detail}>{p.player_names}</Text> : null}
-            {p.winner ? <Text style={s.detail}>🏆 {p.winner}</Text> : null}
-            <View style={s.cardBottom}>
-              {p.duration_minutes ? <Text style={s.meta}>{p.duration_minutes} min</Text> : null}
-              {p.scores ? <Text style={s.meta}>{p.scores}</Text> : null}
-              <TouchableOpacity style={s.delBtn} onPress={() => deletePlay(p)}>
-                <Ionicons name="trash-outline" size={16} color="#e53935" />
+              <TouchableOpacity onPress={() => deletePlay(p)} style={{ padding: 4 }}>
+                <Ionicons name="trash-outline" size={18} color="#b71c1c" />
               </TouchableOpacity>
             </View>
+            <Text style={s.date}>{p.played_at?.slice(0, 10)}</Text>
+            {p.player_names ? <Text style={s.detail}>👥 {p.player_names}</Text> : null}
+            {p.winner       ? <Text style={s.detail}>🏆 {p.winner}</Text>       : null}
+            {p.duration_minutes ? <Text style={s.detail}>⏱ {p.duration_minutes} min</Text> : null}
+            {p.scores       ? <Text style={s.detail}>📊 {p.scores}</Text>       : null}
+            {p.notes        ? <Text style={s.detail}>📝 {p.notes}</Text>        : null}
           </View>
         )}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-        contentContainerStyle={{ padding: 10, gap: 8 }}
-        ListEmptyComponent={<Text style={s.empty}>No plays logged yet.</Text>}
       />
 
       {/* Log Play modal */}
-      <Modal visible={modal} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setModal(false)}>
-        <View style={s.modal}>
-          <View style={s.modalHeader}>
-            <Text style={s.modalTitle}>Log a Play</Text>
-            <TouchableOpacity onPress={() => setModal(false)}><Ionicons name="close" size={24} color="#333" /></TouchableOpacity>
-          </View>
+      <Modal visible={modalOpen} transparent animationType="slide" onRequestClose={() => setModalOpen(false)}>
+        <Pressable style={s.overlay} onPress={() => setModalOpen(false)} />
+        <View style={s.sheet}>
+          <Text style={s.sheetTitle}>Log a Play</Text>
+          <ScrollView showsVerticalScrollIndicator={false}>
+            {/* Game picker */}
+            <Text style={s.label}>Game *</Text>
+            <TouchableOpacity style={s.gamePicker} onPress={() => setPickingGame(true)}>
+              <Text style={selGame ? s.gamePickerTxt : s.gamePickerPlaceholder}>
+                {selGame ? selGame.name : '— select game —'}
+              </Text>
+              <Ionicons name="chevron-down" size={16} color="#9e9e9e" />
+            </TouchableOpacity>
+
+            <Text style={s.label}>Date *</Text>
+            <TextInput style={s.input} value={date} onChangeText={setDate} placeholder="YYYY-MM-DD" />
+
+            <Text style={s.label}>Players</Text>
+            <TextInput style={s.input} value={players} onChangeText={setPlayers} placeholder="Alice, Bob, Carol" />
+
+            <Text style={s.label}>Winner</Text>
+            <TextInput style={s.input} value={winner} onChangeText={setWinner} placeholder="Alice" />
+
+            <Text style={s.label}>Duration (minutes)</Text>
+            <TextInput style={s.input} value={duration} onChangeText={setDuration} keyboardType="number-pad" placeholder="90" />
+
+            <Text style={s.label}>Notes</Text>
+            <TextInput style={s.input} value={notes} onChangeText={setNotes} placeholder="Optional" />
+
+            <TouchableOpacity style={s.sheetBtn} onPress={savePlay}>
+              <Text style={s.sheetBtnTxt}>Save Play</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      </Modal>
+
+      {/* Game search modal */}
+      <Modal visible={pickingGame} transparent animationType="slide" onRequestClose={() => setPickingGame(false)}>
+        <Pressable style={s.overlay} onPress={() => setPickingGame(false)} />
+        <View style={[s.sheet, { maxHeight: '80%' }]}>
+          <Text style={s.sheetTitle}>Select Game</Text>
+          <TextInput style={[s.input, { marginBottom: 8 }]} value={gameSearch} onChangeText={setGameSearch} placeholder="Search…" autoFocus />
           <FlatList
-            data={[]}
-            ListHeaderComponent={
-              <View style={s.modalBody}>
-                <Text style={s.label}>Game</Text>
-                <TextInput style={s.input} value={gameSearch} onChangeText={setGameSearch} placeholder="Search games…" />
-                {filteredGames.slice(0, 8).map(g => (
-                  <TouchableOpacity key={g.bgg_id} style={[s.gameRow, selectedGame === g.bgg_id && s.gameRowSel]} onPress={() => setSelectedGame(g.bgg_id)}>
-                    <Text style={[s.gameTxt, selectedGame === g.bgg_id && s.gameTxtSel]}>{g.name}</Text>
-                    {selectedGame === g.bgg_id && <Ionicons name="checkmark" size={18} color={NAVY} />}
-                  </TouchableOpacity>
-                ))}
-                <Text style={[s.label, { marginTop: 14 }]}>Date Played</Text>
-                <TextInput style={s.input} value={date} onChangeText={setDate} placeholder="YYYY-MM-DD" />
-                <Text style={s.label}>Players (comma-separated)</Text>
-                <TextInput style={s.input} value={players} onChangeText={setPlayers} placeholder="Alice, Bob" />
-                <Text style={s.label}>Winner</Text>
-                <TextInput style={s.input} value={winner} onChangeText={setWinner} placeholder="Alice, All, or None" />
-                <Text style={s.label}>Duration (minutes)</Text>
-                <TextInput style={s.input} value={duration} onChangeText={setDuration} keyboardType="number-pad" placeholder="90" />
-                <Text style={s.label}>Notes</Text>
-                <TextInput style={s.input} value={notes} onChangeText={setNotes} multiline />
-              </View>
-            }
-            renderItem={() => null}
-            keyExtractor={() => '0'}
+            data={filteredGames}
+            keyExtractor={g => String(g.bgg_id)}
+            renderItem={({ item: g }) => (
+              <TouchableOpacity style={s.gameItem} onPress={() => { setSelGame(g); setPickingGame(false); setGameSearch(''); }}>
+                <Text style={s.gameItemTxt}>{g.name}</Text>
+                {g.year ? <Text style={s.gameItemYear}>{g.year}</Text> : null}
+              </TouchableOpacity>
+            )}
+            ItemSeparatorComponent={() => <View style={{ height: 1, backgroundColor: '#f0f0f0' }} />}
           />
-          <TouchableOpacity style={s.primaryBtn} onPress={savePlay}>
-            <Text style={s.primaryBtnTxt}>Log Play</Text>
-          </TouchableOpacity>
         </View>
       </Modal>
     </View>
@@ -130,29 +152,26 @@ export default function Plays() {
 
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f4f6fa' },
-  topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 12 },
-  count: { color: '#6b7280', fontSize: 13 },
-  addBtn: { backgroundColor: NAVY, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 },
-  addTxt: { color: '#fff', fontWeight: '600', fontSize: 14 },
-  card: { backgroundColor: '#fff', borderRadius: 10, padding: 14, shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 4, elevation: 2 },
-  cardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 },
+  addBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: NAVY, margin: 12, borderRadius: 10, padding: 12, justifyContent: 'center' },
+  addBtnTxt: { color: '#fff', fontWeight: '700', fontSize: 15 },
+  count: { paddingHorizontal: 14, paddingBottom: 4, color: '#9e9e9e', fontSize: 12 },
+  card: { backgroundColor: '#fff', borderRadius: 10, padding: 14, shadowColor: '#000', shadowOpacity: 0.07, shadowRadius: 4, elevation: 2 },
+  cardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 },
   gameName: { fontSize: 15, fontWeight: '700', flex: 1, marginRight: 8 },
-  dateVal: { fontSize: 12, color: '#9e9e9e' },
-  detail: { fontSize: 13, color: '#444', marginBottom: 2 },
-  cardBottom: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 6 },
-  meta: { fontSize: 12, color: '#9e9e9e', flex: 1 },
-  delBtn: { padding: 4 },
-  empty: { textAlign: 'center', color: '#9e9e9e', padding: 40, fontSize: 14 },
-  modal: { flex: 1, backgroundColor: '#fff' },
-  modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16, borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
-  modalTitle: { fontSize: 17, fontWeight: '700' },
-  modalBody: { padding: 16 },
-  label: { fontSize: 13, fontWeight: '600', marginBottom: 4 },
-  input: { borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 8, padding: 10, fontSize: 15, marginBottom: 8 },
-  gameRow: { flexDirection: 'row', alignItems: 'center', padding: 10, borderRadius: 8, borderWidth: 1, borderColor: '#e5e7eb', marginBottom: 4 },
-  gameRowSel: { borderColor: NAVY, backgroundColor: '#e8eaf6' },
-  gameTxt: { flex: 1, fontSize: 14, color: '#333' },
-  gameTxtSel: { color: NAVY, fontWeight: '600' },
-  primaryBtn: { backgroundColor: NAVY, margin: 16, padding: 14, borderRadius: 10, alignItems: 'center' },
-  primaryBtnTxt: { color: '#fff', fontWeight: '700', fontSize: 16 },
+  date: { fontSize: 12, color: '#9e9e9e', marginBottom: 4 },
+  detail: { fontSize: 13, color: '#555', marginTop: 2 },
+  empty: { textAlign: 'center', color: '#9e9e9e', marginTop: 40, fontStyle: 'italic' },
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
+  sheet: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 24, paddingBottom: 40 },
+  sheetTitle: { fontSize: 18, fontWeight: '700', marginBottom: 16, color: NAVY },
+  label: { fontSize: 13, fontWeight: '600', marginBottom: 4, color: '#333' },
+  input: { borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 8, padding: 10, fontSize: 15, marginBottom: 12 },
+  gamePicker: { borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 8, padding: 10, marginBottom: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  gamePickerTxt: { fontSize: 15, color: '#333' },
+  gamePickerPlaceholder: { fontSize: 15, color: '#aaa' },
+  sheetBtn: { backgroundColor: NAVY, borderRadius: 8, padding: 14, alignItems: 'center', marginTop: 4, marginBottom: 8 },
+  sheetBtnTxt: { color: '#fff', fontWeight: '700', fontSize: 15 },
+  gameItem: { paddingVertical: 12, paddingHorizontal: 4, flexDirection: 'row', justifyContent: 'space-between' },
+  gameItemTxt: { fontSize: 15, flex: 1 },
+  gameItemYear: { fontSize: 13, color: '#9e9e9e' },
 });
