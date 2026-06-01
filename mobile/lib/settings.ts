@@ -10,7 +10,11 @@ export interface Settings {
   bgg_password: string; // runtime only — stored in SecureStore, not AsyncStorage
 }
 
-const DEFAULTS: Settings = { bgg_username: '', bgg_token: '', bgg_password: '' };
+const DEFAULTS: Settings = {
+  bgg_username: '',
+  bgg_token: 'YOUR_BGG_API_TOKEN_HERE',
+  bgg_password: '',
+};
 
 export async function loadSettings(): Promise<Settings> {
   try {
