@@ -1,58 +1,86 @@
 /**
- * BGG XML API v2 client — mirrors bgg.py
- * All HTTP requests use a browser-like User-Agent (BGG blocks others).
+ * BGG XML API v2 client — React Native compatible.
+ * Uses fast-xml-parser instead of DOMParser (which doesn't exist in RN).
  */
+import { XMLParser } from 'fast-xml-parser';
 
 const BASE = 'https://boardgamegeek.com/xmlapi2';
-const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15';
+const UA   = 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/124 Mobile Safari/537.36';
 
-/**
- * Log in to BGG. On success the OS-level cookie jar stores the session
- * cookie automatically — subsequent fetch calls will include it.
- * Returns true on success, throws on failure.
- */
-export async function loginBgg(username: string, password: string): Promise<void> {
-  const res = await fetch('https://boardgamegeek.com/login/api/v1', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'User-Agent': UA,
-    },
-    body: `credentials[username]=${encodeURIComponent(username)}&credentials[password]=${encodeURIComponent(password)}`,
-    credentials: 'include',
-  });
-  if (!res.ok) {
-    throw new Error(`BGG login failed (HTTP ${res.status}). Check your username and password.`);
-  }
-}
+const parser = new XMLParser({
+  ignoreAttributes: false,
+  attributeNamePrefix: '_',
+  parseAttributeValue: true,
+  parseTagValue: true,
+  // Always treat these as arrays even if only one element
+  isArray: (name) => ['item', 'link', 'name', 'rank'].includes(name),
+});
 
-async function fetchXml(url: string, attempts = 8, token?: string): Promise<Document> {
+// ── HTTP ──────────────────────────────────────────────────────────────────────
+
+async function fetchXml(url: string, attempts = 10, token?: string): Promise<any> {
   for (let i = 0; i < attempts; i++) {
     const headers: Record<string, string> = { 'User-Agent': UA };
     if (token) headers['Authorization'] = `Bearer ${token}`;
-    const res = await fetch(url, { headers });
+    const res = await fetch(url, { headers, credentials: 'include' });
     if (res.status === 200) {
       const text = await res.text();
-      return new DOMParser().parseFromString(text, 'text/xml');
+      return parser.parse(text);
     }
     if (res.status === 202) {
-      await new Promise(r => setTimeout(r, 2000));
+      await new Promise(r => setTimeout(r, 2500));
       continue;
     }
     throw new Error(`BGG HTTP ${res.status}`);
   }
-  throw new Error('BGG kept returning 202');
+  throw new Error('BGG kept returning 202 — try again in a moment.');
 }
 
-function txt(el: Element | null, attr?: string): string {
-  if (!el) return '';
-  return attr ? (el.getAttribute(attr) ?? '') : (el.textContent ?? '');
+// ── BGG login ─────────────────────────────────────────────────────────────────
+
+export async function loginBgg(username: string, password: string): Promise<void> {
+  const res = await fetch('https://boardgamegeek.com/login/api/v1', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': UA },
+    body: `credentials[username]=${encodeURIComponent(username)}&credentials[password]=${encodeURIComponent(password)}`,
+    credentials: 'include',
+  });
+  if (!res.ok) throw new Error(`BGG login failed (HTTP ${res.status}). Check username/password.`);
 }
 
-function num(el: Element | null, attr = 'value'): number | undefined {
-  const s = el?.getAttribute(attr);
-  const n = s ? parseFloat(s) : NaN;
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function strVal(obj: any): string | undefined {
+  if (obj == null) return undefined;
+  if (typeof obj === 'string') return obj;
+  if (typeof obj === 'number') return String(obj);
+  return obj._value != null ? String(obj._value) : undefined;
+}
+
+function numVal(obj: any): number | undefined {
+  if (obj == null) return undefined;
+  const v = typeof obj === 'number' ? obj : obj._value;
+  const n = parseFloat(String(v));
   return isNaN(n) ? undefined : n;
+}
+
+function linkValues(items: any[], type: string): string[] {
+  return (items || [])
+    .filter((l: any) => l._type === type)
+    .map((l: any) => String(l._value ?? ''))
+    .filter(Boolean);
+}
+
+function primaryName(names: any[]): string {
+  if (!names?.length) return '';
+  const primary = names.find((n: any) => n._type === 'primary');
+  const n = primary ?? names[0];
+  return String(n._value ?? n['#text'] ?? '');
+}
+
+function ensureHttps(url?: string): string | undefined {
+  if (!url) return undefined;
+  return url.startsWith('//') ? `https:${url}` : url;
 }
 
 // ── Search ────────────────────────────────────────────────────────────────────
@@ -66,19 +94,12 @@ export interface SearchResult {
 export async function searchGames(query: string): Promise<SearchResult[]> {
   const params = new URLSearchParams({ query, type: 'boardgame,boardgameexpansion' });
   const doc = await fetchXml(`${BASE}/search?${params}`);
-  const results: SearchResult[] = [];
-  doc.querySelectorAll('item').forEach(item => {
-    const bgg_id = parseInt(item.getAttribute('id') ?? '0', 10);
-    if (!bgg_id) return;
-    let name = '';
-    item.querySelectorAll('name').forEach(n => {
-      if (n.getAttribute('type') === 'primary') name = n.getAttribute('value') ?? '';
-    });
-    if (!name) return;
-    const yearEl = item.querySelector('yearpublished');
-    const year = yearEl ? parseInt(yearEl.getAttribute('value') ?? '', 10) : undefined;
-    results.push({ bgg_id, name, year: isNaN(year as number) ? undefined : year });
-  });
+  const items: any[] = doc?.items?.item ?? [];
+  const results: SearchResult[] = items.map((item: any) => ({
+    bgg_id: item._id,
+    name:   primaryName(item.name),
+    year:   numVal(item.yearpublished),
+  })).filter(r => r.bgg_id && r.name);
   return results.sort((a, b) => (b.year ?? 0) - (a.year ?? 0));
 }
 
@@ -106,45 +127,35 @@ export interface GameDetails {
   is_expansion: boolean;
 }
 
-export async function fetchGameDetails(bggId: number): Promise<GameDetails | null> {
-  const doc = await fetchXml(`${BASE}/thing?id=${bggId}&stats=1`);
-  const item = doc.querySelector('item');
+export async function fetchGameDetails(bggId: number, token?: string): Promise<GameDetails | null> {
+  const doc = await fetchXml(`${BASE}/thing?id=${bggId}&stats=1`, 10, token);
+  const items: any[] = doc?.items?.item ?? [];
+  const item = items[0];
   if (!item) return null;
 
-  const type = item.getAttribute('type') ?? '';
-  const is_expansion = type === 'boardgameexpansion';
-
-  let name = '';
-  item.querySelectorAll('name').forEach(n => {
-    if (n.getAttribute('type') === 'primary') name = n.getAttribute('value') ?? '';
-  });
-
-  const listValues = (linkType: string) =>
-    Array.from(item.querySelectorAll(`link[type="${linkType}"]`))
-      .map(l => l.getAttribute('value') ?? '').filter(Boolean);
-
-  const stats = item.querySelector('statistics ratings');
+  const links: any[] = item.link ?? [];
+  const ratings = item.statistics?.ratings ?? item.stats?.rating ?? {};
 
   return {
-    bgg_id:       bggId,
-    name,
-    year:         num(item.querySelector('yearpublished')),
-    image_url:    item.querySelector('image')?.textContent?.trim(),
-    thumbnail_url:item.querySelector('thumbnail')?.textContent?.trim(),
-    min_players:  num(item.querySelector('minplayers')),
-    max_players:  num(item.querySelector('maxplayers')),
-    min_playtime: num(item.querySelector('minplaytime')),
-    max_playtime: num(item.querySelector('maxplaytime')),
-    playing_time: num(item.querySelector('playingtime')),
-    min_age:      num(item.querySelector('minage')),
-    weight:       num(stats?.querySelector('averageweight')),
-    avg_rating:   num(stats?.querySelector('average')),
-    description:  item.querySelector('description')?.textContent?.trim().replace(/&#10;/g, '\n'),
-    categories:   listValues('boardgamecategory'),
-    mechanics:    listValues('boardgamemechanic'),
-    designers:    listValues('boardgamedesigner'),
-    publishers:   listValues('boardgamepublisher'),
-    is_expansion,
+    bgg_id:        item._id,
+    name:          primaryName(item.name),
+    year:          numVal(item.yearpublished),
+    image_url:     ensureHttps(typeof item.image === 'string' ? item.image : item.image?.['#text']),
+    thumbnail_url: ensureHttps(typeof item.thumbnail === 'string' ? item.thumbnail : item.thumbnail?.['#text']),
+    min_players:   numVal(item.minplayers),
+    max_players:   numVal(item.maxplayers),
+    min_playtime:  numVal(item.minplaytime),
+    max_playtime:  numVal(item.maxplaytime),
+    playing_time:  numVal(item.playingtime),
+    min_age:       numVal(item.minage),
+    weight:        numVal(ratings.averageweight),
+    avg_rating:    numVal(ratings.average),
+    description:   typeof item.description === 'string' ? item.description.slice(0, 2000) : undefined,
+    categories:    linkValues(links, 'boardgamecategory'),
+    mechanics:     linkValues(links, 'boardgamemechanic'),
+    designers:     linkValues(links, 'boardgamedesigner'),
+    publishers:    linkValues(links, 'boardgamepublisher'),
+    is_expansion:  item._type === 'boardgameexpansion',
   };
 }
 
@@ -153,51 +164,48 @@ export async function fetchGameDetails(bggId: number): Promise<GameDetails | nul
 export async function fetchCollection(username: string, token?: string): Promise<GameDetails[]> {
   const doc = await fetchXml(
     `${BASE}/collection?username=${encodeURIComponent(username)}&own=1&stats=1`,
-    12,
-    token
+    14,
+    token,
   );
-  const items = doc.querySelectorAll('item');
-  const ids: number[] = [];
-  items.forEach(item => {
-    const id = parseInt(item.getAttribute('objectid') ?? '0', 10);
-    if (id) ids.push(id);
-  });
 
-  // Fetch details in batches of 20
+  const items: any[] = doc?.items?.item ?? [];
+  if (!items.length) return [];
+
+  // Fetch full details in batches of 20
+  const ids: number[] = items
+    .map((item: any) => Number(item._objectid))
+    .filter(Boolean);
+
   const results: GameDetails[] = [];
   for (let i = 0; i < ids.length; i += 20) {
     const batch = ids.slice(i, i + 20).join(',');
-    const detailDoc = await fetchXml(`${BASE}/thing?id=${batch}&stats=1`);
-    detailDoc.querySelectorAll('item').forEach(item => {
-      const bggId = parseInt(item.getAttribute('id') ?? '0', 10);
-      if (!bggId) return;
-      let name = '';
-      item.querySelectorAll('name').forEach(n => {
-        if (n.getAttribute('type') === 'primary') name = n.getAttribute('value') ?? '';
-      });
-      if (!name) return;
-      const type = item.getAttribute('type') ?? '';
-      const stats = item.querySelector('statistics ratings');
-      const listValues = (linkType: string) =>
-        Array.from(item.querySelectorAll(`link[type="${linkType}"]`))
-          .map(l => l.getAttribute('value') ?? '').filter(Boolean);
+    const batchDoc = await fetchXml(`${BASE}/thing?id=${batch}&stats=1`, 10, token);
+    const batchItems: any[] = batchDoc?.items?.item ?? [];
+    for (const item of batchItems) {
+      const links: any[] = item.link ?? [];
+      const ratings = item.statistics?.ratings ?? item.stats?.rating ?? {};
       results.push({
-        bgg_id: bggId, name,
-        year:         num(item.querySelector('yearpublished')),
-        image_url:    item.querySelector('image')?.textContent?.trim(),
-        thumbnail_url:item.querySelector('thumbnail')?.textContent?.trim(),
-        min_players:  num(item.querySelector('minplayers')),
-        max_players:  num(item.querySelector('maxplayers')),
-        playing_time: num(item.querySelector('playingtime')),
-        weight:       num(stats?.querySelector('averageweight')),
-        avg_rating:   num(stats?.querySelector('average')),
-        categories:   listValues('boardgamecategory'),
-        mechanics:    listValues('boardgamemechanic'),
-        designers:    listValues('boardgamedesigner'),
-        publishers:   listValues('boardgamepublisher'),
-        is_expansion: type === 'boardgameexpansion',
+        bgg_id:        item._id,
+        name:          primaryName(item.name),
+        year:          numVal(item.yearpublished),
+        image_url:     ensureHttps(typeof item.image === 'string' ? item.image : item.image?.['#text']),
+        thumbnail_url: ensureHttps(typeof item.thumbnail === 'string' ? item.thumbnail : item.thumbnail?.['#text']),
+        min_players:   numVal(item.minplayers),
+        max_players:   numVal(item.maxplayers),
+        min_playtime:  numVal(item.minplaytime),
+        max_playtime:  numVal(item.maxplaytime),
+        playing_time:  numVal(item.playingtime),
+        min_age:       numVal(item.minage),
+        weight:        numVal(ratings.averageweight),
+        avg_rating:    numVal(ratings.average),
+        description:   typeof item.description === 'string' ? item.description.slice(0, 2000) : undefined,
+        categories:    linkValues(links, 'boardgamecategory'),
+        mechanics:     linkValues(links, 'boardgamemechanic'),
+        designers:     linkValues(links, 'boardgamedesigner'),
+        publishers:    linkValues(links, 'boardgamepublisher'),
+        is_expansion:  item._type === 'boardgameexpansion',
       });
-    });
+    }
   }
   return results;
 }
