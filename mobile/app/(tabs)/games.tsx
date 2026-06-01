@@ -64,10 +64,11 @@ export default function Games() {
       return;
     }
     setSyncing(true);
-    setSyncMessage('Logging in to BGG…');
+    setSyncMessage('Connecting to BGG…');
     try {
-      // Log in first so the session cookie is set for the collection request
-      if (settings.bgg_password) {
+      // Token auth preferred; fall back to password login if no token set
+      if (!settings.bgg_token && settings.bgg_password) {
+        setSyncMessage('Logging in to BGG…');
         await bgg.loginBgg(settings.bgg_username, settings.bgg_password);
       }
       setSyncMessage('Fetching collection…');
@@ -201,19 +202,29 @@ export default function Games() {
             autoCorrect={false}
           />
 
-          <Text style={s.label}>BGG Password</Text>
+          <Text style={s.label}>BGG Token (recommended)</Text>
+          <TextInput
+            style={s.input}
+            value={bggToken}
+            onChangeText={setBggToken}
+            placeholder="e.g. 3761c334-250c-41c9-…"
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+
+          <Text style={s.label}>BGG Password (fallback)</Text>
           <TextInput
             style={s.input}
             value={bggPassword}
             onChangeText={setBggPassword}
-            placeholder="Your BGG password"
+            placeholder="Only needed if no token set"
             secureTextEntry
             autoCapitalize="none"
             autoCorrect={false}
           />
           <Text style={s.hint}>
-            Used to log in and sync private collections.{'\n'}
-            Stored securely on your device, never sent anywhere except BGG.
+            Token syncs private collections without a password.{'\n'}
+            Both are stored securely on your device only.
           </Text>
 
           <TouchableOpacity style={s.sheetBtn} onPress={saveAndClose}>
