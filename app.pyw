@@ -25,26 +25,112 @@ import bgg
 import config
 import db
 
-# Secure credential storage — uses Windows Credential Manager / macOS Keychain / libsecret
-try:
-    import keyring as _keyring
-    _KR_SERVICE = "BoardGameLibrary"
-    def _kr_get_password() -> str:
+# ── Secure credential storage ─────────────────────────────────────────────────
+# Layered approach:
+#   1. Windows DPAPI via ctypes  — no external libs, works in any .exe build
+#   2. keyring (if installed)    — also uses DPAPI under the hood on Windows
+# The DPAPI-encrypted blob is stored in DATA_DIR/creds so it survives restarts.
+
+def _dpapi_encrypt(text: str) -> Optional[str]:
+    """Encrypt *text* with Windows DPAPI (user-scoped). Returns base64 string."""
+    try:
+        import ctypes, ctypes.wintypes, base64 as _b64  # noqa: PLC0415
+        class _BLOB(ctypes.Structure):
+            _fields_ = [("cbData", ctypes.wintypes.DWORD),
+                        ("pbData", ctypes.POINTER(ctypes.c_char))]
+        raw   = text.encode("utf-8")
+        inp   = _BLOB(len(raw), ctypes.cast(ctypes.c_char_p(raw),
+                                             ctypes.POINTER(ctypes.c_char)))
+        out   = _BLOB()
+        ok    = ctypes.windll.Crypt32.CryptProtectData(
+                    ctypes.byref(inp), None, None, None, None, 0, ctypes.byref(out))
+        if ok:
+            result = ctypes.string_at(out.pbData, out.cbData)
+            ctypes.windll.Kernel32.LocalFree(out.pbData)
+            return _b64.b64encode(result).decode()
+    except Exception:
+        pass
+    return None
+
+def _dpapi_decrypt(blob: str) -> Optional[str]:
+    """Decrypt a DPAPI blob produced by _dpapi_encrypt."""
+    try:
+        import ctypes, ctypes.wintypes, base64 as _b64  # noqa: PLC0415
+        class _BLOB(ctypes.Structure):
+            _fields_ = [("cbData", ctypes.wintypes.DWORD),
+                        ("pbData", ctypes.POINTER(ctypes.c_char))]
+        raw   = _b64.b64decode(blob)
+        inp   = _BLOB(len(raw), ctypes.cast(ctypes.c_char_p(raw),
+                                             ctypes.POINTER(ctypes.c_char)))
+        out   = _BLOB()
+        ok    = ctypes.windll.Crypt32.CryptUnprotectData(
+                    ctypes.byref(inp), None, None, None, None, 0, ctypes.byref(out))
+        if ok:
+            result = ctypes.string_at(out.pbData, out.cbData).decode("utf-8")
+            ctypes.windll.Kernel32.LocalFree(out.pbData)
+            return result
+    except Exception:
+        pass
+    return None
+
+# Path for the DPAPI-encrypted credential file
+_CREDS_PATH: Optional[Path] = None  # set after paths module is loaded
+
+def _creds_file() -> Optional[Path]:
+    global _CREDS_PATH
+    if _CREDS_PATH is None:
         try:
-            return _keyring.get_password(_KR_SERVICE, "bgg_password") or ""
-        except Exception:
-            return ""
-    def _kr_set_password(pwd: str) -> None:
-        try:
-            if pwd:
-                _keyring.set_password(_KR_SERVICE, "bgg_password", pwd)
-            else:
-                _keyring.delete_password(_KR_SERVICE, "bgg_password")
+            from paths import DATA_DIR  # noqa: PLC0415
+            _CREDS_PATH = DATA_DIR / "creds"
         except Exception:
             pass
-except ImportError:
-    def _kr_get_password() -> str: return ""
-    def _kr_set_password(pwd: str) -> None: pass
+    return _CREDS_PATH
+
+def _kr_get_password() -> str:
+    """Read the BGG password from the DPAPI-encrypted credential file."""
+    try:
+        cf = _creds_file()
+        if cf and cf.exists():
+            blob = cf.read_text(encoding="utf-8").strip()
+            pwd  = _dpapi_decrypt(blob)
+            if pwd:
+                return pwd
+    except Exception:
+        pass
+    # Fallback: try keyring if available
+    try:
+        import keyring as _kr  # noqa: PLC0415
+        return _kr.get_password("BoardGameLibrary", "bgg_password") or ""
+    except Exception:
+        pass
+    return ""
+
+def _kr_set_password(pwd: str) -> None:
+    """Write the BGG password to the DPAPI-encrypted credential file."""
+    try:
+        cf = _creds_file()
+        if cf is not None:
+            if pwd:
+                blob = _dpapi_encrypt(pwd)
+                if blob:
+                    cf.write_text(blob, encoding="utf-8")
+                    return
+            else:
+                if cf.exists():
+                    cf.unlink()
+                return
+    except Exception:
+        pass
+    # Fallback: keyring
+    try:
+        import keyring as _kr  # noqa: PLC0415
+        if pwd:
+            _kr.set_password("BoardGameLibrary", "bgg_password", pwd)
+        else:
+            try: _kr.delete_password("BoardGameLibrary", "bgg_password")
+            except Exception: pass
+    except Exception:
+        pass
 from paths import DATA_DIR, DB_PATH, CONFIG_PATH, IMAGES_DIR
 from version import __version__ as APP_VERSION
 
