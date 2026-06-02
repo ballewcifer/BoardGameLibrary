@@ -86,8 +86,10 @@ export default function Games({ isActive = true }: { isActive?: boolean }) {
     setSyncing(true);
     setSyncMessage('Connecting to BGG…');
     try {
-      if (!settings.bgg_token && settings.bgg_password) {
-        setSyncMessage('Logging in…');
+      // BG Stats approach: login for session cookies AND send Bearer token
+      // together — private collections work without making them public.
+      if (settings.bgg_password) {
+        setSyncMessage('Logging in to BGG…');
         await bgg.loginBgg(settings.bgg_username, settings.bgg_password);
       }
       setSyncMessage('Fetching collection…');

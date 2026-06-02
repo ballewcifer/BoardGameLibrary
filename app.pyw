@@ -2257,31 +2257,34 @@ class App(tk.Tk):
         entry.focus_set()
         entry.select_range(0, "end")
 
+        ttk.Label(dialog, text="BGG password (for private collections):",
+                  padding=(16, 6, 16, 2)).pack(anchor="w")
+        pwd_var = tk.StringVar(value=self.settings.get("bgg_password", ""))
+        pwd_entry = ttk.Entry(dialog, textvariable=pwd_var, width=34, show="●")
+        pwd_entry.pack(padx=16, pady=(0, 2))
+
         tk.Label(
             dialog,
-            text="Your BGG collection must be set to public.",
-            bg=C_BG, fg="#555", font=("Segoe UI", 9),
-            padx=16,
-        ).pack(anchor="w")
+            text="Password lets the app log in like BG Stats does — no need to\n"
+                 "make your collection public. Leave blank if your collection is public.",
+            bg=C_BG, fg="#555", font=("Segoe UI", 8),
+            padx=16, justify="left",
+        ).pack(anchor="w", pady=(0, 6))
 
         btn_frame = ttk.Frame(dialog)
         btn_frame.pack(padx=16, pady=(8, 14), fill="x")
 
         def do_import() -> None:
             uname = uname_var.get().strip()
+            pwd   = pwd_var.get()
             if not uname:
                 messagebox.showerror("Username required", "Enter your BGG username.", parent=dialog)
                 return
             tok = bgg.BGG_APP_TOKEN or self.settings.get("bgg_token", "").strip()
-            if not tok:
-                messagebox.showerror(
-                    "Not configured",
-                    "The app's BGG API token has not been set yet.\n"
-                    "Please contact the library administrator.",
-                    parent=dialog,
-                )
-                return
             self.settings["bgg_username"] = uname
+            # Save password in memory only (never written to disk)
+            if pwd:
+                self.settings["bgg_password"] = pwd
             config.save(self.settings)
             if hasattr(self, "username_var"):
                 self.username_var.set(uname)
@@ -2289,7 +2292,7 @@ class App(tk.Tk):
             self.status(f"Importing collection for {uname}…")
             threading.Thread(
                 target=self._import_from_username_bg,
-                args=(uname, tok),
+                args=(uname, tok, pwd or None),
                 daemon=True,
             ).start()
 
@@ -2298,14 +2301,27 @@ class App(tk.Tk):
         dialog.bind("<Return>", lambda *_: do_import())
         dialog.grab_set()
 
-    def _import_from_username_bg(self, username: str, token: str) -> None:
+    def _import_from_username_bg(self, username: str, token: str,
+                                   password: Optional[str] = None) -> None:
         try:
-            games = bgg.import_from_username(username, token=token, on_status=self._post_status)
+            opener = None
+            if password:
+                self._post_status("Logging in to BGG…")
+                _jar, opener = bgg._bgg_login(username, password)
+                if opener is None:
+                    self.after(0, lambda: messagebox.showerror(
+                        "Login failed", "BGG login failed — check your password."))
+                    return
+                self._post_status("Login successful. Fetching collection…")
+
+            games = bgg.import_from_username(username, token=token,
+                                              on_status=self._post_status, opener=opener)
             if not games:
                 self.after(0, lambda: messagebox.showinfo(
                     "Nothing found",
                     f"No owned games found for '{username}'.\n"
-                    "Check the username is correct and your BGG collection is set to public.",
+                    "Check the username is correct. If your collection is private,\n"
+                    "enter your BGG password in the sync dialog.",
                 ))
                 self._post_status("Import: nothing found.")
                 return

@@ -100,31 +100,47 @@ class GameDetails:
     is_expansion: bool = False
 
 
-def _http_get(url: str, timeout: int = 30, token: Optional[str] = None) -> tuple[int, bytes]:
-    # BGG now returns 403 to non-browser UAs on all endpoints, including the XML API.
+def _http_get(
+    url: str,
+    timeout: int = 30,
+    token: Optional[str] = None,
+    opener: Optional[urllib.request.OpenerDirector] = None,
+) -> tuple[int, bytes]:
+    """GET *url* with optional Bearer token and/or session-cookie opener.
+
+    BG Stats approach: send both the app Bearer token (identifies the app to
+    BGG) AND the user's session cookies (from a prior _bgg_login call) so that
+    private collections are accessible without requiring the user to make their
+    collection public.
+    """
     headers = {"User-Agent": BROWSER_UA}
     if token:
         headers["Authorization"] = f"Bearer {token}"
     req = urllib.request.Request(url, headers=headers)
     try:
-        with urllib.request.urlopen(req, timeout=timeout, context=_ssl_ctx()) as resp:
-            return resp.status, resp.read()
+        if opener:
+            # Authenticated opener carries session cookies automatically
+            with opener.open(req, timeout=timeout) as resp:
+                return resp.status, resp.read()
+        else:
+            with urllib.request.urlopen(req, timeout=timeout, context=_ssl_ctx()) as resp:
+                return resp.status, resp.read()
     except urllib.error.HTTPError as e:
         if e.code == 401:
             raise PermissionError(
-                "BGG returned 401 Unauthorized. The XML API now requires a "
-                "Bearer token from a registered application "
-                "(https://boardgamegeek.com/applications)."
+                "BGG returned 401 — Bearer token required or collection is private.\n"
+                "Add your BGG password in Settings so the app can log in on your behalf."
             ) from e
         raise
 
 
 def _fetch_xml(url: str, *, token: Optional[str] = None, max_attempts: int = 10,
                backoff: float = 2.0,
-               on_status: Optional[Callable[[str], None]] = None) -> ET.Element:
+               on_status: Optional[Callable[[str], None]] = None,
+               opener: Optional[urllib.request.OpenerDirector] = None) -> ET.Element:
     """GET a BGG XML endpoint, retrying on HTTP 202 (queued)."""
     for attempt in range(1, max_attempts + 1):
-        status, body = _http_get(url, token=token)
+        status, body = _http_get(url, token=token, opener=opener)
         if status == 200:
             return ET.fromstring(body)
         if status == 202:
@@ -157,6 +173,7 @@ def fetch_collection(
     own_only: bool = True,
     token: Optional[str] = None,
     on_status: Optional[Callable[[str], None]] = None,
+    opener: Optional[urllib.request.OpenerDirector] = None,
 ) -> list[CollectionEntry]:
     params = {"username": username, "stats": "1"}
     if own_only:
@@ -164,7 +181,7 @@ def fetch_collection(
     url = f"{BASE}/collection?{urllib.parse.urlencode(params)}"
     if on_status:
         on_status(f"Fetching collection for {username}...")
-    root = _fetch_xml(url, token=token, on_status=on_status)
+    root = _fetch_xml(url, token=token, on_status=on_status, opener=opener)
 
     entries: list[CollectionEntry] = []
     for item in root.findall("item"):
@@ -217,17 +234,19 @@ def import_from_username(
     *,
     token: Optional[str] = None,
     on_status: Optional[Callable[[str], None]] = None,
+    opener: Optional[urllib.request.OpenerDirector] = None,
 ) -> list[GameDetails]:
     """Import an owned collection by BGG username.
 
-    Requires a BGG Bearer token (register at boardgamegeek.com/applications).
+    Pass *opener* from _bgg_login() to access private collections without
+    requiring the user to make their collection public (BG Stats approach).
 
     Step 1: fetch /collection — returns game list + image URLs + basic stats.
     Step 2: fetch /thing in batches — adds weight, categories, designers, best-at.
     """
     if on_status:
         on_status(f"Fetching collection for {username}…")
-    entries = fetch_collection(username, token=token, on_status=on_status)
+    entries = fetch_collection(username, token=token, on_status=on_status, opener=opener)
     if not entries:
         return []
 
