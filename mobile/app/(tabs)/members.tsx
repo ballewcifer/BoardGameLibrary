@@ -66,8 +66,10 @@ export default function Members() {
         <Pressable style={s.overlay} onPress={() => setModalOpen(false)} />
         <View style={s.sheet}>
           <Text style={s.sheetTitle}>Add Member</Text>
-          <TextInput style={s.input} placeholder="First name" value={first} onChangeText={setFirst} autoFocus />
-          <TextInput style={s.input} placeholder="Last name" value={last} onChangeText={setLast} returnKeyType="done" onSubmitEditing={add} />
+          <Text style={s.label}>First Name</Text>
+          <TextInput style={s.input} placeholder="e.g. Jane" value={first} onChangeText={setFirst} autoFocus />
+          <Text style={s.label}>Last Name</Text>
+          <TextInput style={s.input} placeholder="e.g. Smith" value={last} onChangeText={setLast} returnKeyType="done" onSubmitEditing={add} />
           <TouchableOpacity style={s.sheetBtn} onPress={add}>
             <Text style={s.sheetBtnTxt}>Add</Text>
           </TouchableOpacity>
@@ -92,6 +94,7 @@ const s = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
   sheet: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 24, paddingBottom: 40 },
   sheetTitle: { fontSize: 18, fontWeight: '700', marginBottom: 16, color: NAVY },
+  label: { fontSize: 13, fontWeight: '600', color: '#333', marginBottom: 4 },
   input: { borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 8, padding: 10, fontSize: 15, marginBottom: 12 },
   sheetBtn: { backgroundColor: NAVY, borderRadius: 8, padding: 14, alignItems: 'center', marginTop: 4 },
   sheetBtnTxt: { color: '#fff', fontWeight: '700', fontSize: 15 },

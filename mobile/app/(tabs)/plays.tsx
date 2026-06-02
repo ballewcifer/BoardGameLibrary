@@ -3,13 +3,15 @@ import { View, Text, FlatList, TouchableOpacity, StyleSheet, Alert, Modal, TextI
 import { useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as db from '../../lib/db';
-import type { Play, Game } from '../../lib/types';
+import type { Play, Game, User } from '../../lib/types';
+import PlayerPicker from '../../components/PlayerPicker';
 
 const NAVY = '#1a237e';
 
 export default function Plays() {
   const [plays, setPlays]           = useState<Play[]>([]);
   const [games, setGames]           = useState<Game[]>([]);
+  const [users, setUsers]           = useState<User[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [modalOpen, setModalOpen]   = useState(false);
 
@@ -26,6 +28,7 @@ export default function Plays() {
   const load = useCallback(() => {
     setPlays(db.listPlays());
     setGames(db.listGames());
+    setUsers(db.listUsers());
   }, []);
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
@@ -109,7 +112,7 @@ export default function Plays() {
             <TextInput style={s.input} value={date} onChangeText={setDate} placeholder="YYYY-MM-DD" />
 
             <Text style={s.label}>Players</Text>
-            <TextInput style={s.input} value={players} onChangeText={setPlayers} placeholder="Alice, Bob, Carol" />
+            <PlayerPicker users={users} value={players} onChange={setPlayers} />
 
             <Text style={s.label}>Winner</Text>
             <TextInput style={s.input} value={winner} onChangeText={setWinner} placeholder="Alice" />

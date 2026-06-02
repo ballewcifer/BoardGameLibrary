@@ -4,6 +4,7 @@ import { useLocalSearchParams, router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as db from '../../lib/db';
 import type { Game, Loan, User } from '../../lib/types';
+import PlayerPicker from '../../components/PlayerPicker';
 
 const NAVY = '#1a237e';
 
@@ -213,7 +214,7 @@ export default function GameDetail() {
             <Text style={s.label}>Date *</Text>
             <TextInput style={s.input} value={playDate} onChangeText={setPlayDate} placeholder="YYYY-MM-DD" />
             <Text style={s.label}>Players</Text>
-            <TextInput style={s.input} value={players} onChangeText={setPlayers} placeholder="Alice, Bob" />
+            <PlayerPicker users={users} value={players} onChange={setPlayers} />
             <Text style={s.label}>Winner</Text>
             <TextInput style={s.input} value={winner} onChangeText={setWinner} placeholder="Alice" />
             <Text style={s.label}>Duration (minutes)</Text>
