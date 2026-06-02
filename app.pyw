@@ -502,6 +502,10 @@ class App(tk.Tk):
             font=("Segoe UI", 13, "bold"),
         ).pack(side="left", padx=(8, 0))
 
+        # Thin separator line below the header for visual separation
+        sep = tk.Frame(self, bg="#2c3e6e", height=2)
+        sep.pack(side="top", fill="x")
+
     def _build_toolbar(self, parent=None) -> None:
         """Search bar + view toggle + filter bar. Called from _build_games_tab()."""
         parent = parent or self
@@ -1425,10 +1429,16 @@ class App(tk.Tk):
         card = ttk.Frame(self.games_inner, padding=8, relief="solid", borderwidth=1)
         card.configure(width=180)
 
-        # --- header row: star sits right-aligned above the image ---
-        #     Using tk.Frame (not ttk) so bg=C_BG matches perfectly.
+        # --- header row: expansion badge (left) + star (right) ---
         header = tk.Frame(card, bg=C_BG)
         header.pack(fill="x")
+        if game["is_expansion"]:
+            tk.Label(
+                header, text="Expansion",
+                bg="#ede7f6", fg="#4527a0",
+                font=("Segoe UI", 7), padx=4, pady=2,
+                relief="flat",
+            ).pack(side="left", pady=(2, 0))
         star_lbl = tk.Label(
             header,
             text="★" if is_fav else "☆",
@@ -1436,7 +1446,7 @@ class App(tk.Tk):
             fg="#f5a623" if is_fav else "#aaa",
             bg=C_BG, cursor="hand2",
         )
-        star_lbl.pack(side="right", padx=(0, 0), pady=(0, 0))
+        star_lbl.pack(side="right")
         star_lbl.bind("<Button-1>", lambda e, g=game: self.on_toggle_favorite(g))
 
         # --- image canvas (fixed size, centred in card) ---
@@ -1480,15 +1490,9 @@ class App(tk.Tk):
             font=("Segoe UI", 8),
         ).pack()
 
-        # --- badges row: expansion + insert + play count ---
+        # --- badges row: insert + play count (expansion badge is in the header row) ---
         badge_row = ttk.Frame(card)
         badge_row.pack(pady=(3, 0))
-        if game["is_expansion"]:
-            tk.Label(
-                badge_row, text="Expansion",
-                bg="#ede7f6", fg="#4527a0",
-                font=("Segoe UI", 8), padx=4, pady=1,
-            ).pack(side="left", padx=(0, 4))
         if has_insert:
             tk.Label(
                 badge_row, text="\U0001f4e6 Insert",
