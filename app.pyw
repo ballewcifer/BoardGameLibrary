@@ -1542,9 +1542,15 @@ class App(tk.Tk):
         card = ttk.Frame(self.games_inner, padding=8, relief="solid", borderwidth=1)
         card.configure(width=180)
 
-        # --- header row: star right-aligned ---
+        # --- header row: expansion badge (left) + star (right) ---
         header = tk.Frame(card, bg=C_BG)
         header.pack(fill="x")
+        if game["is_expansion"]:
+            tk.Label(
+                header, text="Expansion",
+                bg="#ede7f6", fg="#4527a0",
+                font=("Segoe UI", 7, "bold"), padx=4, pady=1,
+            ).pack(side="left", pady=(2, 0))
         star_lbl = tk.Label(
             header,
             text="★" if is_fav else "☆",
@@ -1554,14 +1560,6 @@ class App(tk.Tk):
         )
         star_lbl.pack(side="right")
         star_lbl.bind("<Button-1>", lambda e, g=game: self.on_toggle_favorite(g))
-
-        # --- expansion badge centred above the image ---
-        if game["is_expansion"]:
-            tk.Label(
-                card, text="Expansion",
-                bg="#ede7f6", fg="#4527a0",
-                font=("Segoe UI", 8, "bold"), padx=6, pady=2,
-            ).pack(pady=(0, 4))
 
         # --- image canvas (fixed size, centred in card) ---
         _CW, _CH = THUMB_SIZE[0], THUMB_SIZE[1]  # 140 × 140
