@@ -258,8 +258,7 @@ class App(tk.Tk):
         self.configure(bg=C_BG)
         self._build_menubar()
         self._build_header()
-        self._build_toolbar()
-        self._build_tabs()
+        self._build_tabs()   # toolbar now built inside _build_games_tab()
         self._build_status_bar()
 
         self.refresh_all()
@@ -268,11 +267,7 @@ class App(tk.Tk):
         if not self.settings.get("welcome_shown"):
             self.after(300, self._show_welcome_dialog)
 
-        # Auto-sync with BGG on startup if a username is configured
-        username = self.settings.get("bgg_username", "").strip()
-        token    = bgg.BGG_APP_TOKEN or self.settings.get("bgg_token", "").strip()
-        if username and token:
-            self.after(1500, lambda: self._auto_sync_bgg(username, token))
+        # BGG sync is manual — use Library → Sync from BGG…
 
     # ---------- first-run welcome ----------
 
@@ -485,6 +480,8 @@ class App(tk.Tk):
         # ── Library ───────────────────────────────────────────────────────────
         lib_menu = tk.Menu(menubar)
         menubar.add_cascade(label="Library", menu=lib_menu)
+        lib_menu.add_command(label="Sync from BGG…", command=self.on_import_from_bgg)
+        lib_menu.add_separator()
         lib_menu.add_command(label="Add Game…", command=self.on_add_game)
 
         # ── Help ──────────────────────────────────────────────────────────────
@@ -505,10 +502,11 @@ class App(tk.Tk):
             font=("Segoe UI", 13, "bold"),
         ).pack(side="left", padx=(8, 0))
 
-    def _build_toolbar(self) -> None:
-        bar = ttk.Frame(self, padding=(8, 6))
+    def _build_toolbar(self, parent=None) -> None:
+        """Search bar + view toggle + filter bar. Called from _build_games_tab()."""
+        parent = parent or self
+        bar = ttk.Frame(parent, padding=(8, 6))
         bar.pack(side="top", fill="x")
-        self._games_toolbar = bar   # hidden when not on Games tab
 
         # ── search ────────────────────────────────────────────────────────────
         ttk.Label(bar, text="Search:").pack(side="left")
@@ -545,9 +543,8 @@ class App(tk.Tk):
         self._btn_table = _view_btn("≡  Table", "table")
 
         # --- filter bar (second row, light-blue background) ---
-        fbar = ttk.Frame(self, style="Filter.TFrame", padding=(8, 4, 8, 6))
+        fbar = ttk.Frame(parent, style="Filter.TFrame", padding=(8, 4, 8, 6))
         fbar.pack(side="top", fill="x")
-        self._games_filterbar = fbar   # hidden when not on Games tab
 
         def flabel(text): return ttk.Label(fbar, text=text, style="Filter.TLabel")
         def fcheck(text, var, cmd): return ttk.Checkbutton(fbar, text=text, variable=var,
@@ -642,18 +639,6 @@ class App(tk.Tk):
         self._build_history_tab()
         self._build_plays_tab()
         self._build_dashboard_tab()
-
-        # Show/hide the toolbar & filter bar depending on which tab is active
-        self.nb.bind("<<NotebookTabChanged>>", self._on_tab_changed)
-
-    def _on_tab_changed(self, _event=None) -> None:
-        on_games = self.nb.select() == str(self.games_tab)
-        if on_games:
-            self._games_toolbar.pack(side="top", fill="x", before=self._games_filterbar)
-            self._games_filterbar.pack(side="top", fill="x", before=self.nb)
-        else:
-            self._games_toolbar.pack_forget()
-            self._games_filterbar.pack_forget()
 
     def _build_status_bar(self) -> None:
         self.status_var = tk.StringVar(value="Ready.")
@@ -800,6 +785,9 @@ class App(tk.Tk):
     # ---------- games tab ----------
 
     def _build_games_tab(self) -> None:
+        # Search bar, view toggle, and filter bar — live inside the Games tab
+        self._build_toolbar(parent=self.games_tab)
+
         wrapper = ttk.Frame(self.games_tab)
         wrapper.pack(fill="both", expand=True)
 
