@@ -2665,6 +2665,7 @@ class App(tk.Tk):
             description  = game["description"],
             my_rating    = game["my_rating"],
             my_comment   = game["my_comment"],
+            best_players = game["best_players"],
         )
         self._open_game_edit_dialog(details, is_new=False)
 
@@ -2709,10 +2710,12 @@ class App(tk.Tk):
         time_var    = row_entry(5, "Play time (min)",   pt,             width=10)
         weight_var  = row_entry(6, "Complexity (1–5)",
                                 f"{d.weight:.2f}" if d.weight else "", width=10)
-        comment_var = row_entry(7, "Comment",           d.my_comment)
+        best_var    = row_entry(7, "Best at (players)",
+                                d.best_players or "",         width=16)
+        comment_var = row_entry(8, "Comment",           d.my_comment)
 
         # Tags row — uses existing tags from DB when editing
-        ttk.Label(dlg, text="Tags", font=("Segoe UI", 9, "bold")).grid(row=8, column=0, **lpad)
+        ttk.Label(dlg, text="Tags", font=("Segoe UI", 9, "bold")).grid(row=9, column=0, **lpad)
         existing_tags = ""
         if not is_new:
             with db.connect() as c:
@@ -2723,23 +2726,23 @@ class App(tk.Tk):
             _existing_tag_list = ["Any"] + db.all_tags(c)
         tags_var = tk.StringVar(value=existing_tags)
         _AutocompleteEntry(dlg, _existing_tag_list, textvariable=tags_var,
-                           width=34).grid(row=8, column=1, **rpad)
+                           width=34).grid(row=9, column=1, **rpad)
         ttk.Label(dlg, text="Comma-separated, e.g. Party, Family, Filler",
                   foreground="#888", font=("Segoe UI", 7),
-                  ).grid(row=9, column=1, sticky="w", padx=(4, 12), pady=(0, 2))
+                  ).grid(row=10, column=1, sticky="w", padx=(4, 12), pady=(0, 2))
 
         ttk.Label(dlg, text="Description",
-                  font=("Segoe UI", 9, "bold")).grid(row=10, column=0, **lpad)
+                  font=("Segoe UI", 9, "bold")).grid(row=11, column=0, **lpad)
         desc_box = tk.Text(dlg, width=38, height=5, font=("Segoe UI", 9),
                            wrap="word", relief="solid", bd=1)
-        desc_box.grid(row=10, column=1, padx=(4, 12), pady=3, sticky="we")
+        desc_box.grid(row=11, column=1, padx=(4, 12), pady=3, sticky="we")
         if d.description:
             desc_box.insert("1.0", d.description)
 
         err_var = tk.StringVar()
         ttk.Label(dlg, textvariable=err_var, foreground="red",
                   font=("Segoe UI", 8)).grid(
-            row=11, column=0, columnspan=2, padx=12, sticky="w")
+            row=12, column=0, columnspan=2, padx=12, sticky="w")
 
         # --- lock-status row (editing an existing game only) ---
         _FIELD_DISPLAY = {
@@ -2748,11 +2751,11 @@ class App(tk.Tk):
             "playing_time": "Play time", "min_playtime": "Play time",
             "max_playtime": "Play time",
             "weight": "Complexity", "description": "Description",
-            "my_comment": "Comment",
+            "my_comment": "Comment", "best_players": "Best at",
         }
         lock_lbl_var = tk.StringVar()
         lock_frame = ttk.Frame(dlg)
-        lock_frame.grid(row=12, column=0, columnspan=2,
+        lock_frame.grid(row=13, column=0, columnspan=2,
                         padx=12, pady=(0, 2), sticky="w")
         ttk.Label(lock_frame, textvariable=lock_lbl_var,
                   foreground="#555", font=("Segoe UI", 8)).pack(side="left")
@@ -2845,7 +2848,7 @@ class App(tk.Tk):
                 "mechanics":     ", ".join(d.mechanics)  if d.mechanics  else None,
                 "designers":     ", ".join(d.designers)  if d.designers  else None,
                 "publishers":    ", ".join(d.publishers) if d.publishers else None,
-                "best_players":  d.best_players,
+                "best_players":  best_var.get().strip() or None,
                 "my_comment":    comment_var.get().strip() or None,
                 "own":           1,
                 "last_synced":   db.now_iso(),
@@ -2855,12 +2858,13 @@ class App(tk.Tk):
                 if not is_new and existing:
                     manual = db.get_manual_fields(c, bgg_id)
                     field_checks = [
-                        ("name",        game_row["name"],        existing["name"]),
-                        ("year",        game_row["year"],         existing["year"]),
-                        ("min_players", game_row["min_players"],  existing["min_players"]),
-                        ("max_players", game_row["max_players"],  existing["max_players"]),
-                        ("description", game_row["description"],  existing["description"]),
-                        ("my_comment",  game_row["my_comment"],   existing["my_comment"]),
+                        ("name",         game_row["name"],         existing["name"]),
+                        ("year",         game_row["year"],          existing["year"]),
+                        ("min_players",  game_row["min_players"],   existing["min_players"]),
+                        ("max_players",  game_row["max_players"],   existing["max_players"]),
+                        ("best_players", game_row["best_players"],  existing["best_players"]),
+                        ("description",  game_row["description"],   existing["description"]),
+                        ("my_comment",   game_row["my_comment"],    existing["my_comment"]),
                     ]
                     for field, new_val, old_val in field_checks:
                         if new_val != old_val:
@@ -2891,7 +2895,7 @@ class App(tk.Tk):
             self.status(f"{verb} \"{name}\".")
 
         btn_row = ttk.Frame(dlg, padding=(12, 4, 12, 12))
-        btn_row.grid(row=13, column=0, columnspan=2, sticky="e")
+        btn_row.grid(row=14, column=0, columnspan=2, sticky="e")
         ttk.Button(btn_row, text="Cancel", command=dlg.destroy).pack(side="left", padx=(0, 6))
         ttk.Button(btn_row, text="Save Game" if is_new else "Save Changes",
                    command=save).pack(side="left")
