@@ -33,9 +33,10 @@ BROWSER_UA = (
 THING_BATCH = 20
 
 # ── Built-in application token ────────────────────────────────────────────────
-# Register at https://boardgamegeek.com/applications to get a Bearer token,
-# then paste it here.  This single token works for all users of the app.
-BGG_APP_TOKEN: str = "YOUR_BGG_API_TOKEN_HERE"
+# Register at https://boardgamegeek.com/applications to get a Bearer token
+# and store it in settings.json (File → Settings → BGG Token) or set the
+# BGG_APP_TOKEN environment variable.  Never commit a real token to source.
+BGG_APP_TOKEN: str = ""
 
 
 def _ssl_ctx() -> ssl.SSLContext:

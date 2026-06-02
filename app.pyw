@@ -2148,26 +2148,34 @@ class App(tk.Tk):
         self.username_var = username_var          # keep ref for import dialog
         ttk.Entry(frame, textvariable=username_var, width=32).grid(row=0, column=1, sticky="w", padx=(8, 0))
         ttk.Label(
-            frame,
-            text="Used by File → Import from BGG… and play sync",
+            frame, text="Used by Library → Sync from BGG… and play sync",
             foreground="#888",
-        ).grid(row=1, column=1, sticky="w", padx=(8, 0), pady=(0, 12))
+        ).grid(row=1, column=1, sticky="w", padx=(8, 0), pady=(0, 8))
+
+        # ── BGG API token ─────────────────────────────────────────────────────
+        ttk.Label(frame, text="BGG API token:").grid(row=2, column=0, sticky="w", pady=4)
+        token_var = tk.StringVar(value=self.settings.get("bgg_token", ""))
+        ttk.Entry(frame, textvariable=token_var, width=38).grid(row=2, column=1, sticky="w", padx=(8, 0))
+        ttk.Label(
+            frame, text="Register at boardgamegeek.com/applications — never share or commit this",
+            foreground="#888",
+        ).grid(row=3, column=1, sticky="w", padx=(8, 0), pady=(0, 8))
 
         # ── BGG password (keychain) ───────────────────────────────────────────
-        ttk.Label(frame, text="BGG password:").grid(row=2, column=0, sticky="w", pady=4)
+        ttk.Label(frame, text="BGG password:").grid(row=4, column=0, sticky="w", pady=4)
         pwd_var = tk.StringVar(value=_kr_get_password())
         pwd_entry = ttk.Entry(frame, textvariable=pwd_var, width=32, show="●")
-        pwd_entry.grid(row=2, column=1, sticky="w", padx=(8, 0))
+        pwd_entry.grid(row=4, column=1, sticky="w", padx=(8, 0))
         _stored = bool(_kr_get_password())
-        _pwd_hint = "✓ Saved in Windows Credential Manager" if _stored else "Optional — needed for private collections"
+        _pwd_hint = "✓ Saved securely (DPAPI)" if _stored else "Optional — needed for private collections"
         pwd_hint_var = tk.StringVar(value=_pwd_hint)
         ttk.Label(frame, textvariable=pwd_hint_var, foreground="#888" if not _stored else "#2e7d32",
-                  ).grid(row=3, column=1, sticky="w", padx=(8, 0), pady=(0, 4))
+                  ).grid(row=5, column=1, sticky="w", padx=(8, 0), pady=(0, 4))
         ttk.Button(
             frame, text="Clear saved password",
             command=lambda: [_kr_set_password(""), pwd_var.set(""),
                              pwd_hint_var.set("Cleared — enter a new password to save")]
-        ).grid(row=4, column=1, sticky="w", padx=(8, 0), pady=(0, 12))
+        ).grid(row=6, column=1, sticky="w", padx=(8, 0), pady=(0, 12))
 
         # ── sync plays toggle ─────────────────────────────────────────────────
         sync_var = tk.BooleanVar(value=bool(self.settings.get("bgg_sync_plays", False)))
@@ -2175,26 +2183,27 @@ class App(tk.Tk):
             frame,
             text="Offer to post plays to BGG when logging a play",
             variable=sync_var,
-        ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(0, 4))
+        ).grid(row=7, column=0, columnspan=2, sticky="w", pady=(0, 4))
 
         def save() -> None:
             self.settings["bgg_username"] = username_var.get().strip()
+            self.settings["bgg_token"]    = token_var.get().strip()
             self.settings.pop("bgg_password", None)   # never in JSON
             self.settings["bgg_sync_plays"] = sync_var.get()
             config.save(self.settings)
-            # Save password to keychain (empty string = clear it)
+            # Save password to DPAPI-encrypted file
             _kr_set_password(pwd_var.get())
             self.status("Settings saved.")
             win.destroy()
 
         # ── danger zone ───────────────────────────────────────────────────────
         tk.Frame(frame, bg=C_PALE, height=1).grid(
-            row=7, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+            row=9, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         tk.Label(
             frame, text="Danger zone",
             bg=C_BG, fg="#b71c1c",
             font=("Segoe UI", 9, "bold"),
-        ).grid(row=8, column=0, sticky="w", pady=(8, 4))
+        ).grid(row=10, column=0, sticky="w", pady=(8, 4))
 
         tk.Button(
             frame, text="Clear collection…",
@@ -2203,17 +2212,17 @@ class App(tk.Tk):
             relief="flat", font=("Segoe UI", 9, "bold"),
             padx=12, pady=4, cursor="hand2",
             command=self.on_clear_collection,
-        ).grid(row=9, column=0, sticky="w")
+        ).grid(row=11, column=0, sticky="w")
         tk.Label(
             frame,
             text="Removes all games, images, play logs,\nand loan history. Members are kept.",
             bg=C_BG, fg="#888",
             font=("Segoe UI", 8), justify="left",
-        ).grid(row=9, column=1, sticky="w", padx=(12, 0))
+        ).grid(row=11, column=1, sticky="w", padx=(12, 0))
 
         # ── buttons ───────────────────────────────────────────────────────────
         btn_row = ttk.Frame(frame)
-        btn_row.grid(row=10, column=0, columnspan=2, sticky="e", pady=(20, 0))
+        btn_row.grid(row=12, column=0, columnspan=2, sticky="e", pady=(20, 0))
         ttk.Button(btn_row, text="Cancel", command=win.destroy).pack(side="left", padx=(0, 6))
         ttk.Button(btn_row, text="Save", command=save).pack(side="left")
 
