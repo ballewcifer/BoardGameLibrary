@@ -84,7 +84,7 @@ export default function Members({ isActive = true }: { isActive?: boolean }) {
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f4f6fa' },
+  container: { flex: 1, backgroundColor: '#fff' },
   addBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: NAVY, margin: 12, borderRadius: 10, padding: 12, justifyContent: 'center' },
   addBtnTxt: { color: '#fff', fontWeight: '700', fontSize: 15 },
   card: { backgroundColor: '#fff', borderRadius: 10, padding: 14, flexDirection: 'row', alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.07, shadowRadius: 4, elevation: 2 },

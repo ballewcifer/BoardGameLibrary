@@ -12,6 +12,11 @@ import traceback
 from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
+try:
+    from tkcalendar import DateEntry as _DateEntry
+    _HAVE_CAL = True
+except ImportError:
+    _HAVE_CAL = False
 from typing import Optional
 
 from PIL import Image, ImageTk
@@ -193,6 +198,38 @@ class _AutocompleteEntry(ttk.Entry):
         self.icursor("end")
         self._hide()
         self.focus_set()
+
+
+def _date_entry(parent, textvariable: tk.StringVar, width: int = 12, **kw):
+    """Return a tkcalendar DateEntry if available, else a plain ttk.Entry.
+
+    Either way the widget reads/writes YYYY-MM-DD through *textvariable*.
+    """
+    if _HAVE_CAL:
+        initial = textvariable.get()
+        try:
+            from datetime import date as _date
+            y, m, d = map(int, initial.split("-"))
+            init_date = _date(y, m, d)
+        except Exception:
+            init_date = None
+
+        def _on_cal_change(*_):
+            textvariable.set(de.get_date().strftime("%Y-%m-%d"))
+
+        de = _DateEntry(
+            parent,
+            textvariable=textvariable,
+            date_pattern="yyyy-mm-dd",
+            width=width,
+            **kw,
+        )
+        if init_date:
+            de.set_date(init_date)
+        de.bind("<<DateEntrySelected>>", _on_cal_change)
+        return de
+    else:
+        return ttk.Entry(parent, textvariable=textvariable, width=width, **kw)
 
 
 class App(tk.Tk):
@@ -1898,25 +1935,42 @@ class App(tk.Tk):
         lpad = {"sticky": "w", "padx": (0, 10), "pady": 4}
 
         ttk.Label(frame, text="Checked out:").grid(row=2, column=0, **lpad)
-        out_var = tk.StringVar(value=(loan["checked_out_at"] or "")[:19])
-        ttk.Entry(frame, textvariable=out_var, width=22).grid(row=2, column=1, sticky="w")
+        _out_date_str = (loan["checked_out_at"] or "")[:10]
+        _out_time_str = (loan["checked_out_at"] or "")[:19][11:] or "00:00:00"
+        out_date_var  = tk.StringVar(value=_out_date_str)
+        out_time_var  = tk.StringVar(value=_out_time_str)
+        _out_f = ttk.Frame(frame)
+        _out_f.grid(row=2, column=1, sticky="w")
+        _date_entry(_out_f, out_date_var, width=12).pack(side="left")
+        ttk.Entry(_out_f, textvariable=out_time_var, width=9).pack(side="left", padx=(4, 0))
+        # Build out_var dynamically for save()
+        out_var = out_date_var  # placeholder; save() reads both parts directly
         ttk.Button(frame, text="Now",
-                   command=lambda: out_var.set(db.now_iso()[:19])
+                   command=lambda: [out_date_var.set(db.now_iso()[:10]),
+                                    out_time_var.set(db.now_iso()[11:19])]
                    ).grid(row=2, column=2, padx=(4, 0), sticky="w")
 
         ttk.Label(frame, text="Returned (blank = still out):").grid(row=3, column=0, **lpad)
-        ret_var = tk.StringVar(value=(loan["returned_at"] or "")[:19])
-        ttk.Entry(frame, textvariable=ret_var, width=22).grid(row=3, column=1, sticky="w")
+        _ret_date_str = (loan["returned_at"] or "")[:10]
+        _ret_time_str = (loan["returned_at"] or "")[:19][11:] or "00:00:00"
+        ret_date_var  = tk.StringVar(value=_ret_date_str)
+        ret_time_var  = tk.StringVar(value=_ret_time_str)
+        _ret_f = ttk.Frame(frame)
+        _ret_f.grid(row=3, column=1, sticky="w")
+        _date_entry(_ret_f, ret_date_var, width=12).pack(side="left")
+        ttk.Entry(_ret_f, textvariable=ret_time_var, width=9).pack(side="left", padx=(4, 0))
+        ret_var = ret_date_var  # placeholder
         _ret_btns = ttk.Frame(frame)
         _ret_btns.grid(row=3, column=2, padx=(4, 0), sticky="w")
         ttk.Button(_ret_btns, text="Now",
-                   command=lambda: ret_var.set(db.now_iso()[:19])).pack(side="left", padx=(0, 2))
+                   command=lambda: [ret_date_var.set(db.now_iso()[:10]),
+                                    ret_time_var.set(db.now_iso()[11:19])]).pack(side="left", padx=(0, 2))
         ttk.Button(_ret_btns, text="Clear",
-                   command=lambda: ret_var.set("")).pack(side="left")
+                   command=lambda: [ret_date_var.set(""), ret_time_var.set("")]).pack(side="left")
 
-        ttk.Label(frame, text="Due date (YYYY-MM-DD):").grid(row=4, column=0, **lpad)
+        ttk.Label(frame, text="Due date:").grid(row=4, column=0, **lpad)
         due_var = tk.StringVar(value=loan["due_date"] or "")
-        ttk.Entry(frame, textvariable=due_var, width=14).grid(row=4, column=1, sticky="w")
+        _date_entry(frame, due_var, width=14).grid(row=4, column=1, sticky="w")
 
         ttk.Label(frame, text="Notes:").grid(row=5, column=0, **lpad)
         notes_var = tk.StringVar(value=loan["notes"] or "")
@@ -1927,8 +1981,12 @@ class App(tk.Tk):
                   font=("Segoe UI", 8)).grid(row=6, column=0, columnspan=3, sticky="w")
 
         def save() -> None:
-            out_val   = out_var.get().strip()   or None
-            ret_val   = ret_var.get().strip()   or None
+            _od = out_date_var.get().strip()
+            _ot = out_time_var.get().strip() or "00:00:00"
+            out_val = f"{_od}T{_ot}" if _od else None
+            _rd = ret_date_var.get().strip()
+            _rt = ret_time_var.get().strip() or "00:00:00"
+            ret_val   = f"{_rd}T{_rt}" if _rd else None
             due_val   = due_var.get().strip()   or None
             notes_val = notes_var.get().strip() or None
             if not out_val:
@@ -3103,9 +3161,9 @@ class App(tk.Tk):
         member_var = tk.StringVar(value=names[0])
         ttk.Combobox(dialog, textvariable=member_var, values=names, state="readonly", width=30).grid(row=1, column=0, columnspan=2, padx=12, sticky="we")
 
-        ttk.Label(dialog, text="Due date (optional, YYYY-MM-DD):").grid(row=2, column=0, columnspan=2, padx=12, pady=(8, 0), sticky="w")
+        ttk.Label(dialog, text="Due date (optional):").grid(row=2, column=0, columnspan=2, padx=12, pady=(8, 0), sticky="w")
         due_var = tk.StringVar()
-        ttk.Entry(dialog, textvariable=due_var, width=16).grid(row=3, column=0, padx=12, pady=(2, 4), sticky="w")
+        _date_entry(dialog, due_var, width=14).grid(row=3, column=0, padx=12, pady=(2, 4), sticky="w")
 
         ttk.Label(dialog, text="Notes (optional):").grid(row=4, column=0, columnspan=2, padx=12, pady=(4, 0), sticky="w")
         notes_var = tk.StringVar()
@@ -3362,7 +3420,7 @@ class App(tk.Tk):
         ttk.Label(dialog, text="Date played:", font=("Segoe UI", 9, "bold")).grid(row=1, column=0, **pad)
         date_val = play["played_at"][:10] if editing else datetime.now().strftime("%Y-%m-%d")
         date_var = tk.StringVar(value=date_val)
-        ttk.Entry(dialog, textvariable=date_var, width=14).grid(row=1, column=1, sticky="w", padx=12, pady=4)
+        _date_entry(dialog, date_var, width=14).grid(row=1, column=1, sticky="w", padx=12, pady=4)
 
         ttk.Label(dialog, text="Players (comma-separated):", font=("Segoe UI", 9, "bold")).grid(row=2, column=0, **pad)
         players_var = tk.StringVar(value=play["player_names"] or "" if editing else "")

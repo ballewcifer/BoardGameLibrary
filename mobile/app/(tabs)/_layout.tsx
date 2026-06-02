@@ -70,7 +70,7 @@ export default function TabLayout() {
 
 const s = StyleSheet.create({
   root:           { flex: 1, backgroundColor: NAVY },
-  pager:          { flex: 1, backgroundColor: '#f4f6fa' },
+  pager:          { flex: 1, backgroundColor: '#fff' },
   page:           { flex: 1 },
   tabBar:         { flexDirection: 'row', backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#e5e7eb' },
   tabItem:        { flex: 1, alignItems: 'center', paddingTop: 8, paddingBottom: 2 },

@@ -5,6 +5,7 @@ import * as db from '../../lib/db';
 import type { Play, Game, User } from '../../lib/types';
 import PlayerPicker from '../../components/PlayerPicker';
 import ScreenHeader from '../../components/ScreenHeader';
+import DateInput from '../../components/DateInput';
 
 const NAVY = '#1a237e';
 
@@ -188,7 +189,7 @@ export default function Plays({ isActive = true }: { isActive?: boolean }) {
             </TouchableOpacity>
 
             <Text style={s.label}>Date *</Text>
-            <TextInput style={s.input} value={date} onChangeText={setDate} placeholder="YYYY-MM-DD" />
+            <DateInput value={date} onChange={setDate} />
 
             <Text style={s.label}>Players</Text>
             <PlayerPicker users={users} value={players} onChange={setPlayers} />
@@ -236,7 +237,7 @@ export default function Plays({ isActive = true }: { isActive?: boolean }) {
 }
 
 const s = StyleSheet.create({
-  container:    { flex: 1, backgroundColor: '#f4f6fa' },
+  container:    { flex: 1, backgroundColor: '#fff' },
   count:        { paddingHorizontal: 14, paddingVertical: 6, color: '#9e9e9e', fontSize: 12 },
   card:         { backgroundColor: '#fff', borderRadius: 10, padding: 14, shadowColor: '#000', shadowOpacity: 0.07, shadowRadius: 4, elevation: 2 },
   cardTop:      { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 },

@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as db from '../../lib/db';
 import type { Game, Loan, User } from '../../lib/types';
 import PlayerPicker from '../../components/PlayerPicker';
+import DateInput from '../../components/DateInput';
 
 const NAVY = '#1a237e';
 
@@ -214,7 +215,7 @@ export default function GameDetail() {
           </TouchableOpacity>
 
           <Text style={s.label}>Due Date (optional)</Text>
-          <TextInput style={s.input} value={dueDate} onChangeText={setDueDate} placeholder="YYYY-MM-DD" />
+          <DateInput value={dueDate} onChange={setDueDate} placeholder="Optional" nullable />
 
           <Text style={s.label}>Notes</Text>
           <TextInput style={s.input} value={coNotes} onChangeText={setCoNotes} placeholder="Optional" />
@@ -246,7 +247,7 @@ export default function GameDetail() {
           <Text style={s.sheetTitle}>Log Play — {game.name}</Text>
           <ScrollView>
             <Text style={s.label}>Date *</Text>
-            <TextInput style={s.input} value={playDate} onChangeText={setPlayDate} placeholder="YYYY-MM-DD" />
+            <DateInput value={playDate} onChange={setPlayDate} />
             <Text style={s.label}>Players</Text>
             <PlayerPicker users={users} value={players} onChange={setPlayers} />
             <Text style={s.label}>Winner</Text>
@@ -298,7 +299,7 @@ export default function GameDetail() {
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f4f6fa' },
+  container: { flex: 1, backgroundColor: '#fff' },
   back: { flexDirection: 'row', alignItems: 'center', gap: 4, padding: 16, paddingTop: 52, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
   backTxt: { color: NAVY, fontSize: 16 },
   scroll: { padding: 14, gap: 12 },

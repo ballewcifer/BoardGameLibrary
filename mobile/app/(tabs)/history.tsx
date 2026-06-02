@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as db from '../../lib/db';
 import type { Loan } from '../../lib/types';
 import ScreenHeader from '../../components/ScreenHeader';
+import DateInput from '../../components/DateInput';
 
 const NAVY = '#1a237e';
 
@@ -134,7 +135,7 @@ export default function History({ isActive = true }: { isActive?: boolean }) {
 
           <Text style={s.label}>Checked Out (YYYY-MM-DD HH:MM)</Text>
           <View style={s.inputRow}>
-            <TextInput style={[s.input, { flex: 1 }]} value={editOut} onChangeText={setEditOut} placeholder="2026-01-15 14:30" />
+            <DateInput value={editOut.slice(0,10)} onChange={v => setEditOut(v)} />
             <TouchableOpacity style={s.nowBtn} onPress={() => setNow(setEditOut)}>
               <Text style={s.nowBtnTxt}>Now</Text>
             </TouchableOpacity>
@@ -142,17 +143,14 @@ export default function History({ isActive = true }: { isActive?: boolean }) {
 
           <Text style={s.label}>Returned (blank = still out)</Text>
           <View style={s.inputRow}>
-            <TextInput style={[s.input, { flex: 1 }]} value={editRet} onChangeText={setEditRet} placeholder="Leave blank if still out" />
+            <DateInput value={editRet.slice(0,10)} onChange={v => setEditRet(v)} nullable />
             <TouchableOpacity style={s.nowBtn} onPress={() => setNow(setEditRet)}>
               <Text style={s.nowBtnTxt}>Now</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={s.clearBtn} onPress={() => setEditRet('')}>
-              <Text style={s.clearBtnTxt}>Clear</Text>
             </TouchableOpacity>
           </View>
 
           <Text style={s.label}>Due Date (YYYY-MM-DD)</Text>
-          <TextInput style={s.input} value={editDue} onChangeText={setEditDue} placeholder="Optional" />
+          <DateInput value={editDue} onChange={setEditDue} placeholder="Optional (tap to set)" nullable />
 
           <Text style={s.label}>Notes</Text>
           <TextInput style={s.input} value={editNotes} onChangeText={setEditNotes} placeholder="Optional" />
@@ -172,9 +170,9 @@ export default function History({ isActive = true }: { isActive?: boolean }) {
 }
 
 const s = StyleSheet.create({
-  container:      { flex: 1, backgroundColor: '#f4f6fa' },
+  container:      { flex: 1, backgroundColor: '#fff' },
   filterRow:      { flexDirection: 'row', backgroundColor: '#fff', padding: 8, gap: 6, borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
-  filterBtn:      { flex: 1, padding: 8, borderRadius: 8, alignItems: 'center', backgroundColor: '#f4f6fa' },
+  filterBtn:      { flex: 1, padding: 8, borderRadius: 8, alignItems: 'center', backgroundColor: '#fff' },
   filterBtnActive:{ backgroundColor: NAVY },
   filterTxt:      { fontSize: 13, fontWeight: '600', color: '#6b7280' },
   filterTxtActive:{ color: '#fff' },

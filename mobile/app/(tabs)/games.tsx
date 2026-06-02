@@ -447,13 +447,13 @@ export default function Games({ isActive = true }: { isActive?: boolean }) {
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f4f6fa' },
+  container: { flex: 1, backgroundColor: '#fff' },
   header: { backgroundColor: NAVY, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14 },
   headerTitle: { color: '#fff', fontSize: 20, fontWeight: '700' },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 2 },
   headerBtn: { padding: 7 },
   filterRow: { flexDirection: 'row', paddingHorizontal: 10, paddingVertical: 6, gap: 6 },
-  filterChip: { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20, backgroundColor: '#e8eaf6', borderWidth: 1, borderColor: 'transparent' },
+  filterChip: { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20, backgroundColor: '#f0f0f0', borderWidth: 1, borderColor: 'transparent' },
   filterChipActive: { backgroundColor: NAVY },
   filterChipFav: { backgroundColor: '#f0c674' },
   filterChipTxt: { fontSize: 12, fontWeight: '600', color: NAVY },
