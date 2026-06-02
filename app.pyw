@@ -204,29 +204,32 @@ def _date_entry(parent, textvariable: tk.StringVar, width: int = 12, **kw):
     """Return a tkcalendar DateEntry if available, else a plain ttk.Entry.
 
     Either way the widget reads/writes YYYY-MM-DD through *textvariable*.
+    NOTE: Do NOT pass textvariable to DateEntry — it confuses the internal
+    date parser. Instead we initialise via set_date() and keep the var in
+    sync through event bindings.
     """
     if _HAVE_CAL:
+        from datetime import date as _date
+
+        de = _DateEntry(parent, date_pattern="yyyy-mm-dd", width=width, **kw)
+
+        # Initialise from the StringVar's current value
         initial = textvariable.get()
         try:
-            from datetime import date as _date
             y, m, d = map(int, initial.split("-"))
-            init_date = _date(y, m, d)
+            de.set_date(_date(y, m, d))
         except Exception:
-            init_date = None
+            pass  # Leave as today's date
 
-        def _on_cal_change(*_):
-            textvariable.set(de.get_date().strftime("%Y-%m-%d"))
+        # Keep StringVar in sync whenever the user picks a date or leaves the field
+        def _sync(*_):
+            try:
+                textvariable.set(de.get_date().strftime("%Y-%m-%d"))
+            except Exception:
+                pass
 
-        de = _DateEntry(
-            parent,
-            textvariable=textvariable,
-            date_pattern="yyyy-mm-dd",
-            width=width,
-            **kw,
-        )
-        if init_date:
-            de.set_date(init_date)
-        de.bind("<<DateEntrySelected>>", _on_cal_change)
+        de.bind("<<DateEntrySelected>>", _sync)
+        de.bind("<FocusOut>", _sync)
         return de
     else:
         return ttk.Entry(parent, textvariable=textvariable, width=width, **kw)
