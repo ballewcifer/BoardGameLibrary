@@ -1570,7 +1570,6 @@ class App(tk.Tk):
         img_canvas = tk.Canvas(
             img_frame, width=_CW, height=_CH,
             bg=C_BG, highlightthickness=0, bd=0,
-            cursor="hand2",
         )
         img_canvas.pack()
 
@@ -1579,14 +1578,6 @@ class App(tk.Tk):
         ph = self._get_placeholder()
         img_canvas.itemconfigure(_img_id, image=ph)
         img_canvas._card_img_ref = ph
-
-        # Camera icon overlay — click the image to set a custom one
-        _cam = img_canvas.create_text(
-            _CW - 6, _CH - 6, anchor="se",
-            text="📷", font=("Segoe UI", 12),
-        )
-        img_canvas.tag_bind(_cam, "<Button-1>", lambda e, g=game: self.on_set_image(g))
-        img_canvas.bind("<Button-1>", lambda e, g=game: self.on_set_image(g))
 
         # --- name + year ---
         ttk.Label(
@@ -4006,6 +3997,7 @@ class App(tk.Tk):
         url_entry = ttk.Entry(dialog, textvariable=url_var, width=52)
         url_entry.pack(padx=14, pady=(0, 2))
         url_entry.focus_set()
+        url_entry.bind("<Return>", lambda *_: confirm())
 
         tk.Label(
             dialog,
@@ -4042,6 +4034,7 @@ class App(tk.Tk):
             if path:
                 file_var.set(path)
                 url_var.set("")   # clear URL if a file is chosen
+                confirm()         # apply immediately and close
 
         ttk.Button(file_row, text="Browse…", command=browse).pack(side="left", padx=(6, 0))
 
