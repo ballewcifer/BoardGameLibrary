@@ -1542,17 +1542,9 @@ class App(tk.Tk):
         card = ttk.Frame(self.games_inner, padding=8, relief="solid", borderwidth=1)
         card.configure(width=180)
 
-        # --- header row: expansion badge (centred) + star (right) ---
-        # col 0 expands so its content is centred; col 1 is just the star.
+        # --- header row: star right, expansion badge truly centred ---
         header = tk.Frame(card, bg=C_BG)
         header.pack(fill="x")
-        header.columnconfigure(0, weight=1)
-        if game["is_expansion"]:
-            tk.Label(
-                header, text="Expansion",
-                bg="#ede7f6", fg="#4527a0",
-                font=("Segoe UI", 7, "bold"), padx=4, pady=1,
-            ).grid(row=0, column=0)          # no sticky → centred in expanding col
         star_lbl = tk.Label(
             header,
             text="★" if is_fav else "☆",
@@ -1560,8 +1552,16 @@ class App(tk.Tk):
             fg="#f5a623" if is_fav else "#aaa",
             bg=C_BG, cursor="hand2",
         )
-        star_lbl.grid(row=0, column=1, sticky="e")
+        star_lbl.pack(side="right")
         star_lbl.bind("<Button-1>", lambda e, g=game: self.on_toggle_favorite(g))
+        if game["is_expansion"]:
+            # place() centres relative to the full header width, not just
+            # the space remaining after the star.
+            tk.Label(
+                header, text="Expansion",
+                bg="#ede7f6", fg="#4527a0",
+                font=("Segoe UI", 7, "bold"), padx=4, pady=1,
+            ).place(relx=0.5, rely=0.5, anchor="center")
 
         # --- image canvas (fixed size, centred in card) ---
         _CW, _CH = THUMB_SIZE[0], THUMB_SIZE[1]  # 140 × 140
