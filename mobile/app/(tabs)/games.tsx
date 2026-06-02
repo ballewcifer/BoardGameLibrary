@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import {
   View, Text, TextInput, FlatList, TouchableOpacity, StyleSheet,
-  Image, RefreshControl, Modal, Pressable, Alert, ActivityIndicator,
+  Image, RefreshControl, Modal, Pressable, Alert, ActivityIndicator, ScrollView,
 } from 'react-native';
 import { useFocusEffect, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -23,7 +23,17 @@ export default function Games() {
   const [syncing, setSyncing]         = useState(false);
   const [syncMessage, setSyncMessage] = useState('');
 
-  // Settings modal
+  // Add game
+  const [addOpen, setAddOpen]           = useState(false);
+  const [addQuery, setAddQuery]         = useState('');
+  const [addSearching, setAddSearching] = useState(false);
+  const [addResults, setAddResults]     = useState<bgg.SearchResult[]>([]);
+  const [addSelected, setAddSelected]   = useState<bgg.SearchResult | null>(null);
+  const [addDetails, setAddDetails]     = useState<bgg.GameDetails | null>(null);
+  const [addSaving, setAddSaving]       = useState(false);
+
+  // Settings (behind ⋯)
+  const [menuOpen, setMenuOpen]         = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [bggUsername, setBggUsername]   = useState('');
   const [bggToken, setBggToken]         = useState('');
@@ -42,33 +52,19 @@ export default function Games() {
     loadSettings().then(s => { setBggUsername(s.bgg_username); setBggToken(s.bgg_token); });
   }, [load]));
 
-  const onRefresh = () => { setRefreshing(true); load(); setRefreshing(false); };
-
-  const openSettings = async () => {
-    const s = await loadSettings();
-    setBggUsername(s.bgg_username);
-    setBggToken(s.bgg_token);
-    setBggPassword(s.bgg_password);
-    setSettingsOpen(true);
-  };
-
-  const saveAndClose = async () => {
-    await saveSettings({ bgg_username: bggUsername.trim(), bgg_token: bggToken.trim(), bgg_password: bggPassword });
-    setSettingsOpen(false);
-  };
+  // ── Sync ──────────────────────────────────────────────────────────────────
 
   const onSync = async () => {
     const settings = await loadSettings();
     if (!settings.bgg_username) {
-      Alert.alert('BGG Username required', 'Tap ⚙ to set your BGG username first.');
+      Alert.alert('BGG Username required', 'Tap ⋯ → Settings to set your BGG username.');
       return;
     }
     setSyncing(true);
     setSyncMessage('Connecting to BGG…');
     try {
-      // Token auth preferred; fall back to password login if no token set
       if (!settings.bgg_token && settings.bgg_password) {
-        setSyncMessage('Logging in to BGG…');
+        setSyncMessage('Logging in…');
         await bgg.loginBgg(settings.bgg_username, settings.bgg_password);
       }
       setSyncMessage('Fetching collection…');
@@ -76,23 +72,14 @@ export default function Games() {
       setSyncMessage(`Saving ${collection.length} games…`);
       for (const g of collection) {
         db.upsertGame({
-          bgg_id:       g.bgg_id,
-          name:         g.name,
-          year:         g.year,
-          image_url:    g.image_url,
-          thumbnail_url:g.thumbnail_url,
-          min_players:  g.min_players,
-          max_players:  g.max_players,
-          playing_time: g.playing_time,
-          weight:       g.weight,
-          avg_rating:   g.avg_rating,
-          description:  g.description,
-          categories:   g.categories?.join(', '),
-          mechanics:    g.mechanics?.join(', '),
-          designers:    g.designers?.join(', '),
-          publishers:   g.publishers?.join(', '),
-          own:          1,
-          is_expansion: g.is_expansion ? 1 : 0,
+          bgg_id: g.bgg_id, name: g.name, year: g.year,
+          image_url: g.image_url, thumbnail_url: g.thumbnail_url,
+          min_players: g.min_players, max_players: g.max_players,
+          playing_time: g.playing_time, weight: g.weight, avg_rating: g.avg_rating,
+          description: g.description,
+          categories: g.categories?.join(', '), mechanics: g.mechanics?.join(', '),
+          designers: g.designers?.join(', '), publishers: g.publishers?.join(', '),
+          own: 1, is_expansion: g.is_expansion ? 1 : 0,
         });
       }
       load();
@@ -106,6 +93,80 @@ export default function Games() {
     }
   };
 
+  // ── Add individual game ───────────────────────────────────────────────────
+
+  const openAdd = () => {
+    setAddQuery(''); setAddResults([]); setAddSelected(null); setAddDetails(null);
+    setAddOpen(true);
+  };
+
+  const doSearch = async () => {
+    if (!addQuery.trim()) return;
+    setAddSearching(true);
+    setAddResults([]);
+    setAddSelected(null);
+    setAddDetails(null);
+    try {
+      const results = await bgg.searchGames(addQuery.trim());
+      setAddResults(results.slice(0, 30));
+    } catch (e: any) {
+      Alert.alert('Search failed', e.message ?? String(e));
+    } finally {
+      setAddSearching(false);
+    }
+  };
+
+  const selectResult = async (result: bgg.SearchResult) => {
+    setAddSelected(result);
+    setAddDetails(null);
+    setAddSaving(false);
+    try {
+      const settings = await loadSettings();
+      const details = await bgg.fetchGameDetails(result.bgg_id, settings.bgg_token || undefined);
+      setAddDetails(details);
+    } catch (e: any) {
+      Alert.alert('Error loading details', e.message ?? String(e));
+    }
+  };
+
+  const confirmAdd = () => {
+    if (!addDetails) return;
+    setAddSaving(true);
+    try {
+      db.upsertGame({
+        bgg_id: addDetails.bgg_id, name: addDetails.name, year: addDetails.year,
+        image_url: addDetails.image_url, thumbnail_url: addDetails.thumbnail_url,
+        min_players: addDetails.min_players, max_players: addDetails.max_players,
+        playing_time: addDetails.playing_time, weight: addDetails.weight,
+        avg_rating: addDetails.avg_rating, description: addDetails.description,
+        categories: addDetails.categories?.join(', '), mechanics: addDetails.mechanics?.join(', '),
+        designers: addDetails.designers?.join(', '), publishers: addDetails.publishers?.join(', '),
+        own: 1, is_expansion: addDetails.is_expansion ? 1 : 0,
+      });
+      load();
+      setAddOpen(false);
+      Alert.alert('Added!', `"${addDetails.name}" has been added to your library.`);
+    } catch (e: any) {
+      Alert.alert('Error', e.message ?? String(e));
+    } finally {
+      setAddSaving(false);
+    }
+  };
+
+  // ── Settings ──────────────────────────────────────────────────────────────
+
+  const openSettings = async () => {
+    setMenuOpen(false);
+    const s = await loadSettings();
+    setBggUsername(s.bgg_username); setBggToken(s.bgg_token); setBggPassword(s.bgg_password);
+    setSettingsOpen(true);
+  };
+
+  const saveAndClose = async () => {
+    await saveSettings({ bgg_username: bggUsername.trim(), bgg_token: bggToken.trim(), bgg_password: bggPassword });
+    setSettingsOpen(false);
+  };
+
   const filtered = games.filter(g => !g.is_expansion);
 
   return (
@@ -115,12 +176,15 @@ export default function Games() {
         <Text style={s.headerTitle}>Games</Text>
         <View style={s.headerRight}>
           {syncing
-            ? <ActivityIndicator color="#fff" style={{ marginRight: 8 }} />
+            ? <ActivityIndicator color="#fff" style={{ marginRight: 4 }} />
             : <TouchableOpacity onPress={onSync} style={s.headerBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
                 <Ionicons name="sync" size={22} color="#fff" />
               </TouchableOpacity>}
-          <TouchableOpacity onPress={openSettings} style={s.headerBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <Ionicons name="settings-outline" size={22} color="#fff" />
+          <TouchableOpacity onPress={openAdd} style={s.headerBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <Ionicons name="add-circle-outline" size={24} color="#fff" />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setMenuOpen(true)} style={s.headerBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <Ionicons name="ellipsis-vertical" size={22} color="#fff" />
           </TouchableOpacity>
         </View>
       </View>
@@ -180,53 +244,120 @@ export default function Games() {
             </TouchableOpacity>
           );
         }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); setRefreshing(false); }} />}
         contentContainerStyle={{ padding: 8 }}
         columnWrapperStyle={{ gap: 8 }}
         ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
       />
+
+      {/* ⋯ menu */}
+      <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)}>
+        <Pressable style={s.overlay} onPress={() => setMenuOpen(false)} />
+        <View style={s.menu}>
+          <TouchableOpacity style={s.menuItem} onPress={openSettings}>
+            <Ionicons name="settings-outline" size={20} color={NAVY} />
+            <Text style={s.menuTxt}>BGG Settings</Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
+
+      {/* ── Add Game modal ─────────────────────────────────────────────────── */}
+      <Modal visible={addOpen} transparent animationType="slide" onRequestClose={() => setAddOpen(false)}>
+        <Pressable style={s.overlay} onPress={() => setAddOpen(false)} />
+        <View style={s.sheet}>
+          <View style={s.sheetHeaderRow}>
+            <Text style={s.sheetTitle}>Add Game</Text>
+            <TouchableOpacity onPress={() => setAddOpen(false)}>
+              <Ionicons name="close" size={22} color="#9e9e9e" />
+            </TouchableOpacity>
+          </View>
+
+          {/* Search step */}
+          {!addSelected ? (
+            <>
+              <View style={s.addSearchRow}>
+                <TextInput
+                  style={[s.input, { flex: 1, marginBottom: 0 }]}
+                  value={addQuery}
+                  onChangeText={setAddQuery}
+                  placeholder="Search BoardGameGeek…"
+                  returnKeyType="search"
+                  onSubmitEditing={doSearch}
+                  autoFocus
+                />
+                <TouchableOpacity style={s.searchBtn} onPress={doSearch}>
+                  {addSearching
+                    ? <ActivityIndicator color="#fff" size="small" />
+                    : <Ionicons name="search" size={18} color="#fff" />}
+                </TouchableOpacity>
+              </View>
+              <FlatList
+                data={addResults}
+                keyExtractor={r => String(r.bgg_id)}
+                style={{ marginTop: 8, maxHeight: 360 }}
+                ListEmptyComponent={
+                  !addSearching && addQuery.length > 0
+                    ? <Text style={s.emptyTxt}>No results — try a different title.</Text>
+                    : null
+                }
+                renderItem={({ item: r }) => (
+                  <TouchableOpacity style={s.resultRow} onPress={() => selectResult(r)}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.resultName}>{r.name}</Text>
+                      {r.year ? <Text style={s.resultYear}>{r.year}</Text> : null}
+                    </View>
+                    <Ionicons name="chevron-forward" size={16} color="#d1d5db" />
+                  </TouchableOpacity>
+                )}
+                ItemSeparatorComponent={() => <View style={{ height: 1, backgroundColor: '#f3f4f6' }} />}
+              />
+            </>
+          ) : (
+            /* Confirm step */
+            <ScrollView>
+              <TouchableOpacity style={s.backRow} onPress={() => { setAddSelected(null); setAddDetails(null); }}>
+                <Ionicons name="arrow-back" size={16} color={NAVY} />
+                <Text style={s.backTxt}>Back to results</Text>
+              </TouchableOpacity>
+              {!addDetails
+                ? <ActivityIndicator style={{ marginTop: 24 }} />
+                : (
+                  <View>
+                    <Text style={s.confirmName}>{addDetails.name}</Text>
+                    <Text style={s.confirmMeta}>
+                      {[addDetails.year,
+                        addDetails.min_players && addDetails.max_players ? `${addDetails.min_players}–${addDetails.max_players} players` : null,
+                        addDetails.playing_time ? `${addDetails.playing_time} min` : null,
+                        addDetails.weight ? `Complexity ${addDetails.weight.toFixed(1)}/5` : null,
+                      ].filter(Boolean).join(' · ')}
+                    </Text>
+                    {addDetails.designers?.length ? <Text style={s.confirmMeta}>By {addDetails.designers.join(', ')}</Text> : null}
+                    {addDetails.description
+                      ? <Text style={s.confirmDesc} numberOfLines={4}>{addDetails.description}</Text>
+                      : null}
+                    <TouchableOpacity style={[s.sheetBtn, { marginTop: 16 }]} onPress={confirmAdd} disabled={addSaving}>
+                      {addSaving
+                        ? <ActivityIndicator color="#fff" />
+                        : <Text style={s.sheetBtnTxt}>Add to Library</Text>}
+                    </TouchableOpacity>
+                  </View>
+                )}
+            </ScrollView>
+          )}
+        </View>
+      </Modal>
 
       {/* Settings modal */}
       <Modal visible={settingsOpen} transparent animationType="slide" onRequestClose={() => setSettingsOpen(false)}>
         <Pressable style={s.overlay} onPress={() => setSettingsOpen(false)} />
         <View style={s.sheet}>
           <Text style={s.sheetTitle}>BGG Settings</Text>
-
           <Text style={s.label}>BGG Username</Text>
-          <TextInput
-            style={s.input}
-            value={bggUsername}
-            onChangeText={setBggUsername}
-            placeholder="e.g. Ballewcifer"
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-
-          <Text style={s.label}>BGG Token (recommended)</Text>
-          <TextInput
-            style={s.input}
-            value={bggToken}
-            onChangeText={setBggToken}
-            placeholder="e.g. 3761c334-250c-41c9-…"
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-
+          <TextInput style={s.input} value={bggUsername} onChangeText={setBggUsername} placeholder="e.g. Ballewcifer" autoCapitalize="none" autoCorrect={false} />
+          <Text style={s.label}>BGG Token</Text>
+          <TextInput style={s.input} value={bggToken} onChangeText={setBggToken} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" autoCapitalize="none" autoCorrect={false} />
           <Text style={s.label}>BGG Password (fallback)</Text>
-          <TextInput
-            style={s.input}
-            value={bggPassword}
-            onChangeText={setBggPassword}
-            placeholder="Only needed if no token set"
-            secureTextEntry
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-          <Text style={s.hint}>
-            Token syncs private collections without a password.{'\n'}
-            Both are stored securely on your device only.
-          </Text>
-
+          <TextInput style={s.input} value={bggPassword} onChangeText={setBggPassword} placeholder="Only needed if no token" secureTextEntry autoCapitalize="none" autoCorrect={false} />
           <TouchableOpacity style={s.sheetBtn} onPress={saveAndClose}>
             <Text style={s.sheetBtnTxt}>Save</Text>
           </TouchableOpacity>
@@ -240,8 +371,8 @@ const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f4f6fa' },
   header: { backgroundColor: NAVY, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 56, paddingBottom: 14 },
   headerTitle: { color: '#fff', fontSize: 20, fontWeight: '700' },
-  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  headerBtn: { padding: 8 },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  headerBtn: { padding: 7 },
   syncBanner: { backgroundColor: '#e3f2fd', padding: 8, alignItems: 'center' },
   syncBannerOk: { backgroundColor: '#e8f5e9' },
   syncBannerTxt: { color: '#0d47a1', fontSize: 13 },
@@ -266,11 +397,28 @@ const s = StyleSheet.create({
   badgeOutTxt: { color: '#795548' },
   favBadge: { position: 'absolute', top: 4, right: 4, backgroundColor: '#f0c674', borderRadius: 4, paddingHorizontal: 4, fontSize: 12, zIndex: 1 },
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
-  sheet: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 24, paddingBottom: 44 },
-  sheetTitle: { fontSize: 18, fontWeight: '700', marginBottom: 20, color: NAVY },
+  // ⋯ menu
+  menu: { position: 'absolute', top: 100, right: 12, backgroundColor: '#fff', borderRadius: 10, shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 8, elevation: 6, minWidth: 160 },
+  menuItem: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 14 },
+  menuTxt: { fontSize: 15, color: NAVY },
+  // Sheets
+  sheet: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 24, paddingBottom: 44, maxHeight: '85%' },
+  sheetHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  sheetTitle: { fontSize: 18, fontWeight: '700', color: NAVY, marginBottom: 16 },
   label: { fontSize: 13, fontWeight: '600', marginBottom: 4, color: '#333' },
   input: { borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 8, padding: 10, fontSize: 15, marginBottom: 12 },
-  hint: { fontSize: 12, color: '#9e9e9e', marginBottom: 20, lineHeight: 17 },
   sheetBtn: { backgroundColor: NAVY, borderRadius: 8, padding: 14, alignItems: 'center' },
   sheetBtnTxt: { color: '#fff', fontWeight: '700', fontSize: 15 },
+  // Add game
+  addSearchRow: { flexDirection: 'row', gap: 8, marginBottom: 4 },
+  searchBtn: { backgroundColor: NAVY, borderRadius: 8, paddingHorizontal: 14, justifyContent: 'center', alignItems: 'center' },
+  resultRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12 },
+  resultName: { fontSize: 15, fontWeight: '500' },
+  resultYear: { fontSize: 12, color: '#9e9e9e', marginTop: 1 },
+  emptyTxt: { textAlign: 'center', color: '#9e9e9e', marginTop: 20, fontStyle: 'italic' },
+  backRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 14 },
+  backTxt: { color: NAVY, fontSize: 14 },
+  confirmName: { fontSize: 18, fontWeight: '700', marginBottom: 6 },
+  confirmMeta: { fontSize: 13, color: '#6b7280', marginBottom: 3 },
+  confirmDesc: { fontSize: 13, color: '#555', marginTop: 10, lineHeight: 19 },
 });
