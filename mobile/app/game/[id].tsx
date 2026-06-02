@@ -101,7 +101,7 @@ export default function GameDetail() {
   return (
     <View style={s.container}>
       {/* Back button */}
-      <TouchableOpacity style={s.back} onPress={() => router.back()}>
+      <TouchableOpacity style={s.back} onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Back to games list">
         <Ionicons name="arrow-back" size={22} color={NAVY} />
         <Text style={s.backTxt}>Games</Text>
       </TouchableOpacity>
@@ -113,6 +113,8 @@ export default function GameDetail() {
             ? <Image
                 source={{ uri: game.thumbnail_url.startsWith('//') ? `https:${game.thumbnail_url}` : game.thumbnail_url }}
                 style={s.thumb}
+                accessibilityLabel={`${game.name} cover art`}
+                accessibilityRole="image"
               />
             : <View style={[s.thumb, s.thumbPlaceholder]}><Text style={{ fontSize: 32 }}>🎲</Text></View>}
           <View style={s.headerInfo}>
@@ -141,28 +143,30 @@ export default function GameDetail() {
         {/* Actions */}
         <View style={s.actions}>
           {loan
-            ? <TouchableOpacity style={[s.actionBtn, { backgroundColor: '#e8eaf6' }]} onPress={checkIn}>
+            ? <TouchableOpacity style={[s.actionBtn, { backgroundColor: '#e8eaf6' }]} onPress={checkIn} accessibilityRole="button" accessibilityLabel={`Check in ${game.name}`}>
                 <Ionicons name="return-down-back" size={18} color={NAVY} />
                 <Text style={[s.actionTxt, { color: NAVY }]}>Check In</Text>
               </TouchableOpacity>
             : users.length > 0
-              ? <TouchableOpacity style={s.actionBtn} onPress={() => setCheckoutOpen(true)}>
+              ? <TouchableOpacity style={s.actionBtn} onPress={() => setCheckoutOpen(true)} accessibilityRole="button" accessibilityLabel={`Check out ${game.name}`}>
                   <Ionicons name="arrow-forward-circle" size={18} color="#fff" />
                   <Text style={s.actionTxt}>Check Out</Text>
                 </TouchableOpacity>
               : null}
-          <TouchableOpacity style={[s.actionBtn, { backgroundColor: '#1b5e20' }]} onPress={() => { setPlayDate(today); setLogPlayOpen(true); }}>
+          <TouchableOpacity style={[s.actionBtn, { backgroundColor: '#1b5e20' }]} onPress={() => { setPlayDate(today); setLogPlayOpen(true); }} accessibilityRole="button" accessibilityLabel="Log a play for this game">
             <Ionicons name="trophy" size={18} color="#fff" />
             <Text style={s.actionTxt}>Log Play</Text>
           </TouchableOpacity>
           <TouchableOpacity style={[s.actionBtn, { backgroundColor: game.is_favorite ? '#f0c674' : '#e8eaf6' }]}
-            onPress={() => { db.setFavorite(bggId, !game.is_favorite); load(); }}>
-            <Text style={{ fontSize: 16 }}>{game.is_favorite ? '★' : '☆'}</Text>
+            onPress={() => { db.setFavorite(bggId, !game.is_favorite); load(); }}
+            accessibilityRole="button"
+            accessibilityLabel={game.is_favorite ? 'Remove from favorites' : 'Add to favorites'}>
+            <Text style={{ fontSize: 16 }} accessible={false}>{game.is_favorite ? '★' : '☆'}</Text>
             <Text style={[s.actionTxt, { color: game.is_favorite ? '#5d4037' : NAVY }]}>
               {game.is_favorite ? 'Unfavorite' : 'Favorite'}
             </Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[s.actionBtn, { backgroundColor: '#e8eaf6' }]} onPress={openEditGame}>
+          <TouchableOpacity style={[s.actionBtn, { backgroundColor: '#e8eaf6' }]} onPress={openEditGame} accessibilityRole="button" accessibilityLabel="Edit game details">
             <Ionicons name="pencil-outline" size={18} color={NAVY} />
             <Text style={[s.actionTxt, { color: NAVY }]}>Edit</Text>
           </TouchableOpacity>
@@ -203,7 +207,7 @@ export default function GameDetail() {
       </ScrollView>
 
       {/* Check-out sheet */}
-      <Modal visible={checkoutOpen} transparent animationType="slide" onRequestClose={() => setCheckoutOpen(false)}>
+      <Modal visible={checkoutOpen} transparent animationType="slide" onRequestClose={() => setCheckoutOpen(false)} accessibilityViewIsModal={true}>
         <Pressable style={s.overlay} onPress={() => setCheckoutOpen(false)} />
         <View style={s.sheet}>
           <Text style={s.sheetTitle}>Check Out — {game.name}</Text>
@@ -227,7 +231,7 @@ export default function GameDetail() {
       </Modal>
 
       {/* Member picker */}
-      <Modal visible={pickingUser} transparent animationType="slide" onRequestClose={() => setPickingUser(false)}>
+      <Modal visible={pickingUser} transparent animationType="slide" onRequestClose={() => setPickingUser(false)} accessibilityViewIsModal={true}>
         <Pressable style={s.overlay} onPress={() => setPickingUser(false)} />
         <View style={s.sheet}>
           <Text style={s.sheetTitle}>Select Member</Text>
@@ -241,7 +245,7 @@ export default function GameDetail() {
       </Modal>
 
       {/* Log play sheet */}
-      <Modal visible={logPlayOpen} transparent animationType="slide" onRequestClose={() => setLogPlayOpen(false)}>
+      <Modal visible={logPlayOpen} transparent animationType="slide" onRequestClose={() => setLogPlayOpen(false)} accessibilityViewIsModal={true}>
         <Pressable style={s.overlay} onPress={() => setLogPlayOpen(false)} />
         <View style={s.sheet}>
           <Text style={s.sheetTitle}>Log Play — {game.name}</Text>
@@ -266,7 +270,7 @@ export default function GameDetail() {
       </Modal>
 
       {/* Edit Game personal data modal */}
-      <Modal visible={editOpen} transparent animationType="slide" onRequestClose={() => setEditOpen(false)}>
+      <Modal visible={editOpen} transparent animationType="slide" onRequestClose={() => setEditOpen(false)} accessibilityViewIsModal={true}>
         <Pressable style={s.overlay} onPress={() => setEditOpen(false)} />
         <View style={s.sheet}>
           <Text style={s.sheetTitle}>Edit — {game.name}</Text>

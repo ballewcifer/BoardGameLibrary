@@ -17,7 +17,7 @@ const NAVY = '#1a237e';
 const GameThumb = memo(({ uri }: { uri: string }) => {
   const [err, setErr] = useState(false);
   if (err) return <Text style={{ fontSize: 36 }}>🎲</Text>;
-  return <Image source={{ uri }} style={{ width: '100%', height: '100%', resizeMode: 'cover' }} onError={() => setErr(true)} />;
+  return <Image source={{ uri }} style={{ width: '100%', height: '100%', resizeMode: 'cover' }} onError={() => setErr(true)} accessible={false} />;
 });
 
 export default function Games({ isActive = true }: { isActive?: boolean }) {
@@ -235,7 +235,7 @@ export default function Games({ isActive = true }: { isActive?: boolean }) {
       {/* Header */}
       <View style={s.header}>
         <Text style={s.headerTitle}>Games</Text>
-        <TouchableOpacity onPress={() => setMenuOpen(true)} style={s.headerBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+        <TouchableOpacity onPress={() => setMenuOpen(true)} style={s.headerBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} accessibilityRole="button" accessibilityLabel="More options">
           <Ionicons name="ellipsis-vertical" size={22} color="#fff" />
         </TouchableOpacity>
       </View>
@@ -255,6 +255,8 @@ export default function Games({ isActive = true }: { isActive?: boolean }) {
           value={search}
           onChangeText={q => { setSearch(q); load(q); }}
           returnKeyType="search"
+          accessibilityLabel="Search games"
+          accessibilityHint="Type to filter the game list"
         />
         {search ? (
           <TouchableOpacity onPress={() => { setSearch(''); load(''); }}>
@@ -266,13 +268,13 @@ export default function Games({ isActive = true }: { isActive?: boolean }) {
       {/* Quick filters */}
       <View style={s.filterRow}>
         {(['all', 'available', 'out'] as const).map(f => (
-          <TouchableOpacity key={f} style={[s.filterChip, statusFilter === f && s.filterChipActive]} onPress={() => setStatus(f)}>
+          <TouchableOpacity key={f} style={[s.filterChip, statusFilter === f && s.filterChipActive]} onPress={() => setStatus(f)} accessibilityRole="button" accessibilityLabel={f === 'all' ? 'Show all games' : f === 'available' ? 'Show available games only' : 'Show checked out games only'} accessibilityState={{ selected: statusFilter === f }}>
             <Text style={[s.filterChipTxt, statusFilter === f && s.filterChipTxtActive]}>
               {f === 'all' ? 'All' : f === 'available' ? 'Available' : 'Out'}
             </Text>
           </TouchableOpacity>
         ))}
-        <TouchableOpacity style={[s.filterChip, favOnly && s.filterChipFav]} onPress={() => setFavOnly(v => !v)}>
+        <TouchableOpacity style={[s.filterChip, favOnly && s.filterChipFav]} onPress={() => setFavOnly(v => !v)} accessibilityRole="button" accessibilityLabel="Show favorites only" accessibilityState={{ selected: favOnly }}>
           <Text style={[s.filterChipTxt, favOnly && s.filterChipTxtActive]}>★ Favs</Text>
         </TouchableOpacity>
       </View>
@@ -288,8 +290,8 @@ export default function Games({ isActive = true }: { isActive?: boolean }) {
           const plays = playCounts[g.bgg_id] ?? 0;
           const uri = thumbUri(g.thumbnail_url);
           return (
-            <TouchableOpacity style={[s.card, loan && s.cardOut]} onPress={() => router.push(`/game/${g.bgg_id}`)}>
-              {g.is_favorite ? <Text style={s.favBadge}>★</Text> : null}
+            <TouchableOpacity style={[s.card, loan && s.cardOut]} onPress={() => router.push(`/game/${g.bgg_id}`)} accessibilityRole="button" accessibilityLabel={`${g.name}, ${loan ? 'checked out' : 'available'}`}>
+              {g.is_favorite ? <Text style={s.favBadge} accessible={true} accessibilityLabel="Favorite">★</Text> : null}
               <View style={s.imgBox}>
                 {uri ? <GameThumb uri={uri} /> : <Text style={s.imgPlaceholder}>🎲</Text>}
               </View>
@@ -317,7 +319,7 @@ export default function Games({ isActive = true }: { isActive?: boolean }) {
       />
 
       {/* ⋯ menu */}
-      <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)}>
+      <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)} accessibilityViewIsModal={true}>
         <Pressable style={s.overlay} onPress={() => setMenuOpen(false)} />
         <View style={s.menu}>
           {syncing
@@ -325,11 +327,11 @@ export default function Games({ isActive = true }: { isActive?: boolean }) {
                 <ActivityIndicator size="small" color={NAVY} />
                 <Text style={s.menuTxt}>{syncMessage || 'Syncing…'}</Text>
               </View>
-            : <TouchableOpacity style={s.menuItem} onPress={() => { setMenuOpen(false); onSync(); }}>
+            : <TouchableOpacity style={s.menuItem} onPress={() => { setMenuOpen(false); onSync(); }} accessibilityRole="button" accessibilityLabel="Sync collection from BGG">
                 <Ionicons name="sync-outline" size={20} color={NAVY} />
                 <Text style={s.menuTxt}>Sync Collection</Text>
               </TouchableOpacity>}
-          <TouchableOpacity style={s.menuItem} onPress={() => { setMenuOpen(false); openAdd(); }}>
+          <TouchableOpacity style={s.menuItem} onPress={() => { setMenuOpen(false); openAdd(); }} accessibilityRole="button" accessibilityLabel="Add individual game">
             <Ionicons name="add-circle-outline" size={20} color={NAVY} />
             <Text style={s.menuTxt}>Add Game</Text>
           </TouchableOpacity>
@@ -341,7 +343,7 @@ export default function Games({ isActive = true }: { isActive?: boolean }) {
       </Modal>
 
       {/* ── Add Game modal ─────────────────────────────────────────────────── */}
-      <Modal visible={addOpen} transparent animationType="slide" onRequestClose={() => setAddOpen(false)}>
+      <Modal visible={addOpen} transparent animationType="slide" onRequestClose={() => setAddOpen(false)} accessibilityViewIsModal={true}>
         <Pressable style={s.overlay} onPress={() => setAddOpen(false)} />
         <View style={s.sheet}>
           <View style={s.sheetHeaderRow}>
@@ -427,7 +429,7 @@ export default function Games({ isActive = true }: { isActive?: boolean }) {
       </Modal>
 
       {/* Settings modal */}
-      <Modal visible={settingsOpen} transparent animationType="slide" onRequestClose={() => setSettingsOpen(false)}>
+      <Modal visible={settingsOpen} transparent animationType="slide" onRequestClose={() => setSettingsOpen(false)} accessibilityViewIsModal={true}>
         <Pressable style={s.overlay} onPress={() => setSettingsOpen(false)} />
         <View style={s.sheet}>
           <Text style={s.sheetTitle}>BGG Settings</Text>

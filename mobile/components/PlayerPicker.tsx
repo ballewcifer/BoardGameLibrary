@@ -48,7 +48,7 @@ export default function PlayerPicker({ users, value, onChange, label = 'Players'
 
   return (
     <>
-      <TouchableOpacity style={s.trigger} onPress={() => setOpen(true)}>
+      <TouchableOpacity style={s.trigger} onPress={() => setOpen(true)} accessibilityRole="button" accessibilityLabel={`Select players, currently: ${value || 'none selected'}`}>
         <View style={{ flex: 1 }}>
           {value
             ? <Text style={s.triggerTxt}>{value}</Text>
@@ -57,13 +57,13 @@ export default function PlayerPicker({ users, value, onChange, label = 'Players'
         <Ionicons name="people" size={18} color="#9e9e9e" />
       </TouchableOpacity>
 
-      <Modal visible={open} transparent animationType="slide" onRequestClose={() => setOpen(false)}>
+      <Modal visible={open} transparent animationType="slide" onRequestClose={() => setOpen(false)} accessibilityViewIsModal={true}>
         <Pressable style={s.overlay} onPress={() => setOpen(false)} />
         <View style={s.sheet}>
           <View style={s.sheetHeader}>
             <Text style={s.sheetTitle}>{label}</Text>
             {selected.size > 0 && (
-              <TouchableOpacity onPress={clear}>
+              <TouchableOpacity onPress={clear} accessibilityRole="button" accessibilityLabel="Clear all selected players">
                 <Text style={s.clearTxt}>Clear all</Text>
               </TouchableOpacity>
             )}
@@ -79,7 +79,7 @@ export default function PlayerPicker({ users, value, onChange, label = 'Players'
                 const name = `${u.first_name} ${u.last_name}`;
                 const checked = selected.has(name);
                 return (
-                  <TouchableOpacity style={s.row} onPress={() => toggle(name)}>
+                  <TouchableOpacity style={s.row} onPress={() => toggle(name)} accessibilityRole="checkbox" accessibilityState={{ checked }} accessibilityLabel={name}>
                     <View style={[s.checkbox, checked && s.checkboxChecked]}>
                       {checked && <Ionicons name="checkmark" size={14} color="#fff" />}
                     </View>
@@ -101,12 +101,12 @@ export default function PlayerPicker({ users, value, onChange, label = 'Players'
               returnKeyType="done"
               onSubmitEditing={addCustom}
             />
-            <TouchableOpacity style={s.addBtn} onPress={addCustom}>
+            <TouchableOpacity style={s.addBtn} onPress={addCustom} accessibilityRole="button" accessibilityLabel="Add custom player name">
               <Ionicons name="add" size={20} color="#fff" />
             </TouchableOpacity>
           </View>
 
-          <TouchableOpacity style={s.doneBtn} onPress={() => setOpen(false)}>
+          <TouchableOpacity style={s.doneBtn} onPress={() => setOpen(false)} accessibilityRole="button" accessibilityLabel={`Done, ${selected.size} player${selected.size !== 1 ? 's' : ''} selected`}>
             <Text style={s.doneBtnTxt}>Done  ({selected.size} selected)</Text>
           </TouchableOpacity>
         </View>

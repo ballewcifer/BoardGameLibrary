@@ -78,7 +78,7 @@ export default function History({ isActive = true }: { isActive?: boolean }) {
 
       <View style={s.filterRow}>
         {(['all', 'active', 'returned'] as const).map(f => (
-          <TouchableOpacity key={f} style={[s.filterBtn, filter === f && s.filterBtnActive]} onPress={() => setFilter(f)}>
+          <TouchableOpacity key={f} style={[s.filterBtn, filter === f && s.filterBtnActive]} onPress={() => setFilter(f)} accessibilityRole="button" accessibilityLabel={f === 'all' ? 'Show all checkouts' : f === 'active' ? 'Show still out' : 'Show returned'} accessibilityState={{ selected: filter === f }}>
             <Text style={[s.filterTxt, filter === f && s.filterTxtActive]}>
               {f === 'all' ? 'All' : f === 'active' ? 'Still Out' : 'Returned'}
             </Text>
@@ -101,11 +101,11 @@ export default function History({ isActive = true }: { isActive?: boolean }) {
                 <Text style={[s.gameName, overdue && s.overdueText]} numberOfLines={1}>{l.game_name}</Text>
                 <View style={s.cardActions}>
                   {!l.returned_at && (
-                    <TouchableOpacity style={s.returnBtn} onPress={() => returnNow(l)}>
+                    <TouchableOpacity style={s.returnBtn} onPress={() => returnNow(l)} accessibilityRole="button" accessibilityLabel={`Return ${l.game_name}`}>
                       <Text style={s.returnBtnTxt}>Return</Text>
                     </TouchableOpacity>
                   )}
-                  <TouchableOpacity onPress={() => openEdit(l)} style={s.editBtn}>
+                  <TouchableOpacity onPress={() => openEdit(l)} style={s.editBtn} accessibilityRole="button" accessibilityLabel={`Edit checkout for ${l.game_name}`}>
                     <Ionicons name="pencil-outline" size={16} color={NAVY} />
                   </TouchableOpacity>
                 </View>
@@ -125,7 +125,7 @@ export default function History({ isActive = true }: { isActive?: boolean }) {
       />
 
       {/* Edit Loan modal */}
-      <Modal visible={!!editingLoan} transparent animationType="slide" onRequestClose={() => setEditingLoan(null)}>
+      <Modal visible={!!editingLoan} transparent animationType="slide" onRequestClose={() => setEditingLoan(null)} accessibilityViewIsModal={true}>
         <Pressable style={s.overlay} onPress={() => setEditingLoan(null)} />
         <View style={s.sheet}>
           <Text style={s.sheetTitle}>Edit Checkout</Text>

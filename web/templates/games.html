@@ -5,16 +5,16 @@
 <!-- Search & filter bar -->
 <div class="filter-bar">
   <form method="get" action="/games" class="filter-form">
-    <input type="search" name="q" value="{{ q }}" placeholder="Search games…" class="search-input">
+    <input type="search" name="q" value="{{ q }}" placeholder="Search games…" class="search-input" aria-label="Search games">
 
-    <select name="status" class="filter-select">
+    <select name="status" class="filter-select" aria-label="Filter by availability">
       <option value="all"       {% if status=='all'       %}selected{% endif %}>All</option>
       <option value="available" {% if status=='available' %}selected{% endif %}>Available</option>
       <option value="out"       {% if status=='out'       %}selected{% endif %}>Checked Out</option>
     </select>
 
     {% if all_tags %}
-    <select name="tag" class="filter-select">
+    <select name="tag" class="filter-select" aria-label="Filter by tag">
       <option value="">Any tag</option>
       {% for t in all_tags %}
         <option {% if tag_filter==t %}selected{% endif %}>{{ t }}</option>
@@ -28,7 +28,7 @@
     <button type="submit" class="btn btn-primary btn-sm">Filter</button>
   </form>
 
-  <button class="btn btn-secondary btn-sm" onclick="openModal('modal-add-game')">+ Add Game</button>
+  <button class="btn btn-secondary btn-sm" onclick="openModal('modal-add-game')" aria-label="Add game from BGG">+ Add Game</button>
 </div>
 
 <p class="result-count muted">{{ games|length }} game{{ 's' if games|length != 1 else '' }}</p>
@@ -37,8 +37,8 @@
 <div class="game-grid">
   {% for g in games %}
   <a href="/games/{{ g.bgg_id }}" class="game-card {% if g.loan %}game-card--out{% endif %}">
-    {% if g.is_favorite %}<span class="fav-badge">★</span>{% endif %}
-    {% if g.is_expansion %}<span class="exp-badge">Expansion</span>{% endif %}
+    {% if g.is_favorite %}<span class="fav-badge"><span aria-hidden="true">★</span><span class="sr-only">Favorite</span></span>{% endif %}
+    {% if g.is_expansion %}<span class="exp-badge" aria-label="Expansion">Expansion</span>{% endif %}
 
     <div class="game-card-img">
       {% if g.image_path %}

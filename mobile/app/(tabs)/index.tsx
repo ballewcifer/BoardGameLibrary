@@ -57,19 +57,19 @@ export default function Dashboard({ isActive = true }: { isActive?: boolean }) {
       >
         {/* Stat cards */}
         <View style={s.statGrid}>
-          <TouchableOpacity style={[s.statCard, { backgroundColor: '#1a237e' }]} onPress={() => router.push('/games')}>
+          <TouchableOpacity style={[s.statCard, { backgroundColor: '#1a237e' }]} onPress={() => router.push('/games')} accessibilityRole="button" accessibilityLabel={`Games: ${stats.total_games}, navigate to games list`}>
             <Text style={s.statNum}>{stats.total_games}</Text>
             <Text style={s.statLbl}>Games</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[s.statCard, { backgroundColor: '#1b5e20' }]} onPress={() => router.push('/plays')}>
+          <TouchableOpacity style={[s.statCard, { backgroundColor: '#1b5e20' }]} onPress={() => router.push('/plays')} accessibilityRole="button" accessibilityLabel={`Total Plays: ${stats.total_plays}, navigate to plays`}>
             <Text style={s.statNum}>{stats.total_plays}</Text>
             <Text style={s.statLbl}>Total Plays</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[s.statCard, { backgroundColor: '#4a148c' }]} onPress={() => router.push('/members')}>
+          <TouchableOpacity style={[s.statCard, { backgroundColor: '#4a148c' }]} onPress={() => router.push('/members')} accessibilityRole="button" accessibilityLabel={`Members: ${stats.total_members}, navigate to members`}>
             <Text style={s.statNum}>{stats.total_members}</Text>
             <Text style={s.statLbl}>Members</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[s.statCard, { backgroundColor: stats.checked_out ? '#b71c1c' : '#37474f' }]} onPress={() => router.push('/history')}>
+          <TouchableOpacity style={[s.statCard, { backgroundColor: stats.checked_out ? '#b71c1c' : '#37474f' }]} onPress={() => router.push('/history')} accessibilityRole="button" accessibilityLabel={`Checked Out: ${stats.checked_out}, navigate to history`}>
             <Text style={s.statNum}>{stats.checked_out}</Text>
             <Text style={s.statLbl}>Checked Out</Text>
           </TouchableOpacity>
@@ -123,12 +123,12 @@ export default function Dashboard({ isActive = true }: { isActive?: boolean }) {
         <View style={s.card}>
           <Text style={s.sectionTitle}>Backup & Restore</Text>
           <View style={s.backupRow}>
-            <TouchableOpacity style={s.backupBtn} onPress={onExport}>
+            <TouchableOpacity style={s.backupBtn} onPress={onExport} accessibilityRole="button" accessibilityLabel="Export backup">
               <Ionicons name="download-outline" size={20} color={NAVY} />
               <Text style={s.backupBtnTxt}>Export Backup</Text>
               <Text style={s.backupBtnSub}>Save to Drive, email, etc.</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={s.backupBtn} onPress={onImport}>
+            <TouchableOpacity style={s.backupBtn} onPress={onImport} accessibilityRole="button" accessibilityLabel="Import backup from a JSON file">
               <Ionicons name="cloud-upload-outline" size={20} color={NAVY} />
               <Text style={s.backupBtnTxt}>Import Backup</Text>
               <Text style={s.backupBtnSub}>Restore from a .json file</Text>

@@ -89,7 +89,7 @@ export default function Plays({ isActive = true }: { isActive?: boolean }) {
       <ScreenHeader
         title="Play Log"
         right={
-          <TouchableOpacity onPress={() => openLog()} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+          <TouchableOpacity onPress={() => openLog()} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} accessibilityRole="button" accessibilityLabel="Log a new play">
             <Ionicons name="add-circle-outline" size={26} color="#fff" />
           </TouchableOpacity>
         }
@@ -97,10 +97,10 @@ export default function Plays({ isActive = true }: { isActive?: boolean }) {
 
       {/* View toggle */}
       <View style={s.toggle}>
-        <TouchableOpacity style={[s.toggleBtn, view === 'log' && s.toggleActive]} onPress={() => setView('log')}>
+        <TouchableOpacity style={[s.toggleBtn, view === 'log' && s.toggleActive]} onPress={() => setView('log')} accessibilityRole="button" accessibilityLabel="Play Log" accessibilityState={{ selected: view === 'log' }}>
           <Text style={[s.toggleTxt, view === 'log' && s.toggleTxtActive]}>Play Log</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={[s.toggleBtn, view === 'leaderboard' && s.toggleActive]} onPress={() => setView('leaderboard')}>
+        <TouchableOpacity style={[s.toggleBtn, view === 'leaderboard' && s.toggleActive]} onPress={() => setView('leaderboard')} accessibilityRole="button" accessibilityLabel="Leaderboard" accessibilityState={{ selected: view === 'leaderboard' }}>
           <Text style={[s.toggleTxt, view === 'leaderboard' && s.toggleTxtActive]}>🏆 Leaderboard</Text>
         </TouchableOpacity>
       </View>
@@ -118,13 +118,13 @@ export default function Plays({ isActive = true }: { isActive?: boolean }) {
             </Text>
           }
           renderItem={({ item: w, index }) => {
-            const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : null;
+            const medal = index === 0 ? { emoji: '🥇', label: 'First place' } : index === 1 ? { emoji: '🥈', label: 'Second place' } : index === 2 ? { emoji: '🥉', label: 'Third place' } : null;
             const topThree = index < 3;
             const maxWins = winners[0]?.win_count ?? 1;
             const pct = Math.round((w.win_count / maxWins) * 100);
             return (
               <View style={[s.lbRow, topThree && s.lbRowTop]}>
-                <Text style={s.lbRank}>{medal ?? `${index + 1}`}</Text>
+                <Text style={s.lbRank} accessible={true} accessibilityLabel={medal ? medal.label : `Rank ${index + 1}`}>{medal ? medal.emoji : `${index + 1}`}</Text>
                 <View style={s.lbInfo}>
                   <View style={s.lbNameRow}>
                     <Text style={[s.lbName, topThree && s.lbNameBold]}>{w.winner}</Text>
@@ -154,10 +154,10 @@ export default function Plays({ isActive = true }: { isActive?: boolean }) {
                 <View style={s.cardTop}>
                   <Text style={s.gameName} numberOfLines={1}>{p.game_name}</Text>
                   <View style={s.cardActions}>
-                    <TouchableOpacity onPress={() => openLog(p)} style={s.iconBtn}>
+                    <TouchableOpacity onPress={() => openLog(p)} style={s.iconBtn} accessibilityRole="button" accessibilityLabel={`Edit play of ${p.game_name}`}>
                       <Ionicons name="pencil-outline" size={17} color={NAVY} />
                     </TouchableOpacity>
-                    <TouchableOpacity onPress={() => deletePlay(p)} style={s.iconBtn}>
+                    <TouchableOpacity onPress={() => deletePlay(p)} style={s.iconBtn} accessibilityRole="button" accessibilityLabel={`Delete play of ${p.game_name}`}>
                       <Ionicons name="trash-outline" size={17} color="#b71c1c" />
                     </TouchableOpacity>
                   </View>
@@ -175,7 +175,7 @@ export default function Plays({ isActive = true }: { isActive?: boolean }) {
       )}
 
       {/* ── Log / Edit Play modal ────────────────────────────────────────── */}
-      <Modal visible={modalOpen} transparent animationType="slide" onRequestClose={() => setModalOpen(false)}>
+      <Modal visible={modalOpen} transparent animationType="slide" onRequestClose={() => setModalOpen(false)} accessibilityViewIsModal={true}>
         <Pressable style={s.overlay} onPress={() => setModalOpen(false)} />
         <View style={s.sheet}>
           <Text style={s.sheetTitle}>{editingPlay ? 'Edit Play' : 'Log a Play'}</Text>
@@ -214,7 +214,7 @@ export default function Plays({ isActive = true }: { isActive?: boolean }) {
       </Modal>
 
       {/* Game picker modal */}
-      <Modal visible={pickingGame} transparent animationType="slide" onRequestClose={() => setPickingGame(false)}>
+      <Modal visible={pickingGame} transparent animationType="slide" onRequestClose={() => setPickingGame(false)} accessibilityViewIsModal={true}>
         <Pressable style={s.overlay} onPress={() => setPickingGame(false)} />
         <View style={[s.sheet, { maxHeight: '80%' }]}>
           <Text style={s.sheetTitle}>Select Game</Text>

@@ -37,7 +37,7 @@ export default function Members({ isActive = true }: { isActive?: boolean }) {
       <ScreenHeader
         title="Members"
         right={
-          <TouchableOpacity onPress={() => setModalOpen(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+          <TouchableOpacity onPress={() => setModalOpen(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} accessibilityRole="button" accessibilityLabel="Add new member">
             <Ionicons name="person-add-outline" size={24} color="#fff" />
           </TouchableOpacity>
         }
@@ -53,20 +53,20 @@ export default function Members({ isActive = true }: { isActive?: boolean }) {
         renderItem={({ item: u }) => (
           <View style={s.card}>
             <View style={s.avatar}>
-              <Text style={s.avatarTxt}>{u.first_name[0]}{u.last_name[0]}</Text>
+              <Text style={s.avatarTxt} accessible={false}>{u.first_name[0]}{u.last_name[0]}</Text>
             </View>
             <View style={s.info}>
               <Text style={s.name}>{u.first_name} {u.last_name}</Text>
               <Text style={s.since}>Member since {u.created_at.slice(0, 10)}</Text>
             </View>
-            <TouchableOpacity onPress={() => remove(u)} style={s.removeBtn}>
+            <TouchableOpacity onPress={() => remove(u)} style={s.removeBtn} accessibilityRole="button" accessibilityLabel={`Remove ${u.first_name} ${u.last_name}`}>
               <Ionicons name="trash-outline" size={20} color="#b71c1c" />
             </TouchableOpacity>
           </View>
         )}
       />
 
-      <Modal visible={modalOpen} transparent animationType="slide" onRequestClose={() => setModalOpen(false)}>
+      <Modal visible={modalOpen} transparent animationType="slide" onRequestClose={() => setModalOpen(false)} accessibilityViewIsModal={true}>
         <Pressable style={s.overlay} onPress={() => setModalOpen(false)} />
         <View style={s.sheet}>
           <Text style={s.sheetTitle}>Add Member</Text>
