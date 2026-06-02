@@ -2498,16 +2498,8 @@ class App(tk.Tk):
             self._download_thumbnails_bg(games)
         except PermissionError as exc:
             self.after(0, lambda err=str(exc): messagebox.showerror(
-                "BGG Authentication Required",
-                f"{err}\n\n"
-                "To fix this, either:\n"
-                "  A) Enter your BGG password in File → Settings\n"
-                "     (logs in on your behalf — no token needed)\n\n"
-                "  B) Register a free BGG API token at\n"
-                "     boardgamegeek.com/applications\n"
-                "     and paste it in File → Settings → BGG API token",
-            ))
-            self._post_status("Import failed: BGG authentication required.")
+                "Sync failed", err))
+            self._post_status(f"Sync failed: {exc}")
         except Exception as exc:
             traceback.print_exc()
             self.after(0, lambda err=str(exc): messagebox.showerror(
