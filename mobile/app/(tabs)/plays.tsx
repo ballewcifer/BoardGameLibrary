@@ -12,6 +12,8 @@ export default function Plays({ isActive = true }: { isActive?: boolean }) {
   const [plays, setPlays]           = useState<Play[]>([]);
   const [games, setGames]           = useState<Game[]>([]);
   const [users, setUsers]           = useState<User[]>([]);
+  const [winners, setWinners]       = useState<{ winner: string; win_count: number }[]>([]);
+  const [view, setView]             = useState<'log' | 'leaderboard'>('log');
   const [refreshing, setRefreshing] = useState(false);
   const [modalOpen, setModalOpen]   = useState(false);
 
@@ -29,6 +31,7 @@ export default function Plays({ isActive = true }: { isActive?: boolean }) {
     setPlays(db.listPlays());
     setGames(db.listGames());
     setUsers(db.listUsers());
+    setWinners(db.topWinners(0));   // 0 = no limit, all winners
   }, []);
   useEffect(() => { if (isActive) load(); }, [isActive]);
 
@@ -70,32 +73,84 @@ export default function Plays({ isActive = true }: { isActive?: boolean }) {
         }
       />
 
-      <Text style={s.count}>{plays.length} play{plays.length !== 1 ? 's' : ''}</Text>
+      {/* View toggle */}
+      <View style={s.toggle}>
+        <TouchableOpacity style={[s.toggleBtn, view === 'log' && s.toggleActive]} onPress={() => setView('log')}>
+          <Text style={[s.toggleTxt, view === 'log' && s.toggleTxtActive]}>Play Log</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[s.toggleBtn, view === 'leaderboard' && s.toggleActive]} onPress={() => setView('leaderboard')}>
+          <Text style={[s.toggleTxt, view === 'leaderboard' && s.toggleTxtActive]}>🏆 Leaderboard</Text>
+        </TouchableOpacity>
+      </View>
 
-      <FlatList
-        data={plays}
-        keyExtractor={p => String(p.id)}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); setRefreshing(false); }} />}
-        contentContainerStyle={{ padding: 12 }}
-        ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
-        ListEmptyComponent={<Text style={s.empty}>No plays logged yet.</Text>}
-        renderItem={({ item: p }) => (
-          <View style={s.card}>
-            <View style={s.cardTop}>
-              <Text style={s.gameName} numberOfLines={1}>{p.game_name}</Text>
-              <TouchableOpacity onPress={() => deletePlay(p)} style={{ padding: 4 }}>
-                <Ionicons name="trash-outline" size={18} color="#b71c1c" />
-              </TouchableOpacity>
-            </View>
-            <Text style={s.date}>{p.played_at?.slice(0, 10)}</Text>
-            {p.player_names ? <Text style={s.detail}>👥 {p.player_names}</Text> : null}
-            {p.winner       ? <Text style={s.detail}>🏆 {p.winner}</Text>       : null}
-            {p.duration_minutes ? <Text style={s.detail}>⏱ {p.duration_minutes} min</Text> : null}
-            {p.scores       ? <Text style={s.detail}>📊 {p.scores}</Text>       : null}
-            {p.notes        ? <Text style={s.detail}>📝 {p.notes}</Text>        : null}
-          </View>
-        )}
-      />
+      {view === 'leaderboard' ? (
+        /* ── Leaderboard ───────────────────────────────────────────── */
+        <FlatList
+          data={winners}
+          keyExtractor={w => w.winner}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); setRefreshing(false); }} />}
+          contentContainerStyle={{ padding: 14 }}
+          ListEmptyComponent={<Text style={s.empty}>No wins recorded yet. Log some plays!</Text>}
+          ListHeaderComponent={
+            <Text style={s.lbHeader}>
+              {winners.length} player{winners.length !== 1 ? 's' : ''} · {plays.length} play{plays.length !== 1 ? 's' : ''} total
+            </Text>
+          }
+          renderItem={({ item: w, index }) => {
+            const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : null;
+            const topThree = index < 3;
+            const maxWins = winners[0]?.win_count ?? 1;
+            const pct = Math.round((w.win_count / maxWins) * 100);
+            return (
+              <View style={[s.lbRow, topThree && s.lbRowTop]}>
+                <Text style={s.lbRank}>
+                  {medal ?? `${index + 1}`}
+                </Text>
+                <View style={s.lbInfo}>
+                  <View style={s.lbNameRow}>
+                    <Text style={[s.lbName, topThree && s.lbNameBold]}>{w.winner}</Text>
+                    <Text style={s.lbWins}>{w.win_count} win{w.win_count !== 1 ? 's' : ''}</Text>
+                  </View>
+                  {/* Win bar */}
+                  <View style={s.lbBarBg}>
+                    <View style={[s.lbBarFill, { width: `${pct}%` as any,
+                      backgroundColor: index === 0 ? '#f0c050' : index === 1 ? '#aab8c2' : index === 2 ? '#cd7f32' : NAVY }]} />
+                  </View>
+                </View>
+              </View>
+            );
+          }}
+        />
+      ) : (
+        /* ── Play Log ──────────────────────────────────────────────── */
+        <>
+          <Text style={s.count}>{plays.length} play{plays.length !== 1 ? 's' : ''}</Text>
+          <FlatList
+            data={plays}
+            keyExtractor={p => String(p.id)}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); setRefreshing(false); }} />}
+            contentContainerStyle={{ padding: 12 }}
+            ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
+            ListEmptyComponent={<Text style={s.empty}>No plays logged yet.</Text>}
+            renderItem={({ item: p }) => (
+              <View style={s.card}>
+                <View style={s.cardTop}>
+                  <Text style={s.gameName} numberOfLines={1}>{p.game_name}</Text>
+                  <TouchableOpacity onPress={() => deletePlay(p)} style={{ padding: 4 }}>
+                    <Ionicons name="trash-outline" size={18} color="#b71c1c" />
+                  </TouchableOpacity>
+                </View>
+                <Text style={s.date}>{p.played_at?.slice(0, 10)}</Text>
+                {p.player_names ? <Text style={s.detail}>👥 {p.player_names}</Text> : null}
+                {p.winner       ? <Text style={s.detail}>🏆 {p.winner}</Text>       : null}
+                {p.duration_minutes ? <Text style={s.detail}>⏱ {p.duration_minutes} min</Text> : null}
+                {p.scores       ? <Text style={s.detail}>📊 {p.scores}</Text>       : null}
+                {p.notes        ? <Text style={s.detail}>📝 {p.notes}</Text>        : null}
+              </View>
+            )}
+          />
+        </>
+      )}
 
       {/* Log Play modal */}
       <Modal visible={modalOpen} transparent animationType="slide" onRequestClose={() => setModalOpen(false)}>
@@ -181,4 +236,22 @@ const s = StyleSheet.create({
   gameItem: { paddingVertical: 12, paddingHorizontal: 4, flexDirection: 'row', justifyContent: 'space-between' },
   gameItemTxt: { fontSize: 15, flex: 1 },
   gameItemYear: { fontSize: 13, color: '#9e9e9e' },
+  // Toggle
+  toggle: { flexDirection: 'row', backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
+  toggleBtn: { flex: 1, paddingVertical: 11, alignItems: 'center' },
+  toggleActive: { borderBottomWidth: 3, borderBottomColor: NAVY },
+  toggleTxt: { fontSize: 14, color: '#9e9e9e', fontWeight: '600' },
+  toggleTxtActive: { color: NAVY },
+  // Leaderboard
+  lbHeader: { fontSize: 12, color: '#9e9e9e', marginBottom: 10 },
+  lbRow: { backgroundColor: '#fff', borderRadius: 10, padding: 14, marginBottom: 8, flexDirection: 'row', alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 3, elevation: 1 },
+  lbRowTop: { shadowOpacity: 0.12, elevation: 3 },
+  lbRank: { fontSize: 22, width: 40, textAlign: 'center' },
+  lbInfo: { flex: 1, marginLeft: 8 },
+  lbNameRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
+  lbName: { fontSize: 15, color: '#333', flex: 1 },
+  lbNameBold: { fontWeight: '700', fontSize: 16 },
+  lbWins: { fontSize: 13, color: '#6b7280', fontWeight: '600' },
+  lbBarBg: { height: 6, backgroundColor: '#f0f0f0', borderRadius: 3, overflow: 'hidden' },
+  lbBarFill: { height: 6, borderRadius: 3 },
 });

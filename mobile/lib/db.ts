@@ -281,12 +281,14 @@ export function topGamesByPlays(limit = 5): { bgg_id: number; name: string; play
 }
 
 export function topWinners(limit = 5): { winner: string; win_count: number }[] {
-  return getDb().getAllSync(
-    `SELECT winner, COUNT(*) AS win_count FROM plays
-     WHERE winner IS NOT NULL AND winner != ''
-     GROUP BY winner ORDER BY win_count DESC LIMIT ?`,
-    [limit]
-  );
+  const sql = limit > 0
+    ? `SELECT winner, COUNT(*) AS win_count FROM plays
+       WHERE winner IS NOT NULL AND winner != ''
+       GROUP BY winner ORDER BY win_count DESC LIMIT ${limit}`
+    : `SELECT winner, COUNT(*) AS win_count FROM plays
+       WHERE winner IS NOT NULL AND winner != ''
+       GROUP BY winner ORDER BY win_count DESC`;
+  return getDb().getAllSync(sql);
 }
 
 // ── Stats ─────────────────────────────────────────────────────────────────────
