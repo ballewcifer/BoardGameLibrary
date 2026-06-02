@@ -2067,36 +2067,48 @@ class App(tk.Tk):
             foreground="#888",
         ).grid(row=1, column=1, sticky="w", padx=(8, 0), pady=(0, 12))
 
+        # ── BGG password (keychain) ───────────────────────────────────────────
+        ttk.Label(frame, text="BGG password:").grid(row=2, column=0, sticky="w", pady=4)
+        pwd_var = tk.StringVar(value=_kr_get_password())
+        pwd_entry = ttk.Entry(frame, textvariable=pwd_var, width=32, show="●")
+        pwd_entry.grid(row=2, column=1, sticky="w", padx=(8, 0))
+        _stored = bool(_kr_get_password())
+        _pwd_hint = "✓ Saved in Windows Credential Manager" if _stored else "Optional — needed for private collections"
+        pwd_hint_var = tk.StringVar(value=_pwd_hint)
+        ttk.Label(frame, textvariable=pwd_hint_var, foreground="#888" if not _stored else "#2e7d32",
+                  ).grid(row=3, column=1, sticky="w", padx=(8, 0), pady=(0, 4))
+        ttk.Button(
+            frame, text="Clear saved password",
+            command=lambda: [_kr_set_password(""), pwd_var.set(""),
+                             pwd_hint_var.set("Cleared — enter a new password to save")]
+        ).grid(row=4, column=1, sticky="w", padx=(8, 0), pady=(0, 12))
+
         # ── sync plays toggle ─────────────────────────────────────────────────
         sync_var = tk.BooleanVar(value=bool(self.settings.get("bgg_sync_plays", False)))
         ttk.Checkbutton(
             frame,
             text="Offer to post plays to BGG when logging a play",
             variable=sync_var,
-        ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(0, 4))
-        ttk.Label(
-            frame,
-            text="You'll be asked for your BGG password each time — it is never stored.",
-            foreground="#888",
-        ).grid(row=3, column=0, columnspan=2, sticky="w", padx=(22, 0), pady=(0, 12))
+        ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(0, 4))
 
         def save() -> None:
             self.settings["bgg_username"] = username_var.get().strip()
-            # bgg_password is intentionally never stored
-            self.settings.pop("bgg_password", None)
+            self.settings.pop("bgg_password", None)   # never in JSON
             self.settings["bgg_sync_plays"] = sync_var.get()
             config.save(self.settings)
+            # Save password to keychain (empty string = clear it)
+            _kr_set_password(pwd_var.get())
             self.status("Settings saved.")
             win.destroy()
 
         # ── danger zone ───────────────────────────────────────────────────────
         tk.Frame(frame, bg=C_PALE, height=1).grid(
-            row=4, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+            row=7, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         tk.Label(
             frame, text="Danger zone",
             bg=C_BG, fg="#b71c1c",
             font=("Segoe UI", 9, "bold"),
-        ).grid(row=5, column=0, sticky="w", pady=(8, 4))
+        ).grid(row=8, column=0, sticky="w", pady=(8, 4))
 
         tk.Button(
             frame, text="Clear collection…",
@@ -2105,17 +2117,17 @@ class App(tk.Tk):
             relief="flat", font=("Segoe UI", 9, "bold"),
             padx=12, pady=4, cursor="hand2",
             command=self.on_clear_collection,
-        ).grid(row=6, column=0, sticky="w")
+        ).grid(row=9, column=0, sticky="w")
         tk.Label(
             frame,
             text="Removes all games, images, play logs,\nand loan history. Members are kept.",
             bg=C_BG, fg="#888",
             font=("Segoe UI", 8), justify="left",
-        ).grid(row=6, column=1, sticky="w", padx=(12, 0))
+        ).grid(row=9, column=1, sticky="w", padx=(12, 0))
 
         # ── buttons ───────────────────────────────────────────────────────────
         btn_row = ttk.Frame(frame)
-        btn_row.grid(row=7, column=0, columnspan=2, sticky="e", pady=(20, 0))
+        btn_row.grid(row=10, column=0, columnspan=2, sticky="e", pady=(20, 0))
         ttk.Button(btn_row, text="Cancel", command=win.destroy).pack(side="left", padx=(0, 6))
         ttk.Button(btn_row, text="Save", command=save).pack(side="left")
 
@@ -2358,9 +2370,18 @@ class App(tk.Tk):
                 ))
                 self._post_status("Import: nothing found.")
                 return
+
+            # Detect games in BGL that are no longer in BGG collection
+            bgg_ids = {g.bgg_id for g in games}
+            with db.connect() as c:
+                all_bgl = db.list_games(c)
+            removed = [g for g in all_bgl if g["bgg_id"] not in bgg_ids]
+
             self._save_games_to_db(games)
             self.after(0, self.refresh_games)
             self._post_status(f"Imported {len(games)} games. Downloading images…")
+            if removed:
+                self.after(0, lambda r=removed: self._prompt_bgg_removals(r))
             self._download_thumbnails_bg(games)
         except PermissionError as exc:
             self.after(0, lambda err=str(exc): messagebox.showerror(
