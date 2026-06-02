@@ -1,9 +1,9 @@
-import { useCallback, useState, memo } from 'react';
+import { useCallback, useState, memo, useEffect } from 'react';
 import {
   View, Text, TextInput, FlatList, TouchableOpacity, StyleSheet,
   Image, RefreshControl, Modal, Pressable, Alert, ActivityIndicator, ScrollView,
 } from 'react-native';
-import { useFocusEffect, router } from 'expo-router';
+import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as db from '../../lib/db';
 import * as bgg from '../../lib/bgg';
@@ -19,7 +19,7 @@ const GameThumb = memo(({ uri }: { uri: string }) => {
   return <Image source={{ uri }} style={{ width: '100%', height: '100%', resizeMode: 'cover' }} onError={() => setErr(true)} />;
 });
 
-export default function Games() {
+export default function Games({ isActive = true }: { isActive?: boolean }) {
   const [games, setGames]           = useState<Game[]>([]);
   const [openLoans, setOpenLoans]   = useState<Record<number, Loan>>({});
   const [playCounts, setPlayCounts] = useState<Record<number, number>>({});
@@ -46,18 +46,31 @@ export default function Games() {
   const [bggToken, setBggToken]         = useState('');
   const [bggPassword, setBggPassword]   = useState('');
 
-  const load = useCallback((q = search) => {
+  // Separate loans/counts from games so loan changes never re-mount image components
+  const loadGames = useCallback((q = search) => {
     setGames(db.listGames(q));
+  }, [search]);
+
+  const loadLoans = useCallback(() => {
     const loans: Record<number, Loan> = {};
     db.currentlyCheckedOut().forEach(l => { if (l.bgg_id) loans[l.bgg_id] = l; });
     setOpenLoans(loans);
     setPlayCounts(db.playCounts());
-  }, [search]);
+  }, []);
 
-  useFocusEffect(useCallback(() => {
-    load();
+  const load = useCallback((q = search) => {
+    loadGames(q);
+    loadLoans();
+  }, [loadGames, loadLoans, search]);
+
+  // On focus: always refresh loans; only reload games on first mount
+  const mountedRef = useState(false);
+  useEffect(() => {
+    if (!isActive) return;
+    if (!mountedRef[0]) { mountedRef[1](true); loadGames(); }
+    loadLoans();
     loadSettings().then(s => { setBggUsername(s.bgg_username); setBggToken(s.bgg_token); });
-  }, [load]));
+  }, [isActive]);
 
   // ── Sync ──────────────────────────────────────────────────────────────────
 
@@ -256,6 +269,8 @@ export default function Games() {
             </TouchableOpacity>
           );
         }}
+        extraData={{ openLoans, playCounts }}
+        removeClippedSubviews={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); setRefreshing(false); }} />}
         contentContainerStyle={{ padding: 8 }}
         columnWrapperStyle={{ gap: 8 }}

@@ -1,12 +1,12 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, RefreshControl } from 'react-native';
-import { useFocusEffect, router } from 'expo-router';
+import { router } from 'expo-router';
 import * as db from '../../lib/db';
 import type { Stats, Loan, Play } from '../../lib/types';
 
 const NAVY = '#1a237e';
 
-export default function Dashboard() {
+export default function Dashboard({ isActive = true }: { isActive?: boolean }) {
   const [stats, setStats]           = useState<Stats>({ total_games: 0, total_plays: 0, total_members: 0, checked_out: 0 });
   const [checkedOut, setCheckedOut] = useState<Loan[]>([]);
   const [recent, setRecent]         = useState<Play[]>([]);
@@ -22,7 +22,7 @@ export default function Dashboard() {
     setTopWins(db.topWinners(5));
   }, []);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  useEffect(() => { if (isActive) load(); }, [isActive]);
 
   const today = new Date().toISOString().slice(0, 10);
 

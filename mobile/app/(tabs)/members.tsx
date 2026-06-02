@@ -1,13 +1,12 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, Modal, TextInput, Alert, Pressable, RefreshControl } from 'react-native';
-import { useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as db from '../../lib/db';
 import type { User } from '../../lib/types';
 
 const NAVY = '#1a237e';
 
-export default function Members() {
+export default function Members({ isActive = true }: { isActive?: boolean }) {
   const [users, setUsers]           = useState<User[]>([]);
   const [modalOpen, setModalOpen]   = useState(false);
   const [first, setFirst]           = useState('');
@@ -15,7 +14,7 @@ export default function Members() {
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(() => setUsers(db.listUsers()), []);
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  useEffect(() => { if (isActive) load(); }, [isActive]);
 
   const add = () => {
     if (!first.trim() || !last.trim()) { Alert.alert('Both names required'); return; }

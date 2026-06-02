@@ -1,18 +1,17 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, RefreshControl, Alert } from 'react-native';
-import { useFocusEffect } from 'expo-router';
 import * as db from '../../lib/db';
 import type { Loan } from '../../lib/types';
 
 const NAVY = '#1a237e';
 
-export default function History() {
+export default function History({ isActive = true }: { isActive?: boolean }) {
   const [loans, setLoans]           = useState<Loan[]>([]);
   const [filter, setFilter]         = useState<'all' | 'active' | 'returned'>('all');
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(() => setLoans(db.loanHistory()), []);
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  useEffect(() => { if (isActive) load(); }, [isActive]);
 
   const returnNow = (loan: Loan) => {
     Alert.alert('Mark as returned?', `Return "${loan.game_name}"?`, [

@@ -1,6 +1,5 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, Alert, Modal, TextInput, Pressable, RefreshControl, ScrollView } from 'react-native';
-import { useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as db from '../../lib/db';
 import type { Play, Game, User } from '../../lib/types';
@@ -8,7 +7,7 @@ import PlayerPicker from '../../components/PlayerPicker';
 
 const NAVY = '#1a237e';
 
-export default function Plays() {
+export default function Plays({ isActive = true }: { isActive?: boolean }) {
   const [plays, setPlays]           = useState<Play[]>([]);
   const [games, setGames]           = useState<Game[]>([]);
   const [users, setUsers]           = useState<User[]>([]);
@@ -30,7 +29,7 @@ export default function Plays() {
     setGames(db.listGames());
     setUsers(db.listUsers());
   }, []);
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  useEffect(() => { if (isActive) load(); }, [isActive]);
 
   const openLog = () => {
     setDate(new Date().toISOString().slice(0, 10));
