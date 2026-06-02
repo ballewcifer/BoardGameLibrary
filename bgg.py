@@ -33,10 +33,15 @@ BROWSER_UA = (
 THING_BATCH = 20
 
 # ── Built-in application token ────────────────────────────────────────────────
-# Register at https://boardgamegeek.com/applications to get a Bearer token
-# and store it in settings.json (File → Settings → BGG Token) or set the
-# BGG_APP_TOKEN environment variable.  Never commit a real token to source.
-BGG_APP_TOKEN: str = ""
+# Loaded from secrets.py (gitignored) so the token never appears in tracked
+# source but IS embedded in the compiled .exe — same approach as BG Stats.
+# Fall back to the BGG_APP_TOKEN env var, then to empty (user must set in
+# File → Settings → BGG API token).
+try:
+    from secrets import BGG_APP_TOKEN  # type: ignore[import]
+except ImportError:
+    import os as _os
+    BGG_APP_TOKEN: str = _os.environ.get("BGG_APP_TOKEN", "")
 
 
 def _ssl_ctx() -> ssl.SSLContext:
