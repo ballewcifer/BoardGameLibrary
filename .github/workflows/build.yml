@@ -39,7 +39,13 @@ jobs:
         run: echo "__version__ = \"${{ steps.ver.outputs.VERSION }}\"" > version.py
 
       - name: Install Python dependencies
-        run: pip install pyinstaller pillow certifi
+        run: pip install pyinstaller pillow certifi keyring
+
+      - name: Write secrets.py
+        shell: bash
+        env:
+          BGG_APP_TOKEN: ${{ secrets.BGG_APP_TOKEN }}
+        run: printf 'BGG_APP_TOKEN = "%s"\n' "$BGG_APP_TOKEN" > _secrets.py
 
       - name: Generate icon.ico
         run: python create_icon.py
@@ -89,7 +95,13 @@ jobs:
         run: echo "__version__ = \"${{ steps.ver.outputs.VERSION }}\"" > version.py
 
       - name: Install Python dependencies
-        run: pip install pyinstaller pillow certifi
+        run: pip install pyinstaller pillow certifi keyring
+
+      - name: Write secrets.py
+        shell: bash
+        env:
+          BGG_APP_TOKEN: ${{ secrets.BGG_APP_TOKEN }}
+        run: printf 'BGG_APP_TOKEN = "%s"\n' "$BGG_APP_TOKEN" > _secrets.py
 
       - name: Install create-dmg
         run: brew install create-dmg

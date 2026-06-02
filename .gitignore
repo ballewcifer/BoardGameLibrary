@@ -16,7 +16,7 @@ settings.json
 images/
 
 # App secrets — token lives here, never in tracked source
-secrets.py
+_secrets.py
 creds
 
 # Installer output

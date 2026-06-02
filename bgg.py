@@ -38,7 +38,7 @@ THING_BATCH = 20
 # Fall back to the BGG_APP_TOKEN env var, then to empty (user must set in
 # File → Settings → BGG API token).
 try:
-    from secrets import BGG_APP_TOKEN  # type: ignore[import]
+    from _secrets import BGG_APP_TOKEN  # type: ignore[import]
 except ImportError:
     import os as _os
     BGG_APP_TOKEN: str = _os.environ.get("BGG_APP_TOKEN", "")
