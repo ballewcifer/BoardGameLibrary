@@ -8,6 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as db from '../../lib/db';
 import * as bgg from '../../lib/bgg';
 import { loadSettings, saveSettings } from '../../lib/settings';
+import { exportBackup, importBackup } from '../../lib/backup';
 import type { Game, Loan } from '../../lib/types';
 
 const NAVY = '#1a237e';
@@ -175,6 +176,33 @@ export default function Games({ isActive = true }: { isActive?: boolean }) {
 
   // ── Settings ──────────────────────────────────────────────────────────────
 
+  const onExport = async () => {
+    setMenuOpen(false);
+    try {
+      await exportBackup();
+    } catch (e: any) {
+      Alert.alert('Export failed', e.message ?? String(e));
+    }
+  };
+
+  const onImport = async () => {
+    setMenuOpen(false);
+    try {
+      const counts = await importBackup();
+      load();
+      Alert.alert(
+        'Import complete',
+        `Members: ${counts.members} added\n` +
+        `Plays: ${counts.plays} added\n` +
+        `Loans: ${counts.loans} added\n` +
+        `Customisations: ${counts.customisations} applied\n` +
+        `Skipped (already exist): ${counts.skipped}`
+      );
+    } catch (e: any) {
+      if (e.message !== 'Cancelled') Alert.alert('Import failed', e.message ?? String(e));
+    }
+  };
+
   const openSettings = async () => {
     setMenuOpen(false);
     const s = await loadSettings();
@@ -284,6 +312,15 @@ export default function Games({ isActive = true }: { isActive?: boolean }) {
           <TouchableOpacity style={s.menuItem} onPress={openSettings}>
             <Ionicons name="settings-outline" size={20} color={NAVY} />
             <Text style={s.menuTxt}>BGG Settings</Text>
+          </TouchableOpacity>
+          <View style={s.menuDivider} />
+          <TouchableOpacity style={s.menuItem} onPress={onExport}>
+            <Ionicons name="download-outline" size={20} color={NAVY} />
+            <Text style={s.menuTxt}>Export Backup</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={s.menuItem} onPress={onImport}>
+            <Ionicons name="cloud-upload-outline" size={20} color={NAVY} />
+            <Text style={s.menuTxt}>Import Backup</Text>
           </TouchableOpacity>
         </View>
       </Modal>
@@ -425,8 +462,9 @@ const s = StyleSheet.create({
   favBadge: { position: 'absolute', top: 4, right: 4, backgroundColor: '#f0c674', borderRadius: 4, paddingHorizontal: 4, fontSize: 12, zIndex: 1 },
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
   // ⋯ menu
-  menu: { position: 'absolute', top: 100, right: 12, backgroundColor: '#fff', borderRadius: 10, shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 8, elevation: 6, minWidth: 160 },
+  menu: { position: 'absolute', top: 100, right: 12, backgroundColor: '#fff', borderRadius: 10, shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 8, elevation: 6, minWidth: 180 },
   menuItem: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 14 },
+  menuDivider: { height: 1, backgroundColor: '#f0f0f0', marginHorizontal: 12 },
   menuTxt: { fontSize: 15, color: NAVY },
   // Sheets
   sheet: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 24, paddingBottom: 44, maxHeight: '85%' },
