@@ -128,9 +128,19 @@ def _http_get(
                 return resp.status, resp.read()
     except urllib.error.HTTPError as e:
         if e.code == 401:
+            # If we have session cookies but no token, the session alone may be
+            # sufficient — let the caller decide whether to retry.
+            if opener and not token:
+                raise PermissionError(
+                    "BGG returned 401. Your session login worked but BGG also requires\n"
+                    "a Bearer token for API access.\n"
+                    "Register a free token at boardgamegeek.com/applications and add it\n"
+                    "in File → Settings → BGG API token."
+                ) from e
             raise PermissionError(
-                "BGG returned 401 — Bearer token required or collection is private.\n"
-                "Add your BGG password in Settings so the app can log in on your behalf."
+                "BGG returned 401 — API token required or collection is private.\n"
+                "Enter your BGG password in File → Settings (option A), or register\n"
+                "a free API token at boardgamegeek.com/applications (option B)."
             ) from e
         raise
 

@@ -2498,11 +2498,16 @@ class App(tk.Tk):
             self._download_thumbnails_bg(games)
         except PermissionError as exc:
             self.after(0, lambda err=str(exc): messagebox.showerror(
-                "Token rejected",
-                f"BGG rejected the API token:\n{err}\n\n"
-                "The built-in token may have expired. Contact the library administrator.",
+                "BGG Authentication Required",
+                f"{err}\n\n"
+                "To fix this, either:\n"
+                "  A) Enter your BGG password in File → Settings\n"
+                "     (logs in on your behalf — no token needed)\n\n"
+                "  B) Register a free BGG API token at\n"
+                "     boardgamegeek.com/applications\n"
+                "     and paste it in File → Settings → BGG API token",
             ))
-            self._post_status("Import failed: token rejected.")
+            self._post_status("Import failed: BGG authentication required.")
         except Exception as exc:
             traceback.print_exc()
             self.after(0, lambda err=str(exc): messagebox.showerror(
