@@ -1235,8 +1235,10 @@ class App(tk.Tk):
 
         if self._view_mode == "table":
             self._refresh_table_view(games, open_loans, play_counts)
+            self.games_tree.yview_moveto(0)
         else:
             self._refresh_card_view(games, open_loans, play_counts)
+            self.games_canvas.yview_moveto(0)
 
     def _filters_active(self) -> bool:
         return (
