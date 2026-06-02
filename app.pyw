@@ -502,9 +502,9 @@ class App(tk.Tk):
             font=("Segoe UI", 13, "bold"),
         ).pack(side="left", padx=(8, 0))
 
-        # Thin separator line below the header for visual separation
-        sep = tk.Frame(self, bg="#2c3e6e", height=2)
-        sep.pack(side="top", fill="x")
+        # Separator: white line, then a darker shadow stripe
+        tk.Frame(self, bg="#ffffff", height=3).pack(side="top", fill="x")
+        tk.Frame(self, bg="#c8d0e0", height=1).pack(side="top", fill="x")
 
     def _build_toolbar(self, parent=None) -> None:
         """Search bar + view toggle + filter bar. Called from _build_games_tab()."""
@@ -1429,16 +1429,9 @@ class App(tk.Tk):
         card = ttk.Frame(self.games_inner, padding=8, relief="solid", borderwidth=1)
         card.configure(width=180)
 
-        # --- header row: expansion badge (left) + star (right) ---
+        # --- header row: star right-aligned ---
         header = tk.Frame(card, bg=C_BG)
         header.pack(fill="x")
-        if game["is_expansion"]:
-            tk.Label(
-                header, text="Expansion",
-                bg="#ede7f6", fg="#4527a0",
-                font=("Segoe UI", 7), padx=4, pady=2,
-                relief="flat",
-            ).pack(side="left", pady=(2, 0))
         star_lbl = tk.Label(
             header,
             text="★" if is_fav else "☆",
@@ -1448,6 +1441,14 @@ class App(tk.Tk):
         )
         star_lbl.pack(side="right")
         star_lbl.bind("<Button-1>", lambda e, g=game: self.on_toggle_favorite(g))
+
+        # --- expansion badge centred above the image ---
+        if game["is_expansion"]:
+            tk.Label(
+                card, text="Expansion",
+                bg="#ede7f6", fg="#4527a0",
+                font=("Segoe UI", 8, "bold"), padx=6, pady=2,
+            ).pack(pady=(0, 4))
 
         # --- image canvas (fixed size, centred in card) ---
         _CW, _CH = THUMB_SIZE[0], THUMB_SIZE[1]  # 140 × 140
