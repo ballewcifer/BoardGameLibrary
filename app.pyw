@@ -24,6 +24,27 @@ from PIL import Image, ImageTk
 import bgg
 import config
 import db
+
+# Secure credential storage — uses Windows Credential Manager / macOS Keychain / libsecret
+try:
+    import keyring as _keyring
+    _KR_SERVICE = "BoardGameLibrary"
+    def _kr_get_password() -> str:
+        try:
+            return _keyring.get_password(_KR_SERVICE, "bgg_password") or ""
+        except Exception:
+            return ""
+    def _kr_set_password(pwd: str) -> None:
+        try:
+            if pwd:
+                _keyring.set_password(_KR_SERVICE, "bgg_password", pwd)
+            else:
+                _keyring.delete_password(_KR_SERVICE, "bgg_password")
+        except Exception:
+            pass
+except ImportError:
+    def _kr_get_password() -> str: return ""
+    def _kr_set_password(pwd: str) -> None: pass
 from paths import DATA_DIR, DB_PATH, CONFIG_PATH, IMAGES_DIR
 from version import __version__ as APP_VERSION
 
@@ -245,6 +266,10 @@ class App(tk.Tk):
         db.init_db()
         IMAGES_DIR.mkdir(parents=True, exist_ok=True)
         self.settings = config.load()
+        # Migrate any plaintext password left by older versions — move to keychain
+        if _stale_pwd := self.settings.pop("bgg_password", None):
+            _kr_set_password(_stale_pwd)
+            config.save(self.settings)
         self._image_cache: dict[str, ImageTk.PhotoImage] = {}
         self._placeholder_img: Optional[ImageTk.PhotoImage] = None
         self._search_after_id: Optional[str] = None
@@ -2259,7 +2284,7 @@ class App(tk.Tk):
 
         ttk.Label(dialog, text="BGG password (for private collections):",
                   padding=(16, 6, 16, 2)).pack(anchor="w")
-        pwd_var = tk.StringVar(value=self.settings.get("bgg_password", ""))
+        pwd_var = tk.StringVar(value=_kr_get_password())   # from OS keychain
         pwd_entry = ttk.Entry(dialog, textvariable=pwd_var, width=34, show="●")
         pwd_entry.pack(padx=16, pady=(0, 2))
 
@@ -2282,10 +2307,10 @@ class App(tk.Tk):
                 return
             tok = bgg.BGG_APP_TOKEN or self.settings.get("bgg_token", "").strip()
             self.settings["bgg_username"] = uname
-            # Save password in memory only (never written to disk)
-            if pwd:
-                self.settings["bgg_password"] = pwd
+            self.settings.pop("bgg_password", None)  # ensure never in JSON
             config.save(self.settings)
+            # Store password in OS keychain (never in plaintext JSON)
+            _kr_set_password(pwd)
             if hasattr(self, "username_var"):
                 self.username_var.set(uname)
             dialog.destroy()
@@ -2305,9 +2330,10 @@ class App(tk.Tk):
                                    password: Optional[str] = None) -> None:
         try:
             opener = None
-            if password:
+            pwd = password or _kr_get_password()
+            if pwd:
                 self._post_status("Logging in to BGG…")
-                _jar, opener = bgg._bgg_login(username, password)
+                _jar, opener = bgg._bgg_login(username, pwd)
                 if opener is None:
                     self.after(0, lambda: messagebox.showerror(
                         "Login failed", "BGG login failed — check your password."))
