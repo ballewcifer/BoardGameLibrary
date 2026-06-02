@@ -532,16 +532,20 @@ def fetch_plays(
 def _bgg_login(username: str, password: str):
     """POST credentials to BGG and return (CookieJar, opener) on success.
 
-    BGG's modern login endpoint accepts JSON and responds with a session cookie.
-    Returns (None, None) if authentication fails.
+    BGG's login endpoint returns 200 on success, 400 on wrong credentials.
+    The opener carries the session cookies for subsequent authenticated requests.
+
+    NOTE: Do NOT add HTTPSHandler(context=...) to the opener — the custom SSL
+    context causes certificate failures on Windows.  The default opener uses the
+    OS certificate store which works correctly.
     """
     import json as _json
     import http.cookiejar
 
     jar = http.cookiejar.CookieJar()
+    # Plain opener — no custom SSL handler so Windows cert store is used
     opener = urllib.request.build_opener(
         urllib.request.HTTPCookieProcessor(jar),
-        urllib.request.HTTPSHandler(context=_ssl_ctx()),
     )
     payload = _json.dumps({
         "credentials": {"username": username, "password": password},
@@ -560,9 +564,14 @@ def _bgg_login(username: str, password: str):
         with opener.open(req, timeout=15) as resp:
             if resp.status == 200:
                 return jar, opener
-    except Exception:
-        pass
-    return None, None
+            # Any non-200 success (unlikely but safe)
+            return None, None
+    except urllib.error.HTTPError as e:
+        if e.code == 400:
+            raise ValueError("BGG login failed — username or password is incorrect.") from e
+        raise RuntimeError(f"BGG login HTTP {e.code}") from e
+    except Exception as exc:
+        raise RuntimeError(f"BGG login failed: {exc}") from exc
 
 
 def log_play_to_bgg(

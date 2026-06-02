@@ -2333,10 +2333,17 @@ class App(tk.Tk):
             pwd = password or _kr_get_password()
             if pwd:
                 self._post_status("Logging in to BGG…")
-                _jar, opener = bgg._bgg_login(username, pwd)
-                if opener is None:
-                    self.after(0, lambda: messagebox.showerror(
-                        "Login failed", "BGG login failed — check your password."))
+                try:
+                    _jar, opener = bgg._bgg_login(username, pwd)
+                except ValueError as e:
+                    # Wrong credentials — clear stored password so user is prompted again
+                    _kr_set_password("")
+                    err = str(e)
+                    self.after(0, lambda: messagebox.showerror("Login failed", err))
+                    return
+                except RuntimeError as e:
+                    err = str(e)
+                    self.after(0, lambda: messagebox.showerror("Login error", err))
                     return
                 self._post_status("Login successful. Fetching collection…")
 
