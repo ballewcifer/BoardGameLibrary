@@ -3,6 +3,7 @@ import { View, Text, FlatList, TouchableOpacity, StyleSheet, Modal, TextInput, A
 import { Ionicons } from '@expo/vector-icons';
 import * as db from '../../lib/db';
 import type { User } from '../../lib/types';
+import ScreenHeader from '../../components/ScreenHeader';
 
 const NAVY = '#1a237e';
 
@@ -33,10 +34,14 @@ export default function Members({ isActive = true }: { isActive?: boolean }) {
 
   return (
     <View style={s.container}>
-      <TouchableOpacity style={s.addBtn} onPress={() => setModalOpen(true)}>
-        <Ionicons name="person-add" size={18} color="#fff" />
-        <Text style={s.addBtnTxt}>Add Member</Text>
-      </TouchableOpacity>
+      <ScreenHeader
+        title="Members"
+        right={
+          <TouchableOpacity onPress={() => setModalOpen(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <Ionicons name="person-add-outline" size={24} color="#fff" />
+          </TouchableOpacity>
+        }
+      />
 
       <FlatList
         data={users}

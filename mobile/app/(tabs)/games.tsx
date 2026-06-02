@@ -228,19 +228,9 @@ export default function Games({ isActive = true }: { isActive?: boolean }) {
       {/* Header */}
       <View style={s.header}>
         <Text style={s.headerTitle}>Games</Text>
-        <View style={s.headerRight}>
-          {syncing
-            ? <ActivityIndicator color="#fff" style={{ marginRight: 4 }} />
-            : <TouchableOpacity onPress={onSync} style={s.headerBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                <Ionicons name="sync" size={22} color="#fff" />
-              </TouchableOpacity>}
-          <TouchableOpacity onPress={openAdd} style={s.headerBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <Ionicons name="add-circle-outline" size={24} color="#fff" />
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => setMenuOpen(true)} style={s.headerBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <Ionicons name="ellipsis-vertical" size={22} color="#fff" />
-          </TouchableOpacity>
-        </View>
+        <TouchableOpacity onPress={() => setMenuOpen(true)} style={s.headerBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+          <Ionicons name="ellipsis-vertical" size={22} color="#fff" />
+        </TouchableOpacity>
       </View>
 
       {syncMessage ? (
@@ -309,18 +299,22 @@ export default function Games({ isActive = true }: { isActive?: boolean }) {
       <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)}>
         <Pressable style={s.overlay} onPress={() => setMenuOpen(false)} />
         <View style={s.menu}>
+          {syncing
+            ? <View style={s.menuItem}>
+                <ActivityIndicator size="small" color={NAVY} />
+                <Text style={s.menuTxt}>{syncMessage || 'Syncing…'}</Text>
+              </View>
+            : <TouchableOpacity style={s.menuItem} onPress={() => { setMenuOpen(false); onSync(); }}>
+                <Ionicons name="sync-outline" size={20} color={NAVY} />
+                <Text style={s.menuTxt}>Sync Collection</Text>
+              </TouchableOpacity>}
+          <TouchableOpacity style={s.menuItem} onPress={() => { setMenuOpen(false); openAdd(); }}>
+            <Ionicons name="add-circle-outline" size={20} color={NAVY} />
+            <Text style={s.menuTxt}>Add Game</Text>
+          </TouchableOpacity>
           <TouchableOpacity style={s.menuItem} onPress={openSettings}>
             <Ionicons name="settings-outline" size={20} color={NAVY} />
             <Text style={s.menuTxt}>BGG Settings</Text>
-          </TouchableOpacity>
-          <View style={s.menuDivider} />
-          <TouchableOpacity style={s.menuItem} onPress={onExport}>
-            <Ionicons name="download-outline" size={20} color={NAVY} />
-            <Text style={s.menuTxt}>Export Backup</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={s.menuItem} onPress={onImport}>
-            <Ionicons name="cloud-upload-outline" size={20} color={NAVY} />
-            <Text style={s.menuTxt}>Import Backup</Text>
           </TouchableOpacity>
         </View>
       </Modal>
@@ -433,7 +427,7 @@ export default function Games({ isActive = true }: { isActive?: boolean }) {
 
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f4f6fa' },
-  header: { backgroundColor: NAVY, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 56, paddingBottom: 14 },
+  header: { backgroundColor: NAVY, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14 },
   headerTitle: { color: '#fff', fontSize: 20, fontWeight: '700' },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 2 },
   headerBtn: { padding: 7 },

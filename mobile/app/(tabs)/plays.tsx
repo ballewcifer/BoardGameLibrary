@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as db from '../../lib/db';
 import type { Play, Game, User } from '../../lib/types';
 import PlayerPicker from '../../components/PlayerPicker';
+import ScreenHeader from '../../components/ScreenHeader';
 
 const NAVY = '#1a237e';
 
@@ -60,10 +61,14 @@ export default function Plays({ isActive = true }: { isActive?: boolean }) {
 
   return (
     <View style={s.container}>
-      <TouchableOpacity style={s.addBtn} onPress={openLog}>
-        <Ionicons name="add-circle-outline" size={18} color="#fff" />
-        <Text style={s.addBtnTxt}>Log Play</Text>
-      </TouchableOpacity>
+      <ScreenHeader
+        title="Play Log"
+        right={
+          <TouchableOpacity onPress={openLog} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <Ionicons name="add-circle-outline" size={26} color="#fff" />
+          </TouchableOpacity>
+        }
+      />
 
       <Text style={s.count}>{plays.length} play{plays.length !== 1 ? 's' : ''}</Text>
 

@@ -2,6 +2,7 @@ import { useCallback, useState, useEffect } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, RefreshControl, Alert } from 'react-native';
 import * as db from '../../lib/db';
 import type { Loan } from '../../lib/types';
+import ScreenHeader from '../../components/ScreenHeader';
 
 const NAVY = '#1a237e';
 
@@ -35,6 +36,7 @@ export default function History({ isActive = true }: { isActive?: boolean }) {
 
   return (
     <View style={s.container}>
+      <ScreenHeader title="History" />
       {/* Filter tabs */}
       <View style={s.filterRow}>
         {(['all', 'active', 'returned'] as const).map(f => (
