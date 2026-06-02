@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useState, memo } from 'react';
 import {
   View, Text, TextInput, FlatList, TouchableOpacity, StyleSheet,
   Image, RefreshControl, Modal, Pressable, Alert, ActivityIndicator, ScrollView,
@@ -11,6 +11,13 @@ import { loadSettings, saveSettings } from '../../lib/settings';
 import type { Game, Loan } from '../../lib/types';
 
 const NAVY = '#1a237e';
+
+/** Stable image component with error → placeholder fallback */
+const GameThumb = memo(({ uri }: { uri: string }) => {
+  const [err, setErr] = useState(false);
+  if (err) return <Text style={{ fontSize: 36 }}>🎲</Text>;
+  return <Image source={{ uri }} style={{ width: '100%', height: '100%', resizeMode: 'cover' }} onError={() => setErr(true)} />;
+});
 
 export default function Games() {
   const [games, setGames]           = useState<Game[]>([]);
@@ -169,6 +176,12 @@ export default function Games() {
 
   const filtered = games.filter(g => !g.is_expansion);
 
+  // Normalise protocol-relative URLs stored before the https fix
+  const thumbUri = (url?: string | null) => {
+    if (!url) return null;
+    return url.startsWith('//') ? `https:${url}` : url;
+  };
+
   return (
     <View style={s.container}>
       {/* Header */}
@@ -221,13 +234,12 @@ export default function Games() {
         renderItem={({ item: g }) => {
           const loan = openLoans[g.bgg_id];
           const plays = playCounts[g.bgg_id] ?? 0;
+          const uri = thumbUri(g.thumbnail_url);
           return (
             <TouchableOpacity style={[s.card, loan && s.cardOut]} onPress={() => router.push(`/game/${g.bgg_id}`)}>
               {g.is_favorite ? <Text style={s.favBadge}>★</Text> : null}
               <View style={s.imgBox}>
-                {g.thumbnail_url
-                  ? <Image source={{ uri: g.thumbnail_url }} style={s.img} />
-                  : <Text style={s.imgPlaceholder}>🎲</Text>}
+                {uri ? <GameThumb uri={uri} /> : <Text style={s.imgPlaceholder}>🎲</Text>}
               </View>
               <View style={s.cardBody}>
                 <Text style={s.cardName} numberOfLines={2}>{g.name}</Text>

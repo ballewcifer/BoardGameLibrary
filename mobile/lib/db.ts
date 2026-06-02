@@ -14,6 +14,12 @@ export function nowIso(): string {
 
 // ── Schema ────────────────────────────────────────────────────────────────────
 
+export function fixProtocolRelativeUrls(): void {
+  const db = getDb();
+  db.runSync("UPDATE games SET thumbnail_url = 'https:' || thumbnail_url WHERE thumbnail_url LIKE '//%'");
+  db.runSync("UPDATE games SET image_url     = 'https:' || image_url     WHERE image_url     LIKE '//%'");
+}
+
 export function initDb(): void {
   const db = getDb();
   db.execSync(`

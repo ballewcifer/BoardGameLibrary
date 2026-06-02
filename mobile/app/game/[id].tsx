@@ -82,7 +82,10 @@ export default function GameDetail() {
         {/* Header */}
         <View style={s.headerRow}>
           {game.thumbnail_url
-            ? <Image source={{ uri: game.thumbnail_url }} style={s.thumb} />
+            ? <Image
+                source={{ uri: game.thumbnail_url.startsWith('//') ? `https:${game.thumbnail_url}` : game.thumbnail_url }}
+                style={s.thumb}
+              />
             : <View style={[s.thumb, s.thumbPlaceholder]}><Text style={{ fontSize: 32 }}>🎲</Text></View>}
           <View style={s.headerInfo}>
             <Text style={s.title}>{game.name}</Text>
