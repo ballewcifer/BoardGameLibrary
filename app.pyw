@@ -3202,11 +3202,20 @@ class App(tk.Tk):
                    command=lambda: [self.plays_game_var.set("All games"), self.refresh_plays()]
                    ).pack(side="left", padx=(4, 0))
 
+        self._lb_showing = False
+        self._lb_btn = ttk.Button(controls, text="🏆 Leaderboard",
+                                  command=self._toggle_leaderboard)
+        self._lb_btn.pack(side="left", padx=(6, 0))
+
         ttk.Button(controls, text="Delete selected",
                    command=self.on_delete_play).pack(side="right")
 
+        # ── Play log pane ────────────────────────────────────────────────
+        self._plays_pane = ttk.Frame(frame)
+        self._plays_pane.pack(fill="both", expand=True)
+
         cols = ("game", "date", "players", "winner", "duration", "scores", "notes")
-        self.plays_tree = ttk.Treeview(frame, columns=cols, show="headings")
+        self.plays_tree = ttk.Treeview(self._plays_pane, columns=cols, show="headings")
         self.plays_tree.heading("game",     text="Game")
         self.plays_tree.heading("date",     text="Date")
         self.plays_tree.heading("players",  text="Players")
@@ -3222,11 +3231,59 @@ class App(tk.Tk):
         self.plays_tree.column("scores",   width=150, anchor="center")
         self.plays_tree.column("notes",    width=150)
 
-        vsb = ttk.Scrollbar(frame, orient="vertical", command=self.plays_tree.yview)
+        vsb = ttk.Scrollbar(self._plays_pane, orient="vertical",
+                             command=self.plays_tree.yview)
         self.plays_tree.configure(yscrollcommand=vsb.set)
         self.plays_tree.pack(side="left", fill="both", expand=True)
         vsb.pack(side="left", fill="y")
         self.plays_tree.bind("<Double-1>", lambda *_: self.on_edit_play())
+
+        # ── Leaderboard pane (hidden until toggled) ──────────────────────
+        self._lb_pane = ttk.Frame(frame)
+        # Not packed yet — shown on toggle
+
+        lb_cols = ("rank", "player", "wins")
+        self._lb_tree = ttk.Treeview(self._lb_pane, columns=lb_cols,
+                                     show="headings", selectmode="none")
+        self._lb_tree.heading("rank",   text="Rank")
+        self._lb_tree.heading("player", text="Player")
+        self._lb_tree.heading("wins",   text="Wins")
+        self._lb_tree.column("rank",   width=60,  anchor="center")
+        self._lb_tree.column("player", width=260)
+        self._lb_tree.column("wins",   width=80,  anchor="center")
+        self._lb_tree.tag_configure("gold",   background="#fff8d6")
+        self._lb_tree.tag_configure("silver", background="#f2f2f2")
+        self._lb_tree.tag_configure("bronze", background="#fdf0e6")
+
+        lb_vsb = ttk.Scrollbar(self._lb_pane, orient="vertical",
+                                command=self._lb_tree.yview)
+        self._lb_tree.configure(yscrollcommand=lb_vsb.set)
+        self._lb_tree.pack(side="left", fill="both", expand=True)
+        lb_vsb.pack(side="left", fill="y")
+
+    def _toggle_leaderboard(self) -> None:
+        self._lb_showing = not self._lb_showing
+        if self._lb_showing:
+            self._plays_pane.pack_forget()
+            self._lb_pane.pack(fill="both", expand=True)
+            self._lb_btn.configure(text="📋 Play Log")
+            self._refresh_leaderboard()
+        else:
+            self._lb_pane.pack_forget()
+            self._plays_pane.pack(fill="both", expand=True)
+            self._lb_btn.configure(text="🏆 Leaderboard")
+
+    def _refresh_leaderboard(self) -> None:
+        self._lb_tree.delete(*self._lb_tree.get_children())
+        with db.connect() as c:
+            rows = db.top_winners(c, limit=9999)
+        medals = {0: "🥇", 1: "🥈", 2: "🥉"}
+        for i, r in enumerate(rows):
+            tag = "gold" if i == 0 else "silver" if i == 1 else "bronze" if i == 2 else ""
+            rank_txt = medals.get(i, str(i + 1))
+            self._lb_tree.insert("", "end",
+                                 values=(rank_txt, r["winner"], r["win_count"]),
+                                 tags=(tag,) if tag else ())
 
     def refresh_plays(self) -> None:
         self.plays_tree.delete(*self.plays_tree.get_children())
@@ -3262,6 +3319,10 @@ class App(tk.Tk):
                     r["notes"] or "",
                 ),
             )
+
+        # Keep leaderboard in sync if it's currently visible
+        if getattr(self, "_lb_showing", False):
+            self._refresh_leaderboard()
 
     def on_log_play(self, game, *, play=None) -> None:
         """Open the Log Play dialog.
