@@ -508,6 +508,7 @@ class App(tk.Tk):
     def _build_toolbar(self) -> None:
         bar = ttk.Frame(self, padding=(8, 6))
         bar.pack(side="top", fill="x")
+        self._games_toolbar = bar   # hidden when not on Games tab
 
         # ── search ────────────────────────────────────────────────────────────
         ttk.Label(bar, text="Search:").pack(side="left")
@@ -546,6 +547,7 @@ class App(tk.Tk):
         # --- filter bar (second row, light-blue background) ---
         fbar = ttk.Frame(self, style="Filter.TFrame", padding=(8, 4, 8, 6))
         fbar.pack(side="top", fill="x")
+        self._games_filterbar = fbar   # hidden when not on Games tab
 
         def flabel(text): return ttk.Label(fbar, text=text, style="Filter.TLabel")
         def fcheck(text, var, cmd): return ttk.Checkbutton(fbar, text=text, variable=var,
@@ -612,9 +614,6 @@ class App(tk.Tk):
         self.tag_filter_cb.pack(side="left", padx=(4, 12))
         self.tag_filter_cb.bind("<<ComboboxSelected>>", lambda *_: self.refresh_games())
 
-        self.expansions_var = tk.BooleanVar(value=False)
-        fcheck("Show expansions", self.expansions_var, self.refresh_games).pack(side="left", padx=(0, 12))
-
         ttk.Button(fbar, text="Reset filters", command=self._reset_filters).pack(side="left")
 
         # ── game count — left-aligned after Reset filters, not floating right ──
@@ -643,6 +642,18 @@ class App(tk.Tk):
         self._build_history_tab()
         self._build_plays_tab()
         self._build_dashboard_tab()
+
+        # Show/hide the toolbar & filter bar depending on which tab is active
+        self.nb.bind("<<NotebookTabChanged>>", self._on_tab_changed)
+
+    def _on_tab_changed(self, _event=None) -> None:
+        on_games = self.nb.select() == str(self.games_tab)
+        if on_games:
+            self._games_toolbar.pack(side="top", fill="x", before=self._games_filterbar)
+            self._games_filterbar.pack(side="top", fill="x", before=self.nb)
+        else:
+            self._games_toolbar.pack_forget()
+            self._games_filterbar.pack_forget()
 
     def _build_status_bar(self) -> None:
         self.status_var = tk.StringVar(value="Ready.")
@@ -878,8 +889,9 @@ class App(tk.Tk):
         self.games_tree.bind("<Button-3>",  self._on_table_right_click)
 
         # Row colour tags
-        self.games_tree.tag_configure("out",      background="#fff8e1")
-        self.games_tree.tag_configure("favorite", foreground=C_GOLD)
+        self.games_tree.tag_configure("out",       background="#fff8e1")
+        self.games_tree.tag_configure("favorite",  foreground=C_GOLD)
+        self.games_tree.tag_configure("expansion", background="#f3e5f5")
 
         # ── bulk-action toolbar (shown below tree, always present) ────────────
         bulk_bar = ttk.Frame(parent)
@@ -962,7 +974,6 @@ class App(tk.Tk):
         self.status_filter_var.set("Any")
         self.favorites_var.set(False)
         self.tag_filter_var.set("Any")
-        self.expansions_var.set(False)
         self.search_var.set("")
 
     def _apply_filters(self, games: list, open_loans: dict) -> list:
@@ -1084,10 +1095,6 @@ class App(tk.Tk):
                 if tag_val not in game_tags:
                     continue
 
-            # --- expansions filter (hide unless toggled on) ---
-            if not self.expansions_var.get() and g["is_expansion"]:
-                continue
-
             out.append(g)
         return out
 
@@ -1136,7 +1143,6 @@ class App(tk.Tk):
                                       self.tag_filter_var.get()])
             or self.exact_players_var.get()
             or self.favorites_var.get()
-            or self.expansions_var.get()
             or bool(self.search_var.get())
         )
 
@@ -1325,14 +1331,17 @@ class App(tk.Tk):
                 tags.append("out")
             if g["is_favorite"]:
                 tags.append("favorite")
+            if g["is_expansion"]:
+                tags.append("expansion")
 
+            exp_prefix = "↳ " if g["is_expansion"] else ""
             self.games_tree.insert(
                 "", "end", iid=str(bgg_id),
                 tags=tags,
                 values=(
                     "★" if g["is_favorite"] else "",
                     "\U0001f4e6" if g["has_insert"] else "",
-                    g["name"],
+                    f"{exp_prefix}{g['name']}",
                     g["year"] or "—",
                     fmt_players(g["min_players"], g["max_players"]),
                     fmt_time(g["min_playtime"], g["max_playtime"], g["playing_time"]),
