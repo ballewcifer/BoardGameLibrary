@@ -2276,40 +2276,60 @@ class App(tk.Tk):
         threading.Thread(target=_bg, daemon=True).start()
 
     def on_import_from_bgg(self) -> None:
-        """Show a dialog asking for a BGG username, then import the collection."""
-        username = self.settings.get("bgg_username", "").strip()
+        """Sync collection from BGG.
 
+        If username and password are already saved, syncs immediately without
+        a dialog.  If either is missing, shows the credentials dialog first.
+        To change saved credentials, use File → Settings.
+        """
+        username = self.settings.get("bgg_username", "").strip()
+        password = _kr_get_password()
+        tok      = bgg.BGG_APP_TOKEN or self.settings.get("bgg_token", "").strip()
+
+        # Both credentials saved — sync immediately, no dialog needed
+        if username and password:
+            self.status(f"Syncing with BGG for {username}…")
+            threading.Thread(
+                target=self._import_from_username_bg,
+                args=(username, tok, password),
+                daemon=True,
+            ).start()
+            return
+
+        # Missing credentials — show the one-time setup dialog
         dialog = tk.Toplevel(self)
-        dialog.title("Import from BGG")
+        dialog.title("BGG Sync — First-time Setup")
         dialog.resizable(False, False)
         dialog.transient(self)
         dialog.configure(bg=C_BG)
         dialog.lift()
         dialog.focus_force()
 
-        ttk.Label(dialog, text="BGG username:", padding=(16, 14, 16, 2)).pack(anchor="w")
+        tk.Label(
+            dialog,
+            text="Enter your BGG credentials once.\n"
+                 "They will be saved securely and you won't be asked again.",
+            bg=C_BG, fg="#333", font=("Segoe UI", 9),
+            padx=16, justify="left",
+        ).pack(anchor="w", pady=(14, 6))
+
+        ttk.Label(dialog, text="BGG username:", padding=(16, 4, 16, 2)).pack(anchor="w")
         uname_var = tk.StringVar(value=username)
         entry = ttk.Entry(dialog, textvariable=uname_var, width=34)
         entry.pack(padx=16, pady=(0, 8))
         entry.focus_set()
-        entry.select_range(0, "end")
 
-        ttk.Label(dialog, text="BGG password (for private collections):",
-                  padding=(16, 6, 16, 2)).pack(anchor="w")
-        pwd_var = tk.StringVar(value=_kr_get_password())   # from OS keychain
-        pwd_entry = ttk.Entry(dialog, textvariable=pwd_var, width=34, show="●")
-        pwd_entry.pack(padx=16, pady=(0, 2))
-
+        ttk.Label(dialog, text="BGG password:", padding=(16, 4, 16, 2)).pack(anchor="w")
+        pwd_var = tk.StringVar(value=password)
+        ttk.Entry(dialog, textvariable=pwd_var, width=34, show="●").pack(padx=16, pady=(0, 2))
         tk.Label(
             dialog,
-            text="Password lets the app log in like BG Stats does — no need to\n"
-                 "make your collection public. Leave blank if your collection is public.",
-            bg=C_BG, fg="#555", font=("Segoe UI", 8),
-            padx=16, justify="left",
-        ).pack(anchor="w", pady=(0, 6))
+            text="Needed for private collections (same approach as BG Stats).",
+            bg=C_BG, fg="#888", font=("Segoe UI", 8), padx=16,
+        ).pack(anchor="w", pady=(0, 8))
 
         btn_frame = ttk.Frame(dialog)
-        btn_frame.pack(padx=16, pady=(8, 14), fill="x")
+        btn_frame.pack(padx=16, pady=(4, 14), fill="x")
 
         def do_import() -> None:
             uname = uname_var.get().strip()
@@ -2317,16 +2337,14 @@ class App(tk.Tk):
             if not uname:
                 messagebox.showerror("Username required", "Enter your BGG username.", parent=dialog)
                 return
-            tok = bgg.BGG_APP_TOKEN or self.settings.get("bgg_token", "").strip()
             self.settings["bgg_username"] = uname
-            self.settings.pop("bgg_password", None)  # ensure never in JSON
+            self.settings.pop("bgg_password", None)
             config.save(self.settings)
-            # Store password in OS keychain (never in plaintext JSON)
             _kr_set_password(pwd)
             if hasattr(self, "username_var"):
                 self.username_var.set(uname)
             dialog.destroy()
-            self.status(f"Importing collection for {uname}…")
+            self.status(f"Syncing with BGG for {uname}…")
             threading.Thread(
                 target=self._import_from_username_bg,
                 args=(uname, tok, pwd or None),
@@ -2334,7 +2352,7 @@ class App(tk.Tk):
             ).start()
 
         ttk.Button(btn_frame, text="Cancel", command=dialog.destroy).pack(side="left")
-        ttk.Button(btn_frame, text="Import", command=do_import).pack(side="right")
+        ttk.Button(btn_frame, text="Save & Sync", command=do_import).pack(side="right")
         dialog.bind("<Return>", lambda *_: do_import())
         dialog.grab_set()
 
