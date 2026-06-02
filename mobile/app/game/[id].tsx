@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react';
 import { View, Text, ScrollView, Image, TouchableOpacity, StyleSheet, Alert, Modal, TextInput, Pressable } from 'react-native';
 import { useLocalSearchParams, router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import * as db from '../../lib/db';
 import type { Game, Loan, User } from '../../lib/types';
 import PlayerPicker from '../../components/PlayerPicker';
@@ -78,6 +79,25 @@ export default function GameDetail() {
     setPlayers(''); setWinner(''); setDuration(''); setPlayScores(''); setPlayNotes('');
   };
 
+  const pickImage = async () => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert('Permission needed', 'Allow photo library access to set a custom image.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.85,
+    });
+    if (!result.canceled && result.assets[0]) {
+      const uri = result.assets[0].uri;
+      db.getDb().runSync('UPDATE games SET image_path = ? WHERE bgg_id = ?', [uri, bggId]);
+      load();
+    }
+  };
+
   const openEditGame = () => {
     if (!game) return;
     setEditComment(game.my_comment ?? '');
@@ -109,14 +129,19 @@ export default function GameDetail() {
       <ScrollView contentContainerStyle={s.scroll}>
         {/* Header */}
         <View style={s.headerRow}>
-          {game.thumbnail_url
-            ? <Image
-                source={{ uri: game.thumbnail_url.startsWith('//') ? `https:${game.thumbnail_url}` : game.thumbnail_url }}
-                style={s.thumb}
-                accessibilityLabel={`${game.name} cover art`}
-                accessibilityRole="image"
-              />
-            : <View style={[s.thumb, s.thumbPlaceholder]}><Text style={{ fontSize: 32 }}>🎲</Text></View>}
+          <TouchableOpacity onPress={pickImage} style={s.thumbWrap}
+            accessibilityRole="button" accessibilityLabel="Change cover image">
+            {game.image_path || game.thumbnail_url
+              ? <Image
+                  source={{ uri: game.image_path
+                    ?? (game.thumbnail_url?.startsWith('//') ? `https:${game.thumbnail_url}` : game.thumbnail_url!) }}
+                  style={s.thumb}
+                />
+              : <View style={[s.thumb, s.thumbPlaceholder]}><Text style={{ fontSize: 32 }}>🎲</Text></View>}
+            <View style={s.camOverlay}>
+              <Ionicons name="camera-outline" size={18} color="#fff" />
+            </View>
+          </TouchableOpacity>
           <View style={s.headerInfo}>
             <Text style={s.title}>{game.name}</Text>
             <Text style={s.meta}>
@@ -308,8 +333,10 @@ const s = StyleSheet.create({
   backTxt: { color: NAVY, fontSize: 16 },
   scroll: { padding: 14, gap: 12 },
   headerRow: { flexDirection: 'row', gap: 14, backgroundColor: '#fff', borderRadius: 12, padding: 14 },
+  thumbWrap: { position: 'relative', width: 90, height: 90 },
   thumb: { width: 90, height: 90, borderRadius: 8, resizeMode: 'cover' },
   thumbPlaceholder: { backgroundColor: '#e8eaf6', alignItems: 'center', justifyContent: 'center' },
+  camOverlay: { position: 'absolute', bottom: 4, right: 4, backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 12, padding: 3 },
   headerInfo: { flex: 1 },
   title: { fontSize: 16, fontWeight: '700', marginBottom: 4, lineHeight: 22 },
   meta: { fontSize: 12, color: '#6b7280', marginTop: 2 },

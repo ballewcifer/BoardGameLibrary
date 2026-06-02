@@ -1563,17 +1563,28 @@ class App(tk.Tk):
 
         # --- image canvas (fixed size, centred in card) ---
         _CW, _CH = THUMB_SIZE[0], THUMB_SIZE[1]  # 140 × 140
+        img_frame = tk.Frame(card, bg=C_BG)
+        img_frame.pack(anchor="center")
         img_canvas = tk.Canvas(
-            card, width=_CW, height=_CH,
+            img_frame, width=_CW, height=_CH,
             bg=C_BG, highlightthickness=0, bd=0,
+            cursor="hand2",
         )
-        img_canvas.pack(anchor="center")  # centred in card, not stretched
+        img_canvas.pack()
 
         _img_id = img_canvas.create_image(_CW // 2, _CH // 2, anchor="center")
         # Always start with a placeholder; the lazy loader will fill in the real image
         ph = self._get_placeholder()
         img_canvas.itemconfigure(_img_id, image=ph)
         img_canvas._card_img_ref = ph
+
+        # Camera icon overlay — click the image to set a custom one
+        _cam = img_canvas.create_text(
+            _CW - 6, _CH - 6, anchor="se",
+            text="📷", font=("Segoe UI", 12),
+        )
+        img_canvas.tag_bind(_cam, "<Button-1>", lambda e, g=game: self.on_set_image(g))
+        img_canvas.bind("<Button-1>", lambda e, g=game: self.on_set_image(g))
 
         # --- name + year ---
         ttk.Label(
@@ -1662,7 +1673,7 @@ class App(tk.Tk):
         # Right-click anywhere on the card for the full action menu (incl. Delete)
         def _card_right_click(event, g=game):
             self._show_card_context_menu(event, g)
-        for widget in (card, header, img_canvas, btn_row, btn_row2):
+        for widget in (card, header, img_frame, img_canvas, btn_row, btn_row2):
             widget.bind("<Button-3>", _card_right_click)
 
         # Ensure mouse-wheel scroll works when the cursor is over any part of the card.
