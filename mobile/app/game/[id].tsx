@@ -29,7 +29,14 @@ export default function GameDetail() {
   const [players, setPlayers]         = useState('');
   const [winner, setWinner]           = useState('');
   const [duration, setDuration]       = useState('');
+  const [playScores, setPlayScores]   = useState('');
   const [playNotes, setPlayNotes]     = useState('');
+
+  // Edit game personal data
+  const [editOpen, setEditOpen]     = useState(false);
+  const [editComment, setEditComment] = useState('');
+  const [editTags, setEditTags]       = useState('');
+  const [editRating, setEditRating]   = useState('');
 
   const load = useCallback(() => {
     setGame(db.getGame(bggId));
@@ -63,9 +70,29 @@ export default function GameDetail() {
 
   const savePlay = () => {
     if (!playDate) { Alert.alert('Date required'); return; }
-    db.logPlay(bggId, playDate, players, winner, playNotes, duration ? parseInt(duration, 10) : undefined);
+    db.logPlay(bggId, playDate, players, winner, playNotes,
+      duration ? parseInt(duration, 10) : undefined,
+      playScores.trim() || undefined);
     setLogPlayOpen(false);
-    setPlayers(''); setWinner(''); setDuration(''); setPlayNotes('');
+    setPlayers(''); setWinner(''); setDuration(''); setPlayScores(''); setPlayNotes('');
+  };
+
+  const openEditGame = () => {
+    if (!game) return;
+    setEditComment(game.my_comment ?? '');
+    setEditTags(game.tags ?? '');
+    setEditRating(game.my_rating != null ? String(game.my_rating) : '');
+    setEditOpen(true);
+  };
+
+  const saveGameEdit = () => {
+    const rating = editRating.trim() ? parseFloat(editRating.trim()) : null;
+    db.getDb().runSync(
+      'UPDATE games SET my_comment=?, tags=?, my_rating=? WHERE bgg_id=?',
+      [editComment.trim() || null, editTags.trim() || null, rating, bggId]
+    );
+    setEditOpen(false);
+    load();
   };
 
   const selUser = users.find(u => u.id === selUserId);
@@ -133,6 +160,10 @@ export default function GameDetail() {
             <Text style={[s.actionTxt, { color: game.is_favorite ? '#5d4037' : NAVY }]}>
               {game.is_favorite ? 'Unfavorite' : 'Favorite'}
             </Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[s.actionBtn, { backgroundColor: '#e8eaf6' }]} onPress={openEditGame}>
+            <Ionicons name="pencil-outline" size={18} color={NAVY} />
+            <Text style={[s.actionTxt, { color: NAVY }]}>Edit</Text>
           </TouchableOpacity>
         </View>
 
@@ -222,11 +253,43 @@ export default function GameDetail() {
             <TextInput style={s.input} value={winner} onChangeText={setWinner} placeholder="Alice" />
             <Text style={s.label}>Duration (minutes)</Text>
             <TextInput style={s.input} value={duration} onChangeText={setDuration} keyboardType="number-pad" placeholder="90" />
+            <Text style={s.label}>Scores</Text>
+            <TextInput style={s.input} value={playScores} onChangeText={setPlayScores} placeholder='e.g. "Alice: 45, Bob: 37"' />
             <Text style={s.label}>Notes</Text>
             <TextInput style={s.input} value={playNotes} onChangeText={setPlayNotes} />
             <TouchableOpacity style={s.sheetBtn} onPress={savePlay}>
               <Text style={s.sheetBtnTxt}>Save Play</Text>
             </TouchableOpacity>
+          </ScrollView>
+        </View>
+      </Modal>
+
+      {/* Edit Game personal data modal */}
+      <Modal visible={editOpen} transparent animationType="slide" onRequestClose={() => setEditOpen(false)}>
+        <Pressable style={s.overlay} onPress={() => setEditOpen(false)} />
+        <View style={s.sheet}>
+          <Text style={s.sheetTitle}>Edit — {game.name}</Text>
+          <ScrollView>
+            <Text style={s.label}>My Rating (1–10)</Text>
+            <TextInput style={s.input} value={editRating} onChangeText={setEditRating} keyboardType="decimal-pad" placeholder="e.g. 8.5" />
+            <Text style={s.label}>Tags (comma-separated)</Text>
+            <TextInput style={s.input} value={editTags} onChangeText={setEditTags} placeholder="Family, Strategy, Filler" />
+            <Text style={s.label}>My Note / Comment</Text>
+            <TextInput
+              style={[s.input, { height: 90, textAlignVertical: 'top' }]}
+              value={editComment}
+              onChangeText={setEditComment}
+              placeholder="Your thoughts on this game…"
+              multiline
+            />
+            <View style={s.btnRow}>
+              <TouchableOpacity style={s.cancelBtn} onPress={() => setEditOpen(false)}>
+                <Text style={s.cancelBtnTxt}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={s.saveBtn} onPress={saveGameEdit}>
+                <Text style={s.saveBtnTxt}>Save</Text>
+              </TouchableOpacity>
+            </View>
           </ScrollView>
         </View>
       </Modal>
@@ -277,4 +340,9 @@ const s = StyleSheet.create({
   sheetBtnTxt: { color: '#fff', fontWeight: '700', fontSize: 15 },
   gameItem: { paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#f0f0f0', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   gameItemTxt: { fontSize: 15 },
+  btnRow:    { flexDirection: 'row', gap: 10, marginTop: 8, marginBottom: 8 },
+  cancelBtn: { flex: 1, backgroundColor: '#f3f4f6', borderRadius: 8, padding: 14, alignItems: 'center' },
+  cancelBtnTxt: { color: '#6b7280', fontWeight: '600' },
+  saveBtn:   { flex: 1, backgroundColor: NAVY, borderRadius: 8, padding: 14, alignItems: 'center' },
+  saveBtnTxt: { color: '#fff', fontWeight: '700' },
 });

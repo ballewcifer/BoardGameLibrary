@@ -25,6 +25,8 @@ export default function Games({ isActive = true }: { isActive?: boolean }) {
   const [openLoans, setOpenLoans]   = useState<Record<number, Loan>>({});
   const [playCounts, setPlayCounts] = useState<Record<number, number>>({});
   const [search, setSearch]         = useState('');
+  const [statusFilter, setStatus]   = useState<'all' | 'available' | 'out'>('all');
+  const [favOnly, setFavOnly]       = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
   // Sync
@@ -215,7 +217,12 @@ export default function Games({ isActive = true }: { isActive?: boolean }) {
     setSettingsOpen(false);
   };
 
-  const filtered = games;
+  const filtered = games.filter(g => {
+    if (favOnly && !g.is_favorite) return false;
+    if (statusFilter === 'available' && openLoans[g.bgg_id]) return false;
+    if (statusFilter === 'out' && !openLoans[g.bgg_id]) return false;
+    return true;
+  });
 
   // Normalise protocol-relative URLs stored before the https fix
   const thumbUri = (url?: string | null) => {
@@ -254,6 +261,20 @@ export default function Games({ isActive = true }: { isActive?: boolean }) {
             <Ionicons name="close-circle" size={16} color="#9e9e9e" />
           </TouchableOpacity>
         ) : null}
+      </View>
+
+      {/* Quick filters */}
+      <View style={s.filterRow}>
+        {(['all', 'available', 'out'] as const).map(f => (
+          <TouchableOpacity key={f} style={[s.filterChip, statusFilter === f && s.filterChipActive]} onPress={() => setStatus(f)}>
+            <Text style={[s.filterChipTxt, statusFilter === f && s.filterChipTxtActive]}>
+              {f === 'all' ? 'All' : f === 'available' ? 'Available' : 'Out'}
+            </Text>
+          </TouchableOpacity>
+        ))}
+        <TouchableOpacity style={[s.filterChip, favOnly && s.filterChipFav]} onPress={() => setFavOnly(v => !v)}>
+          <Text style={[s.filterChipTxt, favOnly && s.filterChipTxtActive]}>★ Favs</Text>
+        </TouchableOpacity>
       </View>
 
       <Text style={s.count}>{filtered.length} game{filtered.length !== 1 ? 's' : ''}</Text>
@@ -431,6 +452,12 @@ const s = StyleSheet.create({
   headerTitle: { color: '#fff', fontSize: 20, fontWeight: '700' },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 2 },
   headerBtn: { padding: 7 },
+  filterRow: { flexDirection: 'row', paddingHorizontal: 10, paddingVertical: 6, gap: 6 },
+  filterChip: { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20, backgroundColor: '#e8eaf6', borderWidth: 1, borderColor: 'transparent' },
+  filterChipActive: { backgroundColor: NAVY },
+  filterChipFav: { backgroundColor: '#f0c674' },
+  filterChipTxt: { fontSize: 12, fontWeight: '600', color: NAVY },
+  filterChipTxtActive: { color: '#fff' },
   syncBanner: { backgroundColor: '#e3f2fd', padding: 8, alignItems: 'center' },
   syncBannerOk: { backgroundColor: '#e8f5e9' },
   syncBannerTxt: { color: '#0d47a1', fontSize: 13 },

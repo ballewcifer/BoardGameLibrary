@@ -4,7 +4,36 @@
 
 <div class="page-header">
   <h1 class="page-title">Play Log</h1>
-  <button class="btn btn-primary btn-sm" onclick="openModal('modal-log-play')">+ Log Play</button>
+  <div style="display:flex;gap:6px">
+    <button class="btn btn-secondary btn-sm" onclick="toggleLeaderboard()">🏆 Leaderboard</button>
+    <button class="btn btn-primary btn-sm" onclick="openModal('modal-log-play')">+ Log Play</button>
+  </div>
+</div>
+
+<!-- Leaderboard (hidden by default) -->
+<div id="leaderboard-panel" style="display:none" class="card mt">
+  <h2 class="section-title">🏆 Win Leaderboard</h2>
+  {% set all_winners = [] %}
+  {% for p in rows %}{% if p.winner and p.winner not in all_winners %}{% set _ = all_winners.append(p.winner) %}{% endif %}{% endfor %}
+  {% set win_counts = {} %}
+  {% for p in rows %}{% if p.winner %}{% set _ = win_counts.update({p.winner: (win_counts.get(p.winner, 0) + 1)}) %}{% endif %}{% endfor %}
+  {% set sorted_winners = win_counts.items()|sort(attribute='1', reverse=true) %}
+  {% if sorted_winners %}
+  <table class="data-table">
+    <thead><tr><th>Rank</th><th>Player</th><th class="center">Wins</th></tr></thead>
+    <tbody>
+      {% for name, count in sorted_winners %}
+      <tr>
+        <td>{% if loop.index == 1 %}🥇{% elif loop.index == 2 %}🥈{% elif loop.index == 3 %}🥉{% else %}{{ loop.index }}{% endif %}</td>
+        <td>{{ name }}</td>
+        <td class="center"><strong>{{ count }}</strong></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No wins recorded yet.</p>
+  {% endif %}
 </div>
 
 <!-- Game filter -->
@@ -155,6 +184,11 @@ function openEditPlay(play, games) {
   document.getElementById('ep-scores').value   = play.scores || '';
   document.getElementById('ep-notes').value    = play.notes || '';
   openModal('modal-edit-play');
+}
+
+function toggleLeaderboard() {
+  const p = document.getElementById('leaderboard-panel');
+  p.style.display = p.style.display === 'none' ? 'block' : 'none';
 }
 </script>
 {% endblock %}

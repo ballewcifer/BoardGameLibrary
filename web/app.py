@@ -577,5 +577,5 @@ if __name__ == "__main__":
     local_ip = socket.gethostbyname(socket.gethostname())
     print(f"\n  Board Game Library Web App")
     print(f"  Local:   http://localhost:{port}")
-    print(f"  Network: http://{local_ip}:{port}  ← open this on your phone\n")
+    print(f"  Network: http://{local_ip}:{port}  <-- open this on your phone\n")
     app.run(host=host, port=port, debug=False)
