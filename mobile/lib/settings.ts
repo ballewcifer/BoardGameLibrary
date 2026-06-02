@@ -12,7 +12,8 @@ export interface Settings {
 
 const DEFAULTS: Settings = {
   bgg_username: '',
-  bgg_token: 'YOUR_BGG_API_TOKEN_HERE',
+  // Token injected from .env at build time — not stored in source
+  bgg_token: process.env.EXPO_PUBLIC_BGG_TOKEN ?? '',
   bgg_password: '',
 };
 

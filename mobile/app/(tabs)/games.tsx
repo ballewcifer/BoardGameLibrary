@@ -187,7 +187,7 @@ export default function Games({ isActive = true }: { isActive?: boolean }) {
     setSettingsOpen(false);
   };
 
-  const filtered = games.filter(g => !g.is_expansion);
+  const filtered = games;
 
   // Normalise protocol-relative URLs stored before the https fix
   const thumbUri = (url?: string | null) => {
