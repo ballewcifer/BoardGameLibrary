@@ -784,7 +784,10 @@ class App(tk.Tk):
             canvas.itemconfigure(_win, width=e.width)
         canvas.bind("<Configure>", _on_resize)
         inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.bind_all("<MouseWheel>", lambda e: canvas.yview_scroll(-1 * (e.delta // 120), "units"))
+        # Only scroll the dashboard canvas when the cursor is actually over it
+        canvas.bind("<Enter>", lambda e: canvas.bind_all(
+            "<MouseWheel>", lambda ev: canvas.yview_scroll(-1 * (ev.delta // 120), "units")))
+        canvas.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
 
         self._dashboard_canvas = canvas
         self._dashboard_inner  = inner
@@ -795,6 +798,7 @@ class App(tk.Tk):
         inner = self._dashboard_inner
         for w in inner.winfo_children():
             w.destroy()
+        self._dashboard_canvas.yview_moveto(0)   # always start at the top
 
         with db.connect() as c:
             summary      = db.stats_summary(c)
