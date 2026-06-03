@@ -11,7 +11,7 @@ import tkinter as tk
 import traceback
 from datetime import datetime
 from pathlib import Path
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 try:
     from tkcalendar import DateEntry as _DateEntry
     _HAVE_CAL = True
@@ -3603,12 +3603,79 @@ class App(tk.Tk):
         game_id_map = {g["name"]: g["bgg_id"] for g in all_games}
         if editing:
             initial = next((g["name"] for g in all_games if g["bgg_id"] == play["game_id"]),
-                           game_names[0])
+                           game_names[0] if game_names else "")
         else:
-            initial = game["name"] if game else game_names[0]
+            initial = game["name"] if game else (game_names[0] if game_names else "")
         game_var = tk.StringVar(value=initial)
-        ttk.Combobox(dialog, textvariable=game_var, values=game_names,
-                     state="readonly", width=34).grid(row=0, column=1, **pad)
+        game_cb = ttk.Combobox(dialog, textvariable=game_var, values=game_names,
+                                state="readonly", width=28)
+        game_cb.grid(row=0, column=1, sticky="w", padx=(12, 4), pady=4)
+
+        def _find_on_bgg() -> None:
+            """Search BGG for the typed/selected name, add result to DB, update list."""
+            q = game_var.get().strip() or ""
+            q = tk.simpledialog.askstring(
+                "Search BGG", "Game name to search on BGG:", initialvalue=q, parent=dialog)
+            if not q:
+                return
+            tok = bgg.BGG_APP_TOKEN or self.settings.get("bgg_token", "")
+            try:
+                results = bgg.search_games(q)
+            except Exception as exc:
+                messagebox.showerror("BGG search failed", str(exc), parent=dialog)
+                return
+            if not results:
+                messagebox.showinfo("No results", f"No BGG results for '{q}'.", parent=dialog)
+                return
+            # Let user pick from results
+            names = [f"{r[1]} ({r[2]})" if r[2] else r[1] for r in results[:15]]
+            picked = tk.simpledialog.askinteger(
+                "Pick a result",
+                "\n".join(f"{i+1}. {n}" for i, n in enumerate(names)) +
+                "\n\nEnter number:",
+                minvalue=1, maxvalue=len(names), parent=dialog,
+            )
+            if not picked:
+                return
+            bgg_id, name, year = results[picked - 1]
+            # Fetch full details and add with own=0 (play-log only)
+            try:
+                detail_list = bgg.fetch_things([bgg_id], token=tok)
+                d = detail_list[0] if detail_list else None
+            except Exception:
+                d = None
+            with db.connect() as c:
+                db.upsert_game(c, {
+                    "bgg_id": bgg_id, "name": name, "year": year,
+                    "image_url": d.image_url if d else None,
+                    "thumbnail_url": d.thumbnail_url if d else None,
+                    "image_path": None,
+                    "min_players": d.min_players if d else None,
+                    "max_players": d.max_players if d else None,
+                    "min_playtime": d.min_playtime if d else None,
+                    "max_playtime": d.max_playtime if d else None,
+                    "playing_time": d.playing_time if d else None,
+                    "min_age": d.min_age if d else None,
+                    "weight": d.weight if d else None,
+                    "avg_rating": d.avg_rating if d else None,
+                    "my_rating": None, "description": d.description if d else None,
+                    "categories": ", ".join(d.categories) if d and d.categories else None,
+                    "mechanics":  ", ".join(d.mechanics)  if d and d.mechanics  else None,
+                    "designers":  ", ".join(d.designers)  if d and d.designers  else None,
+                    "publishers": ", ".join(d.publishers) if d and d.publishers else None,
+                    "best_players": d.best_players if d else None,
+                    "my_comment": None, "own": 0, "last_synced": db.now_iso(),
+                    "is_expansion": int(d.is_expansion) if d else 0,
+                })
+            # Refresh game list in combobox
+            game_id_map[name] = bgg_id
+            if name not in game_names:
+                game_names.append(name)
+                game_cb["values"] = sorted(game_names)
+            game_var.set(name)
+
+        ttk.Button(dialog, text="Find on BGG…", command=_find_on_bgg).grid(
+            row=0, column=2, padx=(0, 12), pady=4, sticky="w")
 
         ttk.Label(dialog, text="Date played:", font=("Segoe UI", 9, "bold")).grid(row=1, column=0, **pad)
         date_val = play["played_at"][:10] if editing else datetime.now().strftime("%Y-%m-%d")

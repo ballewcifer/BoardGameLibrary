@@ -1,7 +1,9 @@
 import { useCallback, useState, useEffect } from 'react';
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, Alert, Modal, TextInput, Pressable, RefreshControl, ScrollView } from 'react-native';
+import { View, Text, FlatList, TouchableOpacity, StyleSheet, Alert, Modal, TextInput, Pressable, RefreshControl, ScrollView, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as db from '../../lib/db';
+import * as bgg from '../../lib/bgg';
+import { loadSettings } from '../../lib/settings';
 import type { Play, Game, User } from '../../lib/types';
 import PlayerPicker from '../../components/PlayerPicker';
 import ScreenHeader from '../../components/ScreenHeader';
@@ -27,8 +29,10 @@ export default function Plays({ isActive = true }: { isActive?: boolean }) {
   const [duration, setDuration] = useState('');
   const [scores, setScores]     = useState('');
   const [notes, setNotes]       = useState('');
-  const [pickingGame, setPickingGame] = useState(false);
-  const [gameSearch, setGameSearch]   = useState('');
+  const [pickingGame, setPickingGame]       = useState(false);
+  const [gameSearch, setGameSearch]         = useState('');
+  const [bggResults, setBggResults]         = useState<bgg.SearchResult[]>([]);
+  const [bggSearching, setBggSearching]     = useState(false);
 
   const load = useCallback(() => {
     setPlays(db.listPlays());
@@ -83,6 +87,47 @@ export default function Plays({ isActive = true }: { isActive?: boolean }) {
   const filteredGames = games.filter(g =>
     g.name.toLowerCase().includes(gameSearch.toLowerCase())
   );
+
+  const searchBGG = async () => {
+    if (!gameSearch.trim()) return;
+    setBggSearching(true);
+    setBggResults([]);
+    try {
+      const results = await bgg.searchGames(gameSearch.trim());
+      setBggResults(results.slice(0, 20));
+    } catch (e: any) {
+      Alert.alert('BGG search failed', e.message ?? String(e));
+    } finally {
+      setBggSearching(false);
+    }
+  };
+
+  const addFromBGG = async (result: bgg.SearchResult) => {
+    try {
+      const settings = await loadSettings();
+      const details = await bgg.fetchGameDetails(result.bgg_id, settings.bgg_token || undefined);
+      if (!details) { Alert.alert('Game not found'); return; }
+      db.upsertGame({
+        bgg_id: details.bgg_id, name: details.name, year: details.year,
+        image_url: details.image_url, thumbnail_url: details.thumbnail_url,
+        min_players: details.min_players, max_players: details.max_players,
+        playing_time: details.playing_time, weight: details.weight,
+        avg_rating: details.avg_rating, description: details.description,
+        categories: details.categories?.join(', '), mechanics: details.mechanics?.join(', '),
+        designers: details.designers?.join(', '), publishers: details.publishers?.join(', '),
+        own: 0,   // not in collection — play-log only
+        is_expansion: details.is_expansion ? 1 : 0,
+      });
+      const newGame = db.getGame(details.bgg_id);
+      if (newGame) setSelGame(newGame);
+      load();
+      setPickingGame(false);
+      setGameSearch('');
+      setBggResults([]);
+    } catch (e: any) {
+      Alert.alert('Error', e.message ?? String(e));
+    }
+  };
 
   return (
     <View style={s.container}>
@@ -214,22 +259,55 @@ export default function Plays({ isActive = true }: { isActive?: boolean }) {
       </Modal>
 
       {/* Game picker modal */}
-      <Modal visible={pickingGame} transparent animationType="slide" onRequestClose={() => setPickingGame(false)} accessibilityViewIsModal={true}>
-        <Pressable style={s.overlay} onPress={() => setPickingGame(false)} />
-        <View style={[s.sheet, { maxHeight: '80%' }]}>
+      <Modal visible={pickingGame} transparent animationType="slide" onRequestClose={() => { setPickingGame(false); setBggResults([]); setGameSearch(''); }} accessibilityViewIsModal={true}>
+        <Pressable style={s.overlay} onPress={() => { setPickingGame(false); setBggResults([]); setGameSearch(''); }} />
+        <View style={[s.sheet, { maxHeight: '85%' }]}>
           <Text style={s.sheetTitle}>Select Game</Text>
-          <TextInput style={[s.input, { marginBottom: 8 }]} value={gameSearch} onChangeText={setGameSearch} placeholder="Search…" autoFocus />
-          <FlatList
-            data={filteredGames}
-            keyExtractor={g => String(g.bgg_id)}
-            renderItem={({ item: g }) => (
-              <TouchableOpacity style={s.gameItem} onPress={() => { setSelGame(g); setPickingGame(false); setGameSearch(''); }}>
-                <Text style={s.gameItemTxt}>{g.name}</Text>
-                {g.year ? <Text style={s.gameItemYear}>{g.year}</Text> : null}
-              </TouchableOpacity>
-            )}
-            ItemSeparatorComponent={() => <View style={{ height: 1, backgroundColor: '#f0f0f0' }} />}
-          />
+          <View style={s.pickerSearchRow}>
+            <TextInput style={[s.input, { flex: 1, marginBottom: 0 }]} value={gameSearch} onChangeText={v => { setGameSearch(v); setBggResults([]); }} placeholder="Search your library…" autoFocus />
+            <TouchableOpacity style={s.bggBtn} onPress={searchBGG} accessibilityLabel="Search BGG for this game">
+              {bggSearching ? <ActivityIndicator color="#fff" size="small" /> : <Text style={s.bggBtnTxt}>BGG</Text>}
+            </TouchableOpacity>
+          </View>
+
+          {/* Local results */}
+          {bggResults.length === 0 && (
+            <FlatList
+              data={filteredGames}
+              keyExtractor={g => String(g.bgg_id)}
+              style={{ maxHeight: 240 }}
+              ListEmptyComponent={gameSearch ? <Text style={s.pickerHint}>Not in library — tap BGG to search</Text> : null}
+              renderItem={({ item: g }) => (
+                <TouchableOpacity style={s.gameItem} onPress={() => { setSelGame(g); setPickingGame(false); setGameSearch(''); }}>
+                  <Text style={s.gameItemTxt}>{g.name}</Text>
+                  {g.year ? <Text style={s.gameItemYear}>{g.year}</Text> : null}
+                </TouchableOpacity>
+              )}
+              ItemSeparatorComponent={() => <View style={{ height: 1, backgroundColor: '#f0f0f0' }} />}
+            />
+          )}
+
+          {/* BGG results */}
+          {bggResults.length > 0 && (
+            <>
+              <Text style={s.pickerHint}>BGG results — tap to add & select</Text>
+              <FlatList
+                data={bggResults}
+                keyExtractor={r => String(r.bgg_id)}
+                style={{ maxHeight: 300 }}
+                renderItem={({ item: r }) => (
+                  <TouchableOpacity style={s.gameItem} onPress={() => addFromBGG(r)}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.gameItemTxt}>{r.name}</Text>
+                      {r.year ? <Text style={s.gameItemYear}>{r.year}</Text> : null}
+                    </View>
+                    <Ionicons name="add-circle-outline" size={20} color={NAVY} />
+                  </TouchableOpacity>
+                )}
+                ItemSeparatorComponent={() => <View style={{ height: 1, backgroundColor: '#f0f0f0' }} />}
+              />
+            </>
+          )}
         </View>
       </Modal>
     </View>
@@ -276,7 +354,11 @@ const s = StyleSheet.create({
   gamePickerPlaceholder: { fontSize: 15, color: '#aaa' },
   sheetBtn:     { backgroundColor: NAVY, borderRadius: 8, padding: 14, alignItems: 'center', marginTop: 4, marginBottom: 8 },
   sheetBtnTxt:  { color: '#fff', fontWeight: '700', fontSize: 15 },
-  gameItem:     { paddingVertical: 12, paddingHorizontal: 4, flexDirection: 'row', justifyContent: 'space-between' },
-  gameItemTxt:  { fontSize: 15, flex: 1 },
-  gameItemYear: { fontSize: 13, color: '#9e9e9e' },
+  gameItem:       { paddingVertical: 12, paddingHorizontal: 4, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  gameItemTxt:    { fontSize: 15, flex: 1 },
+  gameItemYear:   { fontSize: 13, color: '#9e9e9e' },
+  pickerSearchRow:{ flexDirection: 'row', gap: 8, marginBottom: 10, alignItems: 'center' },
+  bggBtn:         { backgroundColor: NAVY, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 10, justifyContent: 'center', minWidth: 52, alignItems: 'center' },
+  bggBtnTxt:      { color: '#fff', fontWeight: '700', fontSize: 13 },
+  pickerHint:     { fontSize: 12, color: '#9e9e9e', fontStyle: 'italic', paddingVertical: 8, textAlign: 'center' },
 });

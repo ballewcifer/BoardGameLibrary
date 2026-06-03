@@ -101,12 +101,17 @@
     <form method="post" action="/plays/add">
       <div class="modal-body">
         <label class="form-label">Game</label>
-        <select name="game_id" class="form-control" required>
+        <select name="game_id" id="log-game-select" class="form-control" required>
           <option value="">— select —</option>
           {% for g in games %}
             <option value="{{ g.bgg_id }}" {% if filter_game==g.bgg_id %}selected{% endif %}>{{ g.name }}</option>
           {% endfor %}
         </select>
+        <div class="search-row mt-sm" id="bgg-play-search-row">
+          <input type="text" id="bgg-play-query" class="search-input" placeholder="Game not listed? Search BGG…">
+          <button type="button" class="btn btn-secondary btn-sm" onclick="searchBGGForPlay()">Search</button>
+        </div>
+        <div id="bgg-play-results" class="search-results"></div>
         <label class="form-label mt-sm">Date Played</label>
         <input type="date" name="played_at" class="form-control"
                value="{{ now.strftime('%Y-%m-%d') }}" required>
@@ -189,6 +194,37 @@ function openEditPlay(play, games) {
 function toggleLeaderboard() {
   const p = document.getElementById('leaderboard-panel');
   p.style.display = p.style.display === 'none' ? 'block' : 'none';
+}
+
+async function searchBGGForPlay() {
+  const q = document.getElementById('bgg-play-query').value.trim();
+  if (!q) return;
+  const results = document.getElementById('bgg-play-results');
+  results.innerHTML = '<p class="muted" style="padding:6px">Searching…</p>';
+  try {
+    const res  = await fetch('/api/search?q=' + encodeURIComponent(q));
+    const data = await res.json();
+    if (!data.length) { results.innerHTML = '<p class="muted" style="padding:6px">No results.</p>'; return; }
+    results.innerHTML = data.slice(0,15).map(g => `
+      <div class="search-result-item" onclick="addBGGGameForPlay(${g.id}, ${JSON.stringify(g.name).replace(/'/g,"&#39;")})">
+        ${g.name}${g.year ? ' <span class="search-result-year">('+g.year+')</span>' : ''}
+        <small class="muted"> — tap to add &amp; select</small>
+      </div>`).join('');
+  } catch(e) { results.innerHTML = '<p style="color:#b71c1c;padding:6px">Search failed.</p>'; }
+}
+
+async function addBGGGameForPlay(bggId, name) {
+  document.getElementById('bgg-play-results').innerHTML = '<p class="muted" style="padding:6px">Adding…</p>';
+  try {
+    const res = await fetch('/games/add', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'bgg_id='+bggId });
+    // Game is now in library — add it to the select and choose it
+    const sel = document.getElementById('log-game-select');
+    let opt = [...sel.options].find(o => o.value == bggId);
+    if (!opt) { opt = new Option(name, bggId); sel.add(opt); }
+    sel.value = bggId;
+    document.getElementById('bgg-play-results').innerHTML = '';
+    document.getElementById('bgg-play-query').value = '';
+  } catch(e) { document.getElementById('bgg-play-results').innerHTML = '<p style="color:#b71c1c;padding:6px">Failed to add game.</p>'; }
 }
 </script>
 {% endblock %}
