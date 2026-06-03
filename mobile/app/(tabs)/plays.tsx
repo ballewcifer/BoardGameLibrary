@@ -8,6 +8,7 @@ import type { Play, Game, User } from '../../lib/types';
 import PlayerPicker from '../../components/PlayerPicker';
 import ScreenHeader from '../../components/ScreenHeader';
 import DateInput from '../../components/DateInput';
+import RibbonBadge from '../../components/RibbonBadge';
 
 const NAVY = '#1a237e';
 
@@ -164,22 +165,13 @@ export default function Plays({ isActive = true }: { isActive?: boolean }) {
             </Text>
           }
           renderItem={({ item: w, index }) => {
-            const ribbonColors = ['#d4a017', '#8a9ba8', '#a0522d'];
-            const ribbonLabels = ['1st', '2nd', '3rd'];
-            const ribbonA11y  = ['First place', 'Second place', 'Third place'];
             const topThree = index < 3;
             const maxWins = winners[0]?.win_count ?? 1;
             const pct = Math.round((w.win_count / maxWins) * 100);
             return (
               <View style={[s.lbRow, topThree && s.lbRowTop]}>
                 {topThree ? (
-                  <View
-                    style={[s.ribbon, { backgroundColor: ribbonColors[index] }]}
-                    accessible={true}
-                    accessibilityLabel={ribbonA11y[index]}
-                  >
-                    <Text style={s.ribbonTxt}>{ribbonLabels[index]}</Text>
-                  </View>
+                  <RibbonBadge rank={(index + 1) as 1 | 2 | 3} />
                 ) : (
                   <Text style={s.lbRank} accessible={true} accessibilityLabel={`Rank ${index + 1}`}>{index + 1}</Text>
                 )}
@@ -348,10 +340,7 @@ const s = StyleSheet.create({
   lbHeader:     { fontSize: 12, color: '#9e9e9e', marginBottom: 10 },
   lbRow:        { backgroundColor: '#fff', borderRadius: 10, padding: 14, marginBottom: 8, flexDirection: 'row', alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 3, elevation: 1 },
   lbRowTop:     { shadowOpacity: 0.12, elevation: 3 },
-  lbRank:       { fontSize: 16, width: 44, textAlign: 'center', color: '#6b7280', fontWeight: '600' },
-  ribbon:       { width: 44, height: 44, borderRadius: 8, alignItems: 'center', justifyContent: 'center',
-                  shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 3, elevation: 3 },
-  ribbonTxt:    { color: '#fff', fontWeight: '900', fontSize: 13, letterSpacing: 0.5 },
+  lbRank:       { fontSize: 16, width: 64, textAlign: 'center', color: '#6b7280', fontWeight: '600' },
   lbInfo:       { flex: 1, marginLeft: 8 },
   lbNameRow:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
   lbName:       { fontSize: 15, color: '#333', flex: 1 },

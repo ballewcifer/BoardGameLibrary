@@ -6,6 +6,7 @@ import * as db from '../../lib/db';
 import { exportBackup, importBackup } from '../../lib/backup';
 import type { Stats, Loan, Play } from '../../lib/types';
 import ScreenHeader from '../../components/ScreenHeader';
+import RibbonBadge from '../../components/RibbonBadge';
 
 const NAVY = '#1a237e';
 
@@ -114,7 +115,15 @@ export default function Dashboard({ isActive = true }: { isActive?: boolean }) {
               <Text style={s.sectionTitle}>Top Winners</Text>
               {topWins.length === 0
                 ? <Text style={s.empty}>No winners yet.</Text>
-                : topWins.map((w, i) => <Text key={i} style={s.listItem}>{i + 1}. {w.winner} ({w.win_count})</Text>)}
+                : topWins.map((w, i) => (
+                  <View key={i} style={s.winnerRow}>
+                    {i < 3
+                      ? <RibbonBadge rank={(i + 1) as 1|2|3} size={0.55} />
+                      : <Text style={s.winnerNum}>{i + 1}</Text>}
+                    <Text style={s.winnerName}>{w.winner}</Text>
+                    <Text style={s.winnerCount}>{w.win_count} win{w.win_count !== 1 ? 's' : ''}</Text>
+                  </View>
+                ))}
             </View>
           </View>
         </View>
@@ -157,6 +166,10 @@ const s = StyleSheet.create({
   listItem:   { fontSize: 13, paddingVertical: 3, color: '#333' },
   dim:        { color: '#9e9e9e' },
   empty:      { fontSize: 13, color: '#9e9e9e', fontStyle: 'italic' },
+  winnerRow:  { flexDirection: 'row', alignItems: 'center', paddingVertical: 4, gap: 8 },
+  winnerNum:  { width: 36, textAlign: 'center', fontSize: 13, color: '#9e9e9e', fontWeight: '600' },
+  winnerName: { flex: 1, fontSize: 13, color: '#333' },
+  winnerCount:{ fontSize: 12, color: '#9e9e9e' },
   backupRow:  { flexDirection: 'row', gap: 10 },
   backupBtn:  { flex: 1, borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 8, padding: 12, alignItems: 'center', gap: 4 },
   backupBtnTxt: { fontSize: 13, fontWeight: '600', color: NAVY, textAlign: 'center' },
