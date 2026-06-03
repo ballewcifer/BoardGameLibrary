@@ -392,7 +392,8 @@ def api_search():
     if not q:
         return jsonify([])
     try:
-        results = _bgg.search_games(q)
+        tok     = _config.load().get("bgg_token", "")
+        results = _bgg.search_games(q, token=tok or None)
         return jsonify([
             {"id": bgg_id, "name": name, "year": year}
             for bgg_id, name, year in results[:30]

@@ -132,7 +132,8 @@ export default function Games({ isActive = true }: { isActive?: boolean }) {
     setAddSelected(null);
     setAddDetails(null);
     try {
-      const results = await bgg.searchGames(addQuery.trim());
+      const settings = await loadSettings();
+      const results = await bgg.searchGames(addQuery.trim(), settings.bgg_token || undefined);
       setAddResults(results.slice(0, 30));
     } catch (e: any) {
       Alert.alert('Search failed', e.message ?? String(e));
