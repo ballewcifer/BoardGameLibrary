@@ -578,6 +578,7 @@ class App(tk.Tk):
         file_menu.add_separator()
         file_menu.add_command(label="Export Library…",        command=self.on_export_data)
         file_menu.add_command(label="Import Library…",        command=self.on_import_data)
+        file_menu.add_command(label="Export for Mobile…",     command=self.on_export_for_mobile)
         file_menu.add_separator()
         file_menu.add_command(label="Export Plays to CSV…",       command=self.on_export_plays_csv)
         file_menu.add_command(label="Export Loan History to CSV…", command=self.on_export_loans_csv)
@@ -4427,6 +4428,76 @@ class App(tk.Tk):
 
         self.status("Importing library…")
         threading.Thread(target=_bg, daemon=True).start()
+
+    def on_export_for_mobile(self) -> None:
+        """Export members, plays, loans and customisations as a JSON file
+        that can be imported on the mobile app via Dashboard → Import Backup."""
+        import json as _json
+
+        default_name = f"bgl-backup-{datetime.now():%Y-%m-%d}.json"
+        dest_path = filedialog.asksaveasfilename(
+            title="Export for Mobile",
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            initialfile=default_name,
+        )
+        if not dest_path:
+            return
+
+        with db.connect() as c:
+            members = [dict(r) for r in c.execute(
+                "SELECT * FROM users ORDER BY id").fetchall()]
+
+            plays = [dict(r) for r in c.execute(
+                """SELECT plays.*, games.name AS game_name
+                   FROM plays
+                   LEFT JOIN games ON games.bgg_id = plays.game_id
+                   ORDER BY plays.played_at DESC""").fetchall()]
+
+            loans = [dict(r) for r in c.execute(
+                """SELECT loans.*, games.name AS game_name,
+                          users.first_name, users.last_name
+                   FROM loans
+                   LEFT JOIN games ON games.bgg_id = loans.game_id
+                   LEFT JOIN users ON users.id = loans.user_id
+                   ORDER BY loans.checked_out_at DESC""").fetchall()]
+
+            customisations = [dict(r) for r in c.execute(
+                """SELECT bgg_id, name, tags, is_favorite, has_insert,
+                          my_comment, my_rating, manual_fields
+                   FROM games
+                   WHERE tags IS NOT NULL OR is_favorite = 1 OR has_insert = 1
+                      OR my_comment IS NOT NULL OR my_rating IS NOT NULL
+                   """).fetchall()]
+
+        payload = {
+            "version": 1,
+            "exported_at": db.now_iso(),
+            "members": members,
+            "plays": plays,
+            "loans": loans,
+            "customisations": customisations,
+        }
+
+        try:
+            with open(dest_path, "w", encoding="utf-8") as f:
+                _json.dump(payload, f, indent=2, default=str)
+            n_m = len(members)
+            n_p = len(plays)
+            n_l = len(loans)
+            p = dest_path
+            self.status(f"Exported for mobile: {Path(p).name}")
+            messagebox.showinfo(
+                "Export complete",
+                f"Saved: {p}\n\n"
+                f"  {n_m} member{'s' if n_m != 1 else ''}\n"
+                f"  {n_p} play record{'s' if n_p != 1 else ''}\n"
+                f"  {n_l} loan record{'s' if n_l != 1 else ''}\n\n"
+                "Transfer this file to your phone, then open the\n"
+                "mobile app → Dashboard → Import Backup.",
+            )
+        except OSError as exc:
+            messagebox.showerror("Export failed", str(exc))
 
     # ---------- refresh ----------
 
