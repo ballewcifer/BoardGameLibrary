@@ -311,7 +311,7 @@ def plays():
     game_id = request.args.get("game_id", type=int)
     with db.connect() as c:
         rows  = [_row_to_dict(r) for r in db.list_plays(c, game_id=game_id)]
-        games = [_row_to_dict(r) for r in db.list_games(c)]
+        games = [_row_to_dict(r) for r in db.list_games(c, owned_only=False)]
     return render_template("plays.html",
                            rows=rows,
                            games=games,

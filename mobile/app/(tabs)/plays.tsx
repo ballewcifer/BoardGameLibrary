@@ -37,7 +37,7 @@ export default function Plays({ isActive = true }: { isActive?: boolean }) {
 
   const load = useCallback(() => {
     setPlays(db.listPlays());
-    setGames(db.listGames());
+    setGames(db.listGames('', false)); // include play-log-only games
     setUsers(db.listUsers());
     setWinners(db.topWinners(0));
   }, []);

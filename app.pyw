@@ -1209,7 +1209,7 @@ class App(tk.Tk):
     def refresh_games(self) -> None:
         with db.connect() as c:
             games = db.list_games(c, self.search_var.get().strip())
-            total_count = c.execute("SELECT COUNT(*) FROM games").fetchone()[0]
+            total_count = c.execute("SELECT COUNT(*) FROM games WHERE own = 1").fetchone()[0]
             open_loans = {
                 row["game_id"]: row
                 for row in c.execute(
@@ -2496,7 +2496,7 @@ class App(tk.Tk):
             # Detect games in BGL that are no longer in BGG collection
             bgg_ids = {g.bgg_id for g in games}
             with db.connect() as c:
-                all_bgl = db.list_games(c)
+                all_bgl = db.list_games(c, owned_only=False)
             removed = [g for g in all_bgl if g["bgg_id"] not in bgg_ids]
 
             self._save_games_to_db(games)
@@ -2539,7 +2539,7 @@ class App(tk.Tk):
             # Detect games in BGL that are no longer in the BGG collection
             bgg_ids = {g.bgg_id for g in games}
             with db.connect() as c:
-                all_bgl = db.list_games(c)
+                all_bgl = db.list_games(c, owned_only=False)
             removed = [g for g in all_bgl if g["bgg_id"] not in bgg_ids]
             self._save_games_to_db(games)
             self.after(0, self.refresh_games)
@@ -2667,7 +2667,7 @@ class App(tk.Tk):
             # Detect games in BGL that are no longer in the BGG collection
             bgg_ids = set(by_id.keys())
             with db.connect() as c:
-                all_bgl = db.list_games(c)
+                all_bgl = db.list_games(c, owned_only=False)
             removed = [g for g in all_bgl if g["bgg_id"] not in bgg_ids]
 
             self._save_games_to_db(list(by_id.values()))
@@ -3655,7 +3655,7 @@ class App(tk.Tk):
 
         # Refresh the game-filter combobox list.
         with db.connect() as c:
-            games = db.list_games(c)
+            games = db.list_games(c, owned_only=False)
             game_names = ["All games"] + [g["name"] for g in games]
             self._plays_game_map = {g["name"]: g["bgg_id"] for g in games}
 
@@ -3696,7 +3696,7 @@ class App(tk.Tk):
         play  — if given (a plays DB row), pre-fill all fields for editing.
         """
         with db.connect() as c:
-            all_games = db.list_games(c)
+            all_games = db.list_games(c, owned_only=False)
             all_users = db.list_users(c)
         if not all_games:
             messagebox.showinfo("No games", "Import your collection first.")
@@ -4311,7 +4311,7 @@ class App(tk.Tk):
                     for r in c.execute("SELECT game_id, played_at FROM plays").fetchall()
                 }
                 # Build set of known bgg_ids in library
-                known_ids = {r["bgg_id"] for r in db.list_games(c)}
+                known_ids = {r["bgg_id"] for r in db.list_games(c, owned_only=False)}
 
                 for p in plays:
                     if p["bgg_id"] not in known_ids:

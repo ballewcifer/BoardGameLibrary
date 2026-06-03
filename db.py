@@ -176,13 +176,23 @@ def set_manual_fields(c: sqlite3.Connection, bgg_id: int, fields: set) -> None:
     )
 
 
-def list_games(c: sqlite3.Connection, search: str = "") -> list[sqlite3.Row]:
+def list_games(c: sqlite3.Connection, search: str = "",
+               owned_only: bool = True) -> list[sqlite3.Row]:
+    """Return games ordered by name.
+
+    owned_only=True  (default) — only games in the user's collection (own=1).
+    owned_only=False           — all games including play-log-only entries (own=0).
+    """
+    own_clause = "own = 1" if owned_only else "1"
     if search:
         return c.execute(
-            "SELECT * FROM games WHERE name LIKE ? ORDER BY name COLLATE NOCASE",
+            f"SELECT * FROM games WHERE {own_clause} AND name LIKE ?"
+            " ORDER BY name COLLATE NOCASE",
             (f"%{search}%",),
         ).fetchall()
-    return c.execute("SELECT * FROM games ORDER BY name COLLATE NOCASE").fetchall()
+    return c.execute(
+        f"SELECT * FROM games WHERE {own_clause} ORDER BY name COLLATE NOCASE"
+    ).fetchall()
 
 
 def get_game(c: sqlite3.Connection, bgg_id: int) -> Optional[sqlite3.Row]:

@@ -113,15 +113,16 @@ export function upsertGame(g: Partial<Game>): void {
   );
 }
 
-export function listGames(search = ''): Game[] {
+export function listGames(search = '', ownedOnly = true): Game[] {
   const db = getDb();
+  const ownClause = ownedOnly ? 'own = 1' : '1';
   if (search) {
     return db.getAllSync<Game>(
-      'SELECT * FROM games WHERE name LIKE ? ORDER BY name COLLATE NOCASE',
+      `SELECT * FROM games WHERE ${ownClause} AND name LIKE ? ORDER BY name COLLATE NOCASE`,
       [`%${search}%`]
     );
   }
-  return db.getAllSync<Game>('SELECT * FROM games ORDER BY name COLLATE NOCASE');
+  return db.getAllSync<Game>(`SELECT * FROM games WHERE ${ownClause} ORDER BY name COLLATE NOCASE`);
 }
 
 export function getGame(bggId: number): Game | null {
