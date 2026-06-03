@@ -3498,24 +3498,21 @@ class App(tk.Tk):
         self._lb_pane = ttk.Frame(frame)
         # Not packed yet — shown on toggle
 
-        lb_cols = ("rank", "player", "wins")
-        self._lb_tree = ttk.Treeview(self._lb_pane, columns=lb_cols,
-                                     show="headings", selectmode="none")
-        self._lb_tree.heading("rank",   text="Rank")
-        self._lb_tree.heading("player", text="Player")
-        self._lb_tree.heading("wins",   text="Wins")
-        self._lb_tree.column("rank",   width=60,  anchor="center")
-        self._lb_tree.column("player", width=260)
-        self._lb_tree.column("wins",   width=80,  anchor="center")
-        self._lb_tree.tag_configure("gold",   background="#fff8d6")
-        self._lb_tree.tag_configure("silver", background="#f2f2f2")
-        self._lb_tree.tag_configure("bronze", background="#fdf0e6")
-
-        lb_vsb = ttk.Scrollbar(self._lb_pane, orient="vertical",
-                                command=self._lb_tree.yview)
-        self._lb_tree.configure(yscrollcommand=lb_vsb.set)
-        self._lb_tree.pack(side="left", fill="both", expand=True)
-        lb_vsb.pack(side="left", fill="y")
+        lb_vsb2 = ttk.Scrollbar(self._lb_pane, orient="vertical")
+        lb_vsb2.pack(side="right", fill="y")
+        self._lb_canvas = tk.Canvas(self._lb_pane, bg=C_BG, highlightthickness=0,
+                                    yscrollcommand=lb_vsb2.set)
+        self._lb_canvas.pack(side="left", fill="both", expand=True)
+        lb_vsb2.configure(command=self._lb_canvas.yview)
+        self._lb_inner = ttk.Frame(self._lb_canvas)
+        _lb_win = self._lb_canvas.create_window((0, 0), window=self._lb_inner, anchor="nw")
+        self._lb_canvas.bind("<Configure>",
+                             lambda e: self._lb_canvas.itemconfigure(_lb_win, width=e.width))
+        self._lb_inner.bind("<Configure>",
+                            lambda e: self._lb_canvas.configure(
+                                scrollregion=self._lb_canvas.bbox("all")))
+        # Pre-generate ribbon images (cached)
+        self._ribbon_photos: dict[int, ImageTk.PhotoImage] = {}
 
     def _toggle_leaderboard(self) -> None:
         self._lb_showing = not self._lb_showing
@@ -3529,17 +3526,129 @@ class App(tk.Tk):
             self._plays_pane.pack(fill="both", expand=True)
             self._lb_btn.configure(text="🏆 Leaderboard")
 
+    def _make_ribbon_photo(self, rank: int, size: int = 56) -> ImageTk.PhotoImage:
+        """Render a rosette ribbon for rank 0/1/2 using Pillow."""
+        import math as _math
+        COLORS = {
+            0: ((26, 35, 126),  (13, 20, 87)),   # navy   1st
+            1: ((183, 28, 28),  (127, 0, 0)),     # red    2nd
+            2: ((27, 94, 32),   (0, 51, 0)),      # green  3rd
+        }
+        LABELS = {0: "1st", 1: "2nd", 2: "3rd"}
+        GOLD, GOLD_D = (240, 192, 80), (200, 146, 42)
+        body, dark = COLORS[rank]
+
+        S = 4                         # oversample for AA
+        W, H = size, int(size * 1.35)
+        w, h = W * S, H * S
+        cx, cy = w // 2, int(0.40 * h)
+
+        PETALS    = 18
+        OUTER_R   = int(0.43 * w / 2)
+        SCALLOP_R = int(0.13 * w / 2)
+        RING_R    = int(0.34 * w / 2)
+        INNER_R   = int(0.30 * w / 2)
+
+        img  = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+
+        # Tails
+        ty = cy + INNER_R + 4 * S
+        draw.polygon([(cx - 9*S, ty), (cx - 13*S, h - 2), (cx,       h - 8*S)], fill=dark)
+        draw.polygon([(cx + 9*S, ty), (cx + 13*S, h - 2), (cx,       h - 8*S)], fill=body)
+
+        # Petals
+        for i in range(PETALS):
+            a = (i / PETALS) * 2 * _math.pi - _math.pi / 2
+            sx = cx + OUTER_R * _math.cos(a)
+            sy = cy + OUTER_R * _math.sin(a)
+            c = body if i % 2 == 0 else dark
+            draw.ellipse([(sx-SCALLOP_R, sy-SCALLOP_R), (sx+SCALLOP_R, sy+SCALLOP_R)], fill=c)
+
+        # Backing disc
+        draw.ellipse([(cx-RING_R-3*S, cy-RING_R-3*S),
+                      (cx+RING_R+3*S, cy+RING_R+3*S)], fill=body)
+        # Gold ring
+        draw.ellipse([(cx-RING_R, cy-RING_R), (cx+RING_R, cy+RING_R)],
+                     outline=GOLD, width=3*S)
+        # Dark centre
+        draw.ellipse([(cx-INNER_R, cy-INNER_R), (cx+INNER_R, cy+INNER_R)], fill=dark)
+        # Inner gold ring
+        draw.ellipse([(cx-INNER_R+S, cy-INNER_R+S),
+                      (cx+INNER_R-S, cy+INNER_R-S)], outline=GOLD_D, width=S)
+
+        # Rank text
+        label = LABELS[rank]
+        try:
+            from PIL import ImageFont as _IF
+            font = _IF.truetype("arialbd.ttf", 10 * S)
+        except Exception:
+            try:
+                from PIL import ImageFont as _IF
+                font = _IF.truetype("arial.ttf", 10 * S)
+            except Exception:
+                font = ImageFont.load_default()
+        bbox = draw.textbbox((0, 0), label, font=font)
+        tx = cx - (bbox[2] - bbox[0]) // 2
+        ty2 = cy - (bbox[3] - bbox[1]) // 2
+        draw.text((tx, ty2), label, fill=GOLD, font=font)
+
+        img = img.resize((W, H), Image.LANCZOS)
+        return ImageTk.PhotoImage(img)
+
     def _refresh_leaderboard(self) -> None:
-        self._lb_tree.delete(*self._lb_tree.get_children())
+        for w in self._lb_inner.winfo_children():
+            w.destroy()
+        self._lb_canvas.yview_moveto(0)
+
         with db.connect() as c:
             rows = db.top_winners(c, limit=9999)
-        ribbons = {0: "🎖 1st", 1: "🎖 2nd", 2: "🎖 3rd"}
+
+        if not rows:
+            ttk.Label(self._lb_inner, text="No wins recorded yet.",
+                      foreground="#888").pack(padx=20, pady=20)
+            return
+
+        max_wins = rows[0]["win_count"] if rows else 1
+        ROW_COLORS = {0: "#fff8d6", 1: "#f2f2f2", 2: "#fdf0e6"}
+        IMG_SIZE   = 52
+
         for i, r in enumerate(rows):
-            tag = "gold" if i == 0 else "silver" if i == 1 else "bronze" if i == 2 else ""
-            rank_txt = ribbons.get(i, str(i + 1))
-            self._lb_tree.insert("", "end",
-                                 values=(rank_txt, r["winner"], r["win_count"]),
-                                 tags=(tag,) if tag else ())
+            bg = ROW_COLORS.get(i, C_BG)
+            row = tk.Frame(self._lb_inner, bg=bg, padx=8, pady=4)
+            row.pack(fill="x", padx=6, pady=2)
+
+            # Ribbon image or plain number
+            if i < 3:
+                if i not in self._ribbon_photos:
+                    self._ribbon_photos[i] = self._make_ribbon_photo(i, IMG_SIZE)
+                ph = self._ribbon_photos[i]
+                tk.Label(row, image=ph, bg=bg).pack(side="left", padx=(0, 8))
+            else:
+                tk.Label(row, text=str(i + 1), bg=bg,
+                         font=("Segoe UI", 11, "bold"),
+                         foreground="#888", width=4,
+                         anchor="center").pack(side="left", padx=(0, 8))
+
+            # Name
+            tk.Label(row, text=r["winner"], bg=bg,
+                     font=("Segoe UI", 11, "bold" if i < 3 else "normal"),
+                     anchor="w").pack(side="left", expand=True, fill="x")
+
+            # Win count + bar
+            info = tk.Frame(row, bg=bg)
+            info.pack(side="right", padx=(8, 0))
+            wins = r["win_count"]
+            tk.Label(info, text=f"{wins} win{'s' if wins != 1 else ''}",
+                     bg=bg, font=("Segoe UI", 9),
+                     foreground="#555").pack(anchor="e")
+            bar_bg = tk.Frame(info, bg="#ddd", height=5, width=120)
+            bar_bg.pack(anchor="e")
+            bar_bg.pack_propagate(False)
+            pct = int((wins / max_wins) * 120)
+            bar_colors = {0: "#d4a017", 1: "#8a9ba8", 2: "#a0522d"}
+            fill_color = bar_colors.get(i, "#1a237e")
+            tk.Frame(bar_bg, bg=fill_color, width=pct, height=5).place(x=0, y=0)
 
     def refresh_plays(self) -> None:
         self.plays_tree.delete(*self.plays_tree.get_children())
