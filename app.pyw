@@ -903,11 +903,11 @@ class App(tk.Tk):
                 row.pack(fill="x", pady=1)
                 rank = i  # 0-based
                 if rank < 3:
-                    key = (rank, 36)
+                    key = (rank, 48)
                     if not hasattr(self, '_ribbon_photos'):
                         self._ribbon_photos = {}
                     if key not in self._ribbon_photos:
-                        self._ribbon_photos[key] = self._make_ribbon_photo(rank, 36)
+                        self._ribbon_photos[key] = self._make_ribbon_photo(rank, 48)
                     ph = self._ribbon_photos[key]
                     tk.Label(row, image=ph, bg=C_BG).pack(side="left", padx=(0, 6))
                 else:
@@ -3544,7 +3544,15 @@ class App(tk.Tk):
             self._lb_btn.configure(text="🏆 Leaderboard")
 
     def _make_ribbon_photo(self, rank: int, size: int = 56) -> ImageTk.PhotoImage:
-        """Render a rosette ribbon for rank 0/1/2 using Pillow."""
+        """Render a circular rosette badge (no tails) for rank 0/1/2 using Pillow.
+
+        The badge is a square image of *size* × *size* pixels containing:
+          • Scalloped outer ring (alternating body/dark petals)
+          • Solid backing disc
+          • Gold ring border
+          • Dark centre circle
+          • Bold gold rank text
+        """
         import math as _math
         COLORS = {
             0: ((26, 35, 126),  (13, 20, 87)),   # navy   1st
@@ -3552,65 +3560,64 @@ class App(tk.Tk):
             2: ((27, 94, 32),   (0, 51, 0)),      # green  3rd
         }
         LABELS = {0: "1st", 1: "2nd", 2: "3rd"}
-        GOLD, GOLD_D = (240, 192, 80), (200, 146, 42)
+        GOLD = (240, 192, 80)
         body, dark = COLORS[rank]
 
-        S = 4                         # oversample for AA
-        W, H = size, int(size * 1.35)
-        w, h = W * S, H * S
-        cx, cy = w // 2, int(0.40 * h)
+        S  = 4            # oversample factor for AA
+        W  = size
+        w  = W * S
+        cx = cy = w // 2
 
-        PETALS    = 18
-        OUTER_R   = int(0.43 * w / 2)
-        SCALLOP_R = int(0.13 * w / 2)
-        RING_R    = int(0.34 * w / 2)
-        INNER_R   = int(0.30 * w / 2)
+        PETALS    = 20
+        OUTER_R   = int(w * 0.46)
+        SCALLOP_R = int(w * 0.10)
+        RING_R    = int(w * 0.36)
+        INNER_R   = int(w * 0.29)
 
-        img  = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        img  = Image.new("RGBA", (w, w), (0, 0, 0, 0))
         draw = ImageDraw.Draw(img)
 
-        # Tails
-        ty = cy + INNER_R + 4 * S
-        draw.polygon([(cx - 9*S, ty), (cx - 13*S, h - 2), (cx,       h - 8*S)], fill=dark)
-        draw.polygon([(cx + 9*S, ty), (cx + 13*S, h - 2), (cx,       h - 8*S)], fill=body)
-
-        # Petals
+        # Scalloped petals
         for i in range(PETALS):
-            a = (i / PETALS) * 2 * _math.pi - _math.pi / 2
+            a  = (i / PETALS) * 2 * _math.pi - _math.pi / 2
             sx = cx + OUTER_R * _math.cos(a)
             sy = cy + OUTER_R * _math.sin(a)
-            c = body if i % 2 == 0 else dark
-            draw.ellipse([(sx-SCALLOP_R, sy-SCALLOP_R), (sx+SCALLOP_R, sy+SCALLOP_R)], fill=c)
+            c  = body if i % 2 == 0 else dark
+            draw.ellipse([(sx - SCALLOP_R, sy - SCALLOP_R),
+                          (sx + SCALLOP_R, sy + SCALLOP_R)], fill=c)
 
-        # Backing disc
-        draw.ellipse([(cx-RING_R-3*S, cy-RING_R-3*S),
-                      (cx+RING_R+3*S, cy+RING_R+3*S)], fill=body)
+        # Solid backing disc (covers petal centres)
+        draw.ellipse([(cx - RING_R - 2*S, cy - RING_R - 2*S),
+                      (cx + RING_R + 2*S, cy + RING_R + 2*S)], fill=body)
+
         # Gold ring
-        draw.ellipse([(cx-RING_R, cy-RING_R), (cx+RING_R, cy+RING_R)],
-                     outline=GOLD, width=3*S)
+        draw.ellipse([(cx - RING_R, cy - RING_R),
+                      (cx + RING_R, cy + RING_R)],
+                     outline=GOLD, width=max(3, S // 1))
+
         # Dark centre
-        draw.ellipse([(cx-INNER_R, cy-INNER_R), (cx+INNER_R, cy+INNER_R)], fill=dark)
-        # Inner gold ring
-        draw.ellipse([(cx-INNER_R+S, cy-INNER_R+S),
-                      (cx+INNER_R-S, cy+INNER_R-S)], outline=GOLD_D, width=S)
+        draw.ellipse([(cx - INNER_R, cy - INNER_R),
+                      (cx + INNER_R, cy + INNER_R)], fill=dark)
 
         # Rank text
-        label = LABELS[rank]
-        try:
-            from PIL import ImageFont as _IF
-            font = _IF.truetype("arialbd.ttf", 10 * S)
-        except Exception:
+        label    = LABELS[rank]
+        font_sz  = max(8, int(w * 0.22))
+        font     = None
+        for name in ("arialbd.ttf", "arial.ttf", "DejaVuSans-Bold.ttf"):
             try:
-                from PIL import ImageFont as _IF
-                font = _IF.truetype("arial.ttf", 10 * S)
+                font = ImageFont.truetype(name, font_sz)
+                break
             except Exception:
-                font = ImageFont.load_default()
-        bbox = draw.textbbox((0, 0), label, font=font)
-        tx = cx - (bbox[2] - bbox[0]) // 2
-        ty2 = cy - (bbox[3] - bbox[1]) // 2
-        draw.text((tx, ty2), label, fill=GOLD, font=font)
+                pass
+        if font is None:
+            font = ImageFont.load_default()
 
-        img = img.resize((W, H), Image.LANCZOS)
+        bbox = draw.textbbox((0, 0), label, font=font)
+        tx   = cx - (bbox[2] - bbox[0]) // 2
+        ty   = cy - (bbox[3] - bbox[1]) // 2
+        draw.text((tx, ty), label, fill=GOLD, font=font)
+
+        img = img.resize((W, W), Image.LANCZOS)
         return ImageTk.PhotoImage(img)
 
     def _refresh_leaderboard(self) -> None:
