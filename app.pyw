@@ -19,7 +19,7 @@ except ImportError:
     _HAVE_CAL = False
 from typing import Optional
 
-from PIL import Image, ImageTk
+from PIL import Image, ImageDraw, ImageFont, ImageTk
 
 import bgg
 import config
