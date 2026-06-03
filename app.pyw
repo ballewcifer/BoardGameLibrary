@@ -3620,7 +3620,7 @@ class App(tk.Tk):
                 return
             tok = bgg.BGG_APP_TOKEN or self.settings.get("bgg_token", "")
             try:
-                results = bgg.search_games(q)
+                results = bgg.search_games(q, token=tok)
             except Exception as exc:
                 messagebox.showerror("BGG search failed", str(exc), parent=dialog)
                 return
