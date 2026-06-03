@@ -431,12 +431,11 @@ def fetch_things(
 def search_games(
     query: str,
     *,
-    token: Optional[str] = None,  # unused — /xmlapi2/search is public
+    token: Optional[str] = None,
 ) -> list[tuple[int, str, Optional[int]]]:
     """Search BGG for board games matching *query*.
 
-    Uses the official BGG XML API v2 /search endpoint which is public,
-    stable, and does not require a Bearer token or a browser User-Agent.
+    BGG now requires a Bearer token even on the /search endpoint.
 
     Returns a list of (bgg_id, name, year) tuples sorted by year descending
     so the most recent printing of a game appears first.
@@ -447,7 +446,7 @@ def search_games(
     })
     url = f"{BASE}/search?{params}"
     try:
-        root = _fetch_xml(url)
+        root = _fetch_xml(url, token=token)
     except Exception as exc:
         raise RuntimeError(f"BGG Search failed: {exc}") from exc
 
