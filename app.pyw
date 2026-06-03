@@ -903,11 +903,11 @@ class App(tk.Tk):
                 row.pack(fill="x", pady=1)
                 rank = i  # 0-based
                 if rank < 3:
-                    key = (rank, 48)
+                    key = (rank, 38)
                     if not hasattr(self, '_ribbon_photos'):
                         self._ribbon_photos = {}
                     if key not in self._ribbon_photos:
-                        self._ribbon_photos[key] = self._make_ribbon_photo(rank, 48)
+                        self._ribbon_photos[key] = self._make_ribbon_photo(rank, 38)
                     ph = self._ribbon_photos[key]
                     tk.Label(row, image=ph, bg=C_BG).pack(side="left", padx=(0, 6))
                 else:
@@ -3613,9 +3613,10 @@ class App(tk.Tk):
         if font is None:
             font = ImageFont.load_default()
 
+        # Account for font bearing so text is visually centred in the circle
         bbox = draw.textbbox((0, 0), label, font=font)
-        tx   = cx - (bbox[2] - bbox[0]) // 2
-        ty   = cy - (bbox[3] - bbox[1]) // 2
+        tx   = cx - (bbox[0] + bbox[2]) // 2
+        ty   = cy - (bbox[1] + bbox[3]) // 2
         draw.text((tx, ty), label, fill=GOLD, font=font)
 
         img = img.resize((W, W), Image.LANCZOS)
@@ -3636,7 +3637,7 @@ class App(tk.Tk):
 
         max_wins = rows[0]["win_count"] if rows else 1
         ROW_COLORS = {0: "#fff8d6", 1: "#f2f2f2", 2: "#fdf0e6"}
-        IMG_SIZE   = 52
+        IMG_SIZE   = 44
 
         for i, r in enumerate(rows):
             bg = ROW_COLORS.get(i, C_BG)

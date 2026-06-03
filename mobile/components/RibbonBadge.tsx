@@ -17,7 +17,7 @@ const CONFIGS = {
 
 const GOLD   = '#f0c050';
 const GOLD_D = '#c8922a';
-const W = 64;
+const W = 54;
 const H = 82;
 const CX = W / 2;          // 32
 const CY = 33;              // rosette centre y
@@ -94,10 +94,11 @@ export default function RibbonBadge({ rank, size = 1 }: Props) {
 
       {/* ── Rank text ─────────────────────────────────────────────────── */}
       <SvgText
-        x={CX} y={CY + 6}
+        x={CX} y={CY}
         textAnchor="middle"
+        dominantBaseline="central"
         fill={GOLD}
-        fontSize={14}
+        fontSize={13}
         fontWeight="bold"
         fontFamily="-apple-system, sans-serif"
       >
