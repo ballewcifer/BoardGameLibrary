@@ -3533,10 +3533,10 @@ class App(tk.Tk):
         self._lb_tree.delete(*self._lb_tree.get_children())
         with db.connect() as c:
             rows = db.top_winners(c, limit=9999)
-        medals = {0: "🥇", 1: "🥈", 2: "🥉"}
+        ribbons = {0: "🎖 1st", 1: "🎖 2nd", 2: "🎖 3rd"}
         for i, r in enumerate(rows):
             tag = "gold" if i == 0 else "silver" if i == 1 else "bronze" if i == 2 else ""
-            rank_txt = medals.get(i, str(i + 1))
+            rank_txt = ribbons.get(i, str(i + 1))
             self._lb_tree.insert("", "end",
                                  values=(rank_txt, r["winner"], r["win_count"]),
                                  tags=(tag,) if tag else ())
