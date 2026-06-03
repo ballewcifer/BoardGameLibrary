@@ -21,6 +21,12 @@ export async function loadSettings(): Promise<Settings> {
   try {
     const raw = await AsyncStorage.getItem(KEY);
     const base = raw ? { ...DEFAULTS, ...JSON.parse(raw) } : { ...DEFAULTS };
+    // If stored token is blank but the build has a compiled-in token, use it.
+    // This handles the case where a user has old empty settings from a
+    // previous build that pre-dates the EAS EXPO_PUBLIC_BGG_TOKEN secret.
+    if (!base.bgg_token && DEFAULTS.bgg_token) {
+      base.bgg_token = DEFAULTS.bgg_token;
+    }
     // Load password from secure storage
     const pwd = await SecureStore.getItemAsync(PWD_KEY);
     return { ...base, bgg_password: pwd ?? '' };

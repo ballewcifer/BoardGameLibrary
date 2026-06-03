@@ -39,13 +39,19 @@ async function fetchXml(url: string, attempts = 10, token?: string): Promise<any
 // ── BGG login ─────────────────────────────────────────────────────────────────
 
 export async function loginBgg(username: string, password: string): Promise<void> {
+  // BGG's login API expects JSON — form-urlencoded is rejected silently
   const res = await fetch('https://boardgamegeek.com/login/api/v1', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': UA },
-    body: `credentials[username]=${encodeURIComponent(username)}&credentials[password]=${encodeURIComponent(password)}`,
+    headers: { 'Content-Type': 'application/json', 'User-Agent': UA },
+    body: JSON.stringify({ credentials: { username, password } }),
     credentials: 'include',
   });
-  if (!res.ok) throw new Error(`BGG login failed (HTTP ${res.status}). Check username/password.`);
+  if (!res.ok) {
+    const msg = res.status === 400
+      ? 'Wrong username or password.'
+      : `BGG login failed (HTTP ${res.status}).`;
+    throw new Error(msg);
+  }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
