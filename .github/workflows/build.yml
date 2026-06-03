@@ -72,9 +72,11 @@ jobs:
           if-no-files-found: error
 
   # ── macOS: .dmg installer ────────────────────────────────────────────────────
+  # macos-13 is Intel (x86_64): runs natively on Intel Macs and via Rosetta
+  # on Apple Silicon. macos-14+ are arm64-only and won't run on Intel Macs.
   build-macos:
-    name: macOS installer
-    runs-on: macos-latest
+    name: macOS installer (universal via Intel runner)
+    runs-on: macos-13
 
     steps:
       - name: Check out code
