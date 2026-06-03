@@ -898,9 +898,25 @@ class App(tk.Tk):
         if not top_wins:
             ttk.Label(rf, text="No winners recorded yet.", foreground="#888").pack(anchor="w")
         else:
-            for i, r in enumerate(top_wins, 1):
-                ttk.Label(rf, text=f"{i}. {r['winner']}  ({r['win_count']} win{'s' if r['win_count'] != 1 else ''})",
-                          font=("Segoe UI", 9)).pack(anchor="w", pady=1)
+            for i, r in enumerate(top_wins):
+                row = tk.Frame(rf, bg=C_BG)
+                row.pack(fill="x", pady=1)
+                rank = i  # 0-based
+                if rank < 3:
+                    key = (rank, 36)
+                    if not hasattr(self, '_ribbon_photos'):
+                        self._ribbon_photos = {}
+                    if key not in self._ribbon_photos:
+                        self._ribbon_photos[key] = self._make_ribbon_photo(rank, 36)
+                    ph = self._ribbon_photos[key]
+                    tk.Label(row, image=ph, bg=C_BG).pack(side="left", padx=(0, 6))
+                else:
+                    tk.Label(row, text=f"{i + 1}.", bg=C_BG,
+                             font=("Segoe UI", 9, "bold"),
+                             foreground="#888", width=3).pack(side="left", padx=(0, 6))
+                wins = r['win_count']
+                ttk.Label(row, text=f"{r['winner']}  ({wins} win{'s' if wins != 1 else ''})",
+                          font=("Segoe UI", 9)).pack(side="left")
 
     # ---------- games tab ----------
 
@@ -3511,8 +3527,9 @@ class App(tk.Tk):
         self._lb_inner.bind("<Configure>",
                             lambda e: self._lb_canvas.configure(
                                 scrollregion=self._lb_canvas.bbox("all")))
-        # Pre-generate ribbon images (cached)
-        self._ribbon_photos: dict[int, ImageTk.PhotoImage] = {}
+        # Ribbon image cache keyed by (rank, size) so different sizes don't collide
+        if not hasattr(self, '_ribbon_photos'):
+            self._ribbon_photos: dict = {}
 
     def _toggle_leaderboard(self) -> None:
         self._lb_showing = not self._lb_showing
@@ -3620,9 +3637,10 @@ class App(tk.Tk):
 
             # Ribbon image or plain number
             if i < 3:
-                if i not in self._ribbon_photos:
-                    self._ribbon_photos[i] = self._make_ribbon_photo(i, IMG_SIZE)
-                ph = self._ribbon_photos[i]
+                key = (i, IMG_SIZE)
+                if key not in self._ribbon_photos:
+                    self._ribbon_photos[key] = self._make_ribbon_photo(i, IMG_SIZE)
+                ph = self._ribbon_photos[key]
                 tk.Label(row, image=ph, bg=bg).pack(side="left", padx=(0, 8))
             else:
                 tk.Label(row, text=str(i + 1), bg=bg,
