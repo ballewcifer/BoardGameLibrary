@@ -2772,7 +2772,8 @@ class App(tk.Tk):
 
             def _bg():
                 try:
-                    found = bgg.search_games(q)
+                    tok = bgg.BGG_APP_TOKEN or self.settings.get("bgg_token", "")
+                    found = bgg.search_games(q, token=tok)
                 except Exception as exc:
                     self.after(0, lambda: status_var.set(f"Search failed: {exc}"))
                     self.after(0, lambda: search_btn.configure(state="normal"))
