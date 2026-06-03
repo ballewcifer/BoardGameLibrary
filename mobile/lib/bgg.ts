@@ -97,9 +97,9 @@ export interface SearchResult {
   year?: number;
 }
 
-export async function searchGames(query: string): Promise<SearchResult[]> {
+export async function searchGames(query: string, token?: string): Promise<SearchResult[]> {
   const params = new URLSearchParams({ query, type: 'boardgame,boardgameexpansion' });
-  const doc = await fetchXml(`${BASE}/search?${params}`);
+  const doc = await fetchXml(`${BASE}/search?${params}`, 8, token);
   const items: any[] = doc?.items?.item ?? [];
   const results: SearchResult[] = items.map((item: any) => ({
     bgg_id: item._id,

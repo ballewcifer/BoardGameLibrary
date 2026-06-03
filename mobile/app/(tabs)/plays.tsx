@@ -93,7 +93,8 @@ export default function Plays({ isActive = true }: { isActive?: boolean }) {
     setBggSearching(true);
     setBggResults([]);
     try {
-      const results = await bgg.searchGames(gameSearch.trim());
+      const settings = await loadSettings();
+      const results = await bgg.searchGames(gameSearch.trim(), settings.bgg_token || undefined);
       setBggResults(results.slice(0, 20));
     } catch (e: any) {
       Alert.alert('BGG search failed', e.message ?? String(e));
