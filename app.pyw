@@ -135,7 +135,7 @@ from paths import DATA_DIR, DB_PATH, CONFIG_PATH, IMAGES_DIR
 from version import __version__ as APP_VERSION
 
 THUMB_SIZE = (240, 240)
-PLACEHOLDER_BG = C_LINE_100
+PLACEHOLDER_BG = "#EAEEF2"  # C_LINE_100 — defined before color tokens
 APP_CREATED   = "May 5, 2026"
 APP_AUTHOR    = "Ballewcifer"
 APP_CONTACT   = "ballewcifer@gmail.com"
