@@ -160,15 +160,39 @@ def _open_url(url: str) -> None:
     except Exception:
         pass
 
-# ── colour palette ────────────────────────────────────────────────────────────
-C_NAVY    = "#1a3a5c"   # dark navy  – header bar, treeview headings
-C_BLUE    = "#2471a3"   # medium blue – buttons, active tab
-C_SKY     = "#5dade2"   # lighter blue – hover / accent highlights
-C_PALE    = "#eaf4fd"   # very light blue – filter bar background
-C_BG      = "#f4f7fb"   # near-white with a blue tint – main background
-C_WHITE   = "#ffffff"
-C_TEXT    = "#1c2833"   # near-black body text
-C_GOLD    = "#d4a017"   # darker gold for best-at labels (replaces #b8860b)
+# ── Design system tokens (design-tokens.json) ────────────────────────────────
+# Brand / navy
+C_NAVY_900 = "#0E2A47"   # header / top bar
+C_NAVY_800 = "#13395F"   # tab strip
+C_NAVY_700 = "#1B4B79"
+# Action blue
+C_BLUE_600 = "#1366C9"   # primary buttons, links, focus ring
+C_BLUE_700 = "#0F52A3"   # hover
+C_BLUE_800 = "#0B3F80"   # pressed
+C_BLUE_050 = "#E7F0FB"   # tints / selected row bg
+# Neutrals
+C_INK_900  = "#16202B"   # primary text
+C_INK_600  = "#51606E"   # secondary text
+C_INK_500  = "#6B7785"   # muted / icons
+C_LINE_200 = "#D9E0E7"   # borders
+C_LINE_100 = "#EAEEF2"   # hairlines
+C_SURFACE  = "#FFFFFF"   # card surface
+C_BG       = "#F4F6F8"   # app canvas
+# Status
+C_OK_TEXT  = "#1E6E32";  C_OK_BG  = "#E6F4EA";  C_OK_SOLID  = "#2E7D32"
+C_WN_TEXT  = "#8A5300";  C_WN_BG  = "#FFF3E0";  C_WN_SOLID  = "#B26A00"
+C_DR_TEXT  = "#B3261E";  C_DR_BG  = "#FCEBEA";  C_DR_SOLID  = "#C62828"
+# Star / favorite
+C_STAR_TEXT = "#B07A00"; C_STAR_FILL = "#F2A900"
+
+# Aliases so existing code that references the old names keeps working
+C_NAVY  = C_NAVY_900
+C_BLUE  = C_BLUE_600
+C_SKY   = C_BLUE_050
+C_PALE  = C_LINE_100
+C_WHITE = C_SURFACE
+C_TEXT  = C_INK_900
+C_GOLD  = C_STAR_FILL
 
 
 _ORDINALS = {
@@ -480,85 +504,116 @@ class App(tk.Tk):
 
     def _apply_style(self) -> None:
         s = ttk.Style(self)
-        s.theme_use("clam")   # clam supports colour overrides on Windows
+        s.theme_use("clam")   # clam respects colour overrides on all platforms
 
+        # ── Global defaults ────────────────────────────────────────────────────
         s.configure(".",
-            background=C_BG, foreground=C_TEXT,
+            background=C_BG, foreground=C_INK_900,
             font=("Segoe UI", 9))
 
-        # Frames
+        # ── Frames ─────────────────────────────────────────────────────────────
         s.configure("TFrame",     background=C_BG)
         s.configure("TLabelframe", background=C_BG)
-        s.configure("TLabelframe.Label", background=C_BG, foreground=C_NAVY,
+        s.configure("TLabelframe.Label", background=C_BG, foreground=C_NAVY_900,
                     font=("Segoe UI", 9, "bold"))
 
-        # Labels
-        s.configure("TLabel", background=C_BG, foreground=C_TEXT)
+        # ── Labels ─────────────────────────────────────────────────────────────
+        s.configure("TLabel", background=C_BG, foreground=C_INK_900)
 
-        # Buttons – blue pill style
+        # ── Buttons — Primary (filled blue) ────────────────────────────────────
         s.configure("TButton",
-            background=C_BLUE, foreground=C_WHITE,
+            background=C_BLUE_600, foreground=C_SURFACE,
             font=("Segoe UI", 9, "bold"),
-            padding=[8, 4], relief="flat", borderwidth=0)
+            padding=[14, 6], relief="flat", borderwidth=0)
         s.map("TButton",
-            background=[("active", C_NAVY), ("pressed", C_NAVY)],
-            foreground=[("active", C_WHITE)])
+            background=[("pressed", C_BLUE_800), ("active", C_BLUE_700)],
+            foreground=[("pressed", C_SURFACE),  ("active", C_SURFACE)])
 
-        # Notebook tabs
-        s.configure("TNotebook", background=C_NAVY, borderwidth=0)
-        s.configure("TNotebook.Tab",
-            background=C_BLUE, foreground=C_WHITE,
+        # ── Buttons — Ghost (outline) ───────────────────────────────────────────
+        s.configure("Ghost.TButton",
+            background=C_SURFACE, foreground=C_INK_900,
+            font=("Segoe UI", 9),
+            padding=[14, 6], relief="solid", borderwidth=1)
+        s.map("Ghost.TButton",
+            background=[("pressed", C_BG),     ("active", C_BG)],
+            foreground=[("pressed", C_INK_900), ("active", C_INK_900)],
+            bordercolor=[("!disabled", C_LINE_200)])
+
+        # ── Buttons — Quiet (text-only, no border) ─────────────────────────────
+        s.configure("Quiet.TButton",
+            background=C_BG, foreground=C_BLUE_700,
+            font=("Segoe UI", 9),
+            padding=[8, 4], relief="flat", borderwidth=0)
+        s.map("Quiet.TButton",
+            background=[("active", C_BLUE_050)],
+            foreground=[("active", C_BLUE_700)])
+
+        # ── Buttons — Danger ───────────────────────────────────────────────────
+        s.configure("Danger.TButton",
+            background=C_DR_SOLID, foreground=C_SURFACE,
             font=("Segoe UI", 9, "bold"),
-            padding=[14, 6])
+            padding=[14, 6], relief="flat", borderwidth=0)
+        s.map("Danger.TButton",
+            background=[("active", "#a01e18")])
+
+        # ── Notebook tabs ─────────────────────────────────────────────────────
+        s.configure("TNotebook", background=C_NAVY_800, borderwidth=0)
+        s.configure("TNotebook.Tab",
+            background=C_NAVY_800, foreground="#C7D6E6",
+            font=("Segoe UI", 9, "bold"),
+            padding=[16, 7])
         s.map("TNotebook.Tab",
-            background=[("selected", C_NAVY), ("active", C_SKY)],
-            foreground=[("selected", C_WHITE), ("active", C_WHITE)])
+            background=[("selected", C_BG),        ("active", "#1e4a73")],
+            foreground=[("selected", C_NAVY_900),   ("active", C_SURFACE)])
 
-        # Entry / Combobox
+        # ── Entry / Combobox ──────────────────────────────────────────────────
         s.configure("TEntry",
-            fieldbackground=C_WHITE, foreground=C_TEXT,
-            insertcolor=C_NAVY, bordercolor=C_BLUE)
+            fieldbackground=C_SURFACE, foreground=C_INK_900,
+            insertcolor=C_BLUE_600, bordercolor=C_LINE_200,
+            padding=[8, 6])
+        s.map("TEntry", bordercolor=[("focus", C_BLUE_600)])
         s.configure("TCombobox",
-            fieldbackground=C_WHITE, foreground=C_TEXT,
-            selectbackground=C_BLUE, selectforeground=C_WHITE)
+            fieldbackground=C_SURFACE, foreground=C_INK_900,
+            selectbackground=C_BLUE_600, selectforeground=C_SURFACE,
+            padding=[6, 5])
 
-        # Checkbutton / Radiobutton
-        s.configure("TCheckbutton", background=C_PALE, foreground=C_TEXT)
-        s.map("TCheckbutton", background=[("active", C_PALE)])
-        s.configure("TRadiobutton", background=C_BG, foreground=C_TEXT)
+        # ── Checkbutton / Radiobutton ─────────────────────────────────────────
+        s.configure("TCheckbutton", background=C_BG, foreground=C_INK_900)
+        s.map("TCheckbutton", background=[("active", C_BG)])
+        s.configure("TRadiobutton", background=C_BG, foreground=C_INK_900)
         s.map("TRadiobutton", background=[("active", C_BG)])
 
-        # Treeview
+        # ── Treeview ──────────────────────────────────────────────────────────
         s.configure("Treeview",
-            background=C_WHITE, fieldbackground=C_WHITE,
-            foreground=C_TEXT, rowheight=24)
+            background=C_SURFACE, fieldbackground=C_SURFACE,
+            foreground=C_INK_900, rowheight=28)
         s.configure("Treeview.Heading",
-            background=C_NAVY, foreground=C_WHITE,
+            background=C_NAVY_900, foreground=C_SURFACE,
             font=("Segoe UI", 9, "bold"), relief="flat")
         s.map("Treeview.Heading",
-            background=[("active", C_BLUE)])
+            background=[("active", C_NAVY_800)])
         s.map("Treeview",
-            background=[("selected", C_BLUE)],
-            foreground=[("selected", C_WHITE)])
+            background=[("selected", C_BLUE_050)],
+            foreground=[("selected", C_INK_900)])
 
-        # Scrollbar
+        # ── Scrollbar ─────────────────────────────────────────────────────────
         s.configure("TScrollbar",
-            background=C_PALE, troughcolor=C_BG,
-            arrowcolor=C_NAVY, borderwidth=0)
+            background=C_LINE_100, troughcolor=C_BG,
+            arrowcolor=C_INK_500, borderwidth=0)
 
-        # Separator
-        s.configure("TSeparator", background=C_BLUE)
+        # ── Separator ─────────────────────────────────────────────────────────
+        s.configure("TSeparator", background=C_LINE_200)
 
-        # Filter-bar specific frame tag
-        s.configure("Filter.TFrame", background=C_PALE)
-        s.configure("Filter.TLabel", background=C_PALE, foreground=C_NAVY,
-                    font=("Segoe UI", 9, "bold"))
-        s.configure("Filter.TCheckbutton", background=C_PALE, foreground=C_TEXT)
-        s.map("Filter.TCheckbutton", background=[("active", C_PALE)])
+        # ── Filter bar ────────────────────────────────────────────────────────
+        s.configure("Filter.TFrame",      background=C_BG)
+        s.configure("Filter.TLabel",      background=C_BG, foreground=C_INK_600,
+                    font=("Segoe UI", 8, "bold"))
+        s.configure("Filter.TCheckbutton", background=C_BG, foreground=C_INK_900)
+        s.map("Filter.TCheckbutton",       background=[("active", C_BG)])
 
-        # Status bar
-        s.configure("Status.TFrame", background=C_NAVY)
-        s.configure("Status.TLabel", background=C_NAVY, foreground=C_WHITE,
+        # ── Status bar ────────────────────────────────────────────────────────
+        s.configure("Status.TFrame", background=C_NAVY_900)
+        s.configure("Status.TLabel", background=C_NAVY_900, foreground=C_SURFACE,
                     font=("Segoe UI", 8))
 
     # ---------- layout ----------
@@ -605,12 +660,12 @@ class App(tk.Tk):
 
     def _build_header(self) -> None:
         """Navy banner at the very top with the app title."""
-        hdr = tk.Frame(self, bg=C_NAVY, pady=6)
+        hdr = tk.Frame(self, bg=C_NAVY_900, pady=8)
         hdr.pack(side="top", fill="x")
 
         tk.Label(
             hdr, text="  \U0001f3b2  Board Game Library",
-            bg=C_NAVY, fg=C_WHITE,
+            bg=C_NAVY_900, fg=C_SURFACE,
             font=("Segoe UI", 13, "bold"),
         ).pack(side="left", padx=(8, 0))
 
@@ -1560,18 +1615,20 @@ class App(tk.Tk):
         has_insert = bool(game["has_insert"])
         n_plays = play_counts.get(bgg_id, 0)
 
-        card = ttk.Frame(self.games_inner, padding=8, relief="solid", borderwidth=1)
+        # White card on gray canvas — 1px border per design system
+        card = tk.Frame(self.games_inner, bg=C_SURFACE, padx=8, pady=8,
+                        highlightbackground=C_LINE_200, highlightthickness=1, bd=0)
         card.configure(width=180)
 
         # --- header row: star right, expansion badge truly centred ---
-        header = tk.Frame(card, bg=C_BG)
+        header = tk.Frame(card, bg=C_SURFACE)
         header.pack(fill="x")
         star_lbl = tk.Label(
             header,
             text="★" if is_fav else "☆",
             font=("Segoe UI", 13),
-            fg="#f5a623" if is_fav else "#aaa",
-            bg=C_BG, cursor="hand2",
+            fg=C_STAR_FILL if is_fav else C_LINE_200,
+            bg=C_SURFACE, cursor="hand2",
         )
         star_lbl.pack(side="right")
         star_lbl.bind("<Button-1>", lambda e, g=game: self.on_toggle_favorite(g))
@@ -1586,11 +1643,11 @@ class App(tk.Tk):
 
         # --- image canvas (fixed size, centred in card) ---
         _CW, _CH = THUMB_SIZE[0], THUMB_SIZE[1]  # 140 × 140
-        img_frame = tk.Frame(card, bg=C_BG)
+        img_frame = tk.Frame(card, bg=C_SURFACE)
         img_frame.pack(anchor="center")
         img_canvas = tk.Canvas(
             img_frame, width=_CW, height=_CH,
-            bg=C_BG, highlightthickness=0, bd=0,
+            bg=C_SURFACE, highlightthickness=0, bd=0,
         )
         img_canvas.pack()
 
@@ -1600,89 +1657,97 @@ class App(tk.Tk):
         img_canvas.itemconfigure(_img_id, image=ph)
         img_canvas._card_img_ref = ph
 
-        # --- name + year ---
+        # --- name + year -------------------------------------------------------
         ttk.Label(
             card,
             text=_shorten(game["name"]),
             wraplength=160,
             justify="center",
-            font=("Segoe UI", 9, "bold"),
+            font=("Segoe UI", 10, "bold"),
+            foreground=C_INK_900,
         ).pack(pady=(6, 0))
 
         year_text = f"({game['year']})" if game["year"] else ""
-        ttk.Label(card, text=year_text, foreground="#666").pack()
+        ttk.Label(card, text=year_text, foreground=C_INK_600,
+                  font=("Segoe UI", 8)).pack()
 
-        # --- player count + time ---
+        # --- player count + time ----------------------------------------------
         info = (
             f"\U0001f465 {fmt_players(game['min_players'], game['max_players'])}   "
             f"⏱ {fmt_time(game['min_playtime'], game['max_playtime'], game['playing_time'])}"
         )
-        ttk.Label(card, text=info, foreground="#444").pack(pady=(4, 0))
+        ttk.Label(card, text=info, foreground=C_INK_600,
+                  font=("Segoe UI", 8)).pack(pady=(3, 0))
 
-        # --- best-at line (always present so all cards are the same height) ---
+        # --- best-at line -----------------------------------------------------
         ttk.Label(
             card,
             text=f"★ Best at {game['best_players']}" if game["best_players"] else "",
-            foreground="#b8860b",
+            foreground=C_STAR_TEXT,
             font=("Segoe UI", 8),
         ).pack()
 
-        # --- badges row: insert + play count (expansion badge is in the header row) ---
+        # --- badges row -------------------------------------------------------
         badge_row = ttk.Frame(card)
         badge_row.pack(pady=(3, 0))
         if has_insert:
             tk.Label(
-                badge_row, text="\U0001f4e6 Insert",
-                bg="#d0e8ff", fg="#1a5276",
-                font=("Segoe UI", 8), padx=4, pady=1,
-            ).pack(side="left", padx=(0, 4))
+                badge_row, text="📦 Insert",
+                bg="#E7F0FB", fg=C_BLUE_700,
+                font=("Segoe UI", 8), padx=5, pady=1,
+            ).pack(side="left", padx=(0, 3))
         if n_plays:
-            plays_lbl = tk.Label(
-                badge_row, text=f"\U0001f3ae {n_plays} play{'s' if n_plays != 1 else ''}",
-                bg="#e8f5e9", fg="#2e7d32",
-                font=("Segoe UI", 8), padx=4, pady=1,
-            )
-            plays_lbl.pack(side="left")
+            tk.Label(
+                badge_row, text=f"🎮 {n_plays} play{'s' if n_plays != 1 else ''}",
+                bg=C_OK_BG, fg=C_OK_TEXT,
+                font=("Segoe UI", 8), padx=5, pady=1,
+            ).pack(side="left")
 
-        # --- bottom-anchored section (packed before top content so buttons
-        #     are always pinned to the card's bottom edge regardless of how
-        #     much text/badges appear above them) ---
+        # --- bottom-anchored buttons (design system: 1 primary + ghost rest) --
+        # Pack bottom-to-top so the primary action is always at the very bottom.
         btn_row2 = ttk.Frame(card)
-        btn_row2.pack(side="bottom", fill="x", pady=(3, 0))
-        ttk.Button(btn_row2, text="Edit",
-                   command=lambda g=game: self.on_edit_game(g)).pack(side="left", expand=True, fill="x")
-        ttk.Button(btn_row2, text="Log Play",
-                   command=lambda g=game: self.on_log_play(g)).pack(side="left", expand=True, fill="x", padx=(2, 0))
+        btn_row2.pack(side="bottom", fill="x", pady=(2, 0))
+        ttk.Button(btn_row2, text="Edit",     style="Ghost.TButton",
+                   command=lambda g=game: self.on_edit_game(g)
+                   ).pack(side="left", expand=True, fill="x")
+        ttk.Button(btn_row2, text="Log Play", style="Ghost.TButton",
+                   command=lambda g=game: self.on_log_play(g)
+                   ).pack(side="left", expand=True, fill="x", padx=(2, 0))
 
         btn_row = ttk.Frame(card)
-        btn_row.pack(side="bottom", fill="x", pady=(2, 0))
+        btn_row.pack(side="bottom", fill="x", pady=(3, 0))
         if out_to:
+            # Primary action = Check In (most likely next step)
             ttk.Button(btn_row, text="Check In",
-                       command=lambda g=game: self.on_check_in(g)).pack(side="left", expand=True, fill="x")
+                       command=lambda g=game: self.on_check_in(g)
+                       ).pack(side="left", expand=True, fill="x")
         else:
             ttk.Button(btn_row, text="Check Out",
-                       command=lambda g=game: self.on_check_out(g)).pack(side="left", expand=True, fill="x")
-        ttk.Button(btn_row, text="Details",
-                   command=lambda g=game: self.show_details(g)).pack(side="left", expand=True, fill="x", padx=(2, 0))
+                       command=lambda g=game: self.on_check_out(g)
+                       ).pack(side="left", expand=True, fill="x")
+        ttk.Button(btn_row, text="Details", style="Ghost.TButton",
+                   command=lambda g=game: self.show_details(g)
+                   ).pack(side="left", expand=True, fill="x", padx=(2, 0))
 
+        # --- status badge (dot + word pill — design-system pattern) -----------
         if out_to:
             overdue = (
                 loan is not None
                 and loan["due_date"]
                 and loan["due_date"] < datetime.now().strftime("%Y-%m-%d")
             )
-            avail_text = f"⚠ OVERDUE: {out_to}" if overdue else f"Out: {out_to}"
-            avail_bg   = "#e53935" if overdue else "#f0c674"
-            avail_fg   = "white"   if overdue else "black"
-            tk.Label(
-                card, text=avail_text,
-                bg=avail_bg, fg=avail_fg, font=("Segoe UI", 8), padx=6, pady=2,
-            ).pack(side="bottom", fill="x", pady=(4, 0))
+            if overdue:
+                badge_txt, badge_bg, badge_fg = f"● Overdue — {out_to}", C_DR_BG, C_DR_TEXT
+            else:
+                badge_txt, badge_bg, badge_fg = f"● Checked out — {out_to}", C_WN_BG, C_WN_TEXT
         else:
-            tk.Label(
-                card, text="Available",
-                bg="#b5d6a7", font=("Segoe UI", 8), padx=6, pady=2,
-            ).pack(side="bottom", fill="x", pady=(4, 0))
+            badge_txt, badge_bg, badge_fg = "● Available", C_OK_BG, C_OK_TEXT
+
+        tk.Label(
+            card, text=badge_txt,
+            bg=badge_bg, fg=badge_fg,
+            font=("Segoe UI", 8, "bold"), padx=8, pady=3,
+        ).pack(side="bottom", fill="x", pady=(4, 0))
 
         # Right-click anywhere on the card for the full action menu (incl. Delete)
         def _card_right_click(event, g=game):
