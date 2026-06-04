@@ -492,7 +492,8 @@ class App(tk.Tk):
 
         tk.Button(
             footer, text="Get Started",
-            bg=C_NAVY, fg=C_WHITE, activebackground=C_BLUE, activeforeground=C_WHITE,
+            bg=C_BLUE_600, fg=C_SURFACE,
+            activebackground=C_BLUE_700, activeforeground=C_SURFACE,
             relief="flat", font=("Segoe UI", 9, "bold"),
             padx=14, pady=5, cursor="hand2",
             command=close,
@@ -576,6 +577,9 @@ class App(tk.Tk):
             fieldbackground=C_SURFACE, foreground=C_INK_900,
             selectbackground=C_BLUE_600, selectforeground=C_SURFACE,
             padding=[6, 5])
+        s.map("TCombobox",
+            fieldbackground=[("focus", C_BLUE_050)],
+            bordercolor=[("focus", C_BLUE_600)])
 
         # ── Checkbutton / Radiobutton ─────────────────────────────────────────
         s.configure("TCheckbutton", background=C_BG, foreground=C_INK_900)
@@ -586,7 +590,7 @@ class App(tk.Tk):
         # ── Treeview ──────────────────────────────────────────────────────────
         s.configure("Treeview",
             background=C_SURFACE, fieldbackground=C_SURFACE,
-            foreground=C_INK_900, rowheight=28)
+            foreground=C_INK_900, rowheight=32)
         s.configure("Treeview.Heading",
             background=C_NAVY_900, foreground=C_SURFACE,
             font=("Segoe UI", 9, "bold"), relief="flat")
@@ -607,14 +611,14 @@ class App(tk.Tk):
         # ── Filter bar ────────────────────────────────────────────────────────
         s.configure("Filter.TFrame",      background=C_BG)
         s.configure("Filter.TLabel",      background=C_BG, foreground=C_INK_600,
-                    font=("Segoe UI", 7, "bold"), padding=(4, 0, 2, 0))
+                    font=("Segoe UI", 9, "bold"), padding=(0, 0, 2, 0))
         s.configure("Filter.TCheckbutton", background=C_BG, foreground=C_INK_900)
         s.map("Filter.TCheckbutton",       background=[("active", C_BG)])
 
         # ── Status bar ────────────────────────────────────────────────────────
         s.configure("Status.TFrame", background=C_NAVY_900)
         s.configure("Status.TLabel", background=C_NAVY_900, foreground=C_SURFACE,
-                    font=("Segoe UI", 8))
+                    font=("Segoe UI", 9))
 
     # ---------- layout ----------
 
@@ -802,6 +806,68 @@ class App(tk.Tk):
         self._count_label = ttk.Label(fbar, text="", style="Filter.TLabel")
         self._count_label.pack(side="right")
 
+        # ── Active filter chips row (hidden when no filters active) ───────────
+        self._chips_frame = ttk.Frame(parent, style="Filter.TFrame",
+                                      padding=(16, 0, 16, 6))
+        # Packed on demand by _refresh_chips()
+
+    def _refresh_chips(self) -> None:
+        """Rebuild the active-filter chips row below the filter bar."""
+        for w in self._chips_frame.winfo_children():
+            w.destroy()
+
+        active: list[tuple] = []
+        if self.search_var.get():
+            v = self.search_var.get()
+            active.append(("Search", v, lambda: self.search_var.set("")))
+        if self.players_var.get() != "Any":
+            v = self.players_var.get()
+            active.append(("Players", v, lambda _v=v: self.players_var.set("Any")))
+        if self.exact_players_var.get():
+            active.append(("Exact", "on", lambda: self.exact_players_var.set(False)))
+        if self.best_at_var.get() != "Any":
+            v = self.best_at_var.get()
+            active.append(("Best at", v, lambda _v=v: self.best_at_var.set("Any")))
+        if self.time_var.get() != "Any":
+            v = self.time_var.get()
+            active.append(("Time", v, lambda _v=v: self.time_var.set("Any")))
+        if self.weight_var.get() != "Any":
+            v = self.weight_var.get()
+            active.append(("Complexity", v, lambda _v=v: self.weight_var.set("Any")))
+        if self.status_filter_var.get() != "Any":
+            v = self.status_filter_var.get()
+            active.append(("Status", v, lambda _v=v: self.status_filter_var.set("Any")))
+        if self.favorites_var.get():
+            active.append(("Favorites", "only", lambda: self.favorites_var.set(False)))
+        if self.tag_filter_var.get() != "Any":
+            v = self.tag_filter_var.get()
+            active.append(("Tag", v, lambda _v=v: self.tag_filter_var.set("Any")))
+
+        if active:
+            self._chips_frame.pack(side="top", fill="x")
+            for label, value, clear_fn in active:
+                chip = tk.Frame(self._chips_frame, bg=C_BLUE_050)
+                chip.pack(side="left", padx=(0, 4), pady=(0, 2))
+                tk.Label(chip, text=f"{label}: {value}",
+                         bg=C_BLUE_050, fg=C_BLUE_800,
+                         font=("Segoe UI", 9, "bold"),
+                         padx=8, pady=3).pack(side="left")
+
+                def _make_dismiss(fn):
+                    def _dismiss():
+                        fn()
+                        self.refresh_games()
+                    return _dismiss
+
+                tk.Button(chip, text="×",
+                          bg=C_BLUE_050, fg=C_BLUE_700,
+                          activebackground=C_SURFACE, activeforeground=C_BLUE_700,
+                          font=("Segoe UI", 11, "bold"),
+                          relief="flat", bd=0, padx=6, pady=1, cursor="hand2",
+                          command=_make_dismiss(clear_fn)).pack(side="left")
+        else:
+            self._chips_frame.pack_forget()
+
     def _build_tabs(self) -> None:
         self.nb = ttk.Notebook(self)
         self.nb.pack(side="top", fill="both", expand=True)
@@ -879,7 +945,7 @@ class App(tk.Tk):
 
         def section(parent, title):
             ttk.Label(parent, text=title,
-                      font=("Segoe UI", 11, "bold"), foreground=C_NAVY).pack(anchor="w", pady=(16, 4))
+                      font=("Segoe UI", 13, "bold"), foreground=C_NAVY_900).pack(anchor="w", pady=(16, 4))
             ttk.Separator(parent, orient="horizontal").pack(fill="x", pady=(0, 8))
 
         def stat_card(parent, label, value, color=C_NAVY, tab=None):
@@ -1314,6 +1380,7 @@ class App(tk.Tk):
             self.tag_filter_var.set("Any")
 
         games = self._apply_filters(list(games), open_loans)
+        self._refresh_chips()
 
         # Update count label
         shown = len(games)
@@ -1459,7 +1526,7 @@ class App(tk.Tk):
                 self._alpha_bar,
                 text=letter,
                 font=("Segoe UI", 7, "bold" if active else "normal"),
-                fg=C_BLUE if active else "#ccc",
+                fg=C_BLUE_600 if active else C_LINE_200,
                 bg=C_BG,
                 cursor="hand2" if active else "",
                 pady=1, padx=2,
@@ -1658,12 +1725,12 @@ class App(tk.Tk):
             img_canvas.coords(iid, e.width // 2, h // 2)
         img_canvas.bind("<Configure>", _on_cover_resize)
 
-        # Expansion badge at bottom-left of cover
+        # Expansion badge at bottom-left of cover (info colors from design system)
         if game["is_expansion"]:
-            img_canvas.create_rectangle(0, _IH - 20, 70, _IH,
-                                        fill="#ede7f6", outline="", width=0)
+            img_canvas.create_rectangle(0, _IH - 20, 74, _IH,
+                                        fill=C_BLUE_050, outline="", width=0)
             img_canvas.create_text(5, _IH - 10, anchor="w",
-                                   text="Expansion", fill="#4527a0",
+                                   text="Expansion", fill=C_BLUE_800,
                                    font=("Segoe UI", 7, "bold"))
 
         # ── star button (header strip above cover) ────────────────────────────
@@ -1688,22 +1755,22 @@ class App(tk.Tk):
         img_canvas.pack(fill="x")
 
         # ── card body ─────────────────────────────────────────────────────────
-        body = tk.Frame(card, bg=C_SURFACE, padx=12, pady=8)
+        body = tk.Frame(card, bg=C_SURFACE, padx=16, pady=12)
         body.pack(fill="x")
 
         # Status badge — above title per design system
         tk.Label(
             body, text=badge_txt,
             bg=badge_bg, fg=badge_fg,
-            font=("Segoe UI", 9, "bold"), padx=8, pady=2,
-        ).pack(anchor="w", pady=(0, 5))
+            font=("Segoe UI", 9, "bold"), padx=10, pady=4,
+        ).pack(anchor="w", pady=(0, 6))
 
         # Title
         ttk.Label(
             body,
             text=_shorten(game["name"]),
-            wraplength=224, justify="left",
-            font=("Segoe UI", 12, "bold"),
+            wraplength=220, justify="left",
+            font=("Segoe UI", 13, "bold"),
             foreground=C_INK_900,
         ).pack(anchor="w")
 
@@ -1744,7 +1811,7 @@ class App(tk.Tk):
                      ).pack(side="left")
 
         # ── actions ───────────────────────────────────────────────────────────
-        tk.Frame(body, bg=C_SURFACE, height=6).pack()  # spacer
+        tk.Frame(body, bg=C_SURFACE, height=8).pack()  # spacer
 
         # Primary action — full width
         if out_to:
@@ -2287,10 +2354,10 @@ class App(tk.Tk):
         _stored = bool(_kr_get_password())
         _pwd_hint = "✓ Saved securely (DPAPI)" if _stored else "Optional — needed for private collections"
         pwd_hint_var = tk.StringVar(value=_pwd_hint)
-        ttk.Label(frame, textvariable=pwd_hint_var, foreground=C_INK_500 if not _stored else "#2e7d32",
+        ttk.Label(frame, textvariable=pwd_hint_var, foreground=C_INK_500 if not _stored else C_OK_SOLID,
                   ).grid(row=5, column=1, sticky="w", padx=(8, 0), pady=(0, 4))
         ttk.Button(
-            frame, text="Clear saved password",
+            frame, text="Clear saved password", style="Ghost.TButton",
             command=lambda: [_kr_set_password(""), pwd_var.set(""),
                              pwd_hint_var.set("Cleared — enter a new password to save")]
         ).grid(row=6, column=1, sticky="w", padx=(8, 0), pady=(0, 12))
@@ -4179,7 +4246,7 @@ class App(tk.Tk):
         name_lbl = ttk.Label(info, text=game["name"], font=("Segoe UI", 13, "bold"))
         name_lbl.pack(anchor="w")
         if game["is_expansion"]:
-            tk.Label(info, text="Expansion", bg="#ede7f6", fg="#4527a0",
+            tk.Label(info, text="Expansion", bg=C_BLUE_050, fg=C_BLUE_800,
                      font=("Segoe UI", 8), padx=6, pady=2).pack(anchor="w", pady=(2, 0))
         if game["year"]:
             ttk.Label(info, text=f"Published {game['year']}", foreground=C_INK_600).pack(anchor="w")
