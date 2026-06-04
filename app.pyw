@@ -367,6 +367,20 @@ def _date_entry(parent, textvariable: tk.StringVar, width: int = 12, **kw):
 
 
 class App(tk.Tk):
+    # ── Design-system type ramp (Tkinter pt sizes, tuned per Implementation Notes) ──
+    FONT_FAMILY = "Segoe UI"
+    FONTS = {
+        "display":     ("Segoe UI", 22, "bold"),   # app header
+        "title":       ("Segoe UI", 15, "bold"),   # section / dialog titles
+        "card_title":  ("Segoe UI", 13, "bold"),   # game name on a card
+        "body":        ("Segoe UI", 11),           # specs, descriptions
+        "body_strong": ("Segoe UI", 11, "bold"),
+        "control":     ("Segoe UI", 11, "bold"),   # button text
+        "label":       ("Segoe UI",  9, "bold"),   # UPPERCASE filter labels, captions
+    }
+    # ── Spacing scale — multiples of 4 (design-tokens.json) ──
+    SP = {"xs": 4, "sm": 8, "md": 12, "lg": 16, "xl": 24}
+
     def __init__(self) -> None:
         super().__init__()
         self.title("Board Game Library")
@@ -389,8 +403,8 @@ class App(tk.Tk):
         self._table_games: list = []
         self._lazy_generation: int = 0   # incremented each refresh to cancel stale loaders
 
+        self.configure(bg=C_BG)          # grey canvas so white cards separate visually
         self._apply_style()
-        self.configure(bg=C_BG)
         self._build_menubar()
         self._build_header()
         self._build_tabs()   # toolbar now built inside _build_games_tab()
@@ -504,47 +518,69 @@ class App(tk.Tk):
     # ---------- style / theme ----------
 
     def _apply_style(self) -> None:
+        """Map the design tokens to ttk.Style.
+
+        Built from scratch off design-tokens.json + the Implementation Notes:
+          • clam theme (only theme that honours colour overrides everywhere)
+          • type ramp:  Display 22 / Title 15 / Card-title 13 / Body 11 / Label 9-bold
+          • spacing scale: 4 / 8 / 12 / 16 / 24
+          • one filled primary button; everything else is Ghost / Quiet
+        """
         s = ttk.Style(self)
         s.theme_use("clam")   # clam respects colour overrides on all platforms
+
+        FONT = self.FONT_FAMILY
 
         # ── Global defaults ────────────────────────────────────────────────────
         s.configure(".",
             background=C_BG, foreground=C_INK_900,
-            font=("Segoe UI", 9))
+            font=self.FONTS["body"])
 
         # ── Frames ─────────────────────────────────────────────────────────────
-        s.configure("TFrame",     background=C_BG)
-        s.configure("TLabelframe", background=C_BG)
+        s.configure("TFrame",      background=C_BG)
+        s.configure("Card.TFrame",    background=C_SURFACE)
+        s.configure("TLabelframe",    background=C_BG)
         s.configure("TLabelframe.Label", background=C_BG, foreground=C_NAVY_900,
-                    font=("Segoe UI", 9, "bold"))
+                    font=self.FONTS["body_strong"])
 
         # ── Labels ─────────────────────────────────────────────────────────────
-        s.configure("TLabel", background=C_BG, foreground=C_INK_900)
+        s.configure("TLabel", background=C_BG, foreground=C_INK_900,
+                    font=self.FONTS["body"])
+        s.configure("Muted.TLabel",  background=C_BG, foreground=C_INK_500,
+                    font=self.FONTS["body"])
+        s.configure("Section.TLabel", background=C_BG, foreground=C_NAVY_900,
+                    font=self.FONTS["title"])
 
-        # ── Buttons — Primary (filled blue) ────────────────────────────────────
+        # ── Buttons — Primary (the single filled action per context) ───────────
         s.configure("TButton",
             background=C_BLUE_600, foreground=C_SURFACE,
-            font=("Segoe UI", 9, "bold"),
-            padding=[14, 6], relief="flat", borderwidth=0)
+            font=self.FONTS["control"],
+            padding=[self.SP["lg"], self.SP["xs"] + 2],
+            relief="flat", borderwidth=0,
+            focusthickness=3, focuscolor=C_BLUE_700)
         s.map("TButton",
-            background=[("pressed", C_BLUE_800), ("active", C_BLUE_700)],
-            foreground=[("pressed", C_SURFACE),  ("active", C_SURFACE)])
+            background=[("pressed", C_BLUE_800), ("active", C_BLUE_700),
+                        ("disabled", C_LINE_200)],
+            foreground=[("disabled", C_INK_500),
+                        ("pressed", C_SURFACE), ("active", C_SURFACE)])
 
-        # ── Buttons — Ghost (outline) ───────────────────────────────────────────
+        # ── Buttons — Ghost (outline / secondary) ──────────────────────────────
         s.configure("Ghost.TButton",
             background=C_SURFACE, foreground=C_INK_900,
-            font=("Segoe UI", 9),
-            padding=[14, 6], relief="solid", borderwidth=1)
+            font=self.FONTS["body"],
+            padding=[self.SP["lg"], self.SP["xs"] + 2],
+            relief="solid", borderwidth=1)
         s.map("Ghost.TButton",
-            background=[("pressed", C_BG),     ("active", C_BG)],
+            background=[("pressed", C_BG), ("active", C_BG)],
             foreground=[("pressed", C_INK_900), ("active", C_INK_900)],
-            bordercolor=[("!disabled", C_LINE_200)])
+            bordercolor=[("active", C_INK_500), ("!disabled", C_LINE_200)])
 
-        # ── Buttons — Quiet (text-only, no border) ─────────────────────────────
+        # ── Buttons — Quiet (text-only) ────────────────────────────────────────
         s.configure("Quiet.TButton",
             background=C_BG, foreground=C_BLUE_700,
-            font=("Segoe UI", 9),
-            padding=[8, 4], relief="flat", borderwidth=0)
+            font=self.FONTS["body"],
+            padding=[self.SP["sm"], self.SP["xs"]],
+            relief="flat", borderwidth=0)
         s.map("Quiet.TButton",
             background=[("active", C_BLUE_050)],
             foreground=[("active", C_BLUE_700)])
@@ -552,73 +588,80 @@ class App(tk.Tk):
         # ── Buttons — Danger ───────────────────────────────────────────────────
         s.configure("Danger.TButton",
             background=C_DR_SOLID, foreground=C_SURFACE,
-            font=("Segoe UI", 9, "bold"),
-            padding=[14, 6], relief="flat", borderwidth=0)
+            font=self.FONTS["control"],
+            padding=[self.SP["lg"], self.SP["xs"] + 2],
+            relief="flat", borderwidth=0)
         s.map("Danger.TButton",
             background=[("active", "#a01e18")])
 
-        # ── Notebook tabs ─────────────────────────────────────────────────────
+        # ── Notebook tabs (navy-800 strip) ─────────────────────────────────────
         s.configure("TNotebook", background=C_NAVY_800, borderwidth=0)
         s.configure("TNotebook.Tab",
             background=C_NAVY_800, foreground="#C7D6E6",
-            font=("Segoe UI", 9, "bold"),
-            padding=[16, 7])
+            font=self.FONTS["control"],
+            padding=[self.SP["lg"], self.SP["sm"] - 1])
         s.map("TNotebook.Tab",
-            background=[("selected", C_BG),        ("active", "#1e4a73")],
-            foreground=[("selected", C_NAVY_900),   ("active", C_SURFACE)])
+            background=[("selected", C_BG), ("active", "#1E4A73")],
+            foreground=[("selected", C_NAVY_900), ("active", C_SURFACE)])
 
-        # ── Entry / Combobox ──────────────────────────────────────────────────
+        # ── Entry / Combobox ───────────────────────────────────────────────────
         s.configure("TEntry",
             fieldbackground=C_SURFACE, foreground=C_INK_900,
             insertcolor=C_BLUE_600, bordercolor=C_LINE_200,
-            padding=[8, 6])
+            padding=[self.SP["sm"], self.SP["xs"] + 2])
         s.map("TEntry", bordercolor=[("focus", C_BLUE_600)])
         s.configure("TCombobox",
             fieldbackground=C_SURFACE, foreground=C_INK_900,
             selectbackground=C_BLUE_600, selectforeground=C_SURFACE,
-            padding=[6, 5])
+            bordercolor=C_LINE_200, arrowcolor=C_INK_500,
+            padding=[self.SP["sm"], self.SP["xs"] + 1])
         s.map("TCombobox",
-            fieldbackground=[("focus", C_BLUE_050)],
+            fieldbackground=[("readonly", C_SURFACE), ("focus", C_BLUE_050)],
             bordercolor=[("focus", C_BLUE_600)])
 
-        # ── Checkbutton / Radiobutton ─────────────────────────────────────────
-        s.configure("TCheckbutton", background=C_BG, foreground=C_INK_900)
+        # ── Checkbutton / Radiobutton ──────────────────────────────────────────
+        s.configure("TCheckbutton", background=C_BG, foreground=C_INK_900,
+                    font=self.FONTS["body"])
         s.map("TCheckbutton", background=[("active", C_BG)])
-        s.configure("TRadiobutton", background=C_BG, foreground=C_INK_900)
+        s.configure("TRadiobutton", background=C_BG, foreground=C_INK_900,
+                    font=self.FONTS["body"])
         s.map("TRadiobutton", background=[("active", C_BG)])
 
-        # ── Treeview ──────────────────────────────────────────────────────────
+        # ── Treeview (table view) ──────────────────────────────────────────────
         s.configure("Treeview",
             background=C_SURFACE, fieldbackground=C_SURFACE,
-            foreground=C_INK_900, rowheight=32)
+            foreground=C_INK_900, rowheight=32, borderwidth=0,
+            font=self.FONTS["body"])
         s.configure("Treeview.Heading",
             background=C_NAVY_900, foreground=C_SURFACE,
-            font=("Segoe UI", 9, "bold"), relief="flat")
-        s.map("Treeview.Heading",
-            background=[("active", C_NAVY_800)])
+            font=self.FONTS["label"], relief="flat", padding=[self.SP["sm"], 6])
+        s.map("Treeview.Heading", background=[("active", C_NAVY_800)])
         s.map("Treeview",
             background=[("selected", C_BLUE_050)],
             foreground=[("selected", C_INK_900)])
 
-        # ── Scrollbar ─────────────────────────────────────────────────────────
+        # ── Scrollbar ──────────────────────────────────────────────────────────
         s.configure("TScrollbar",
             background=C_LINE_100, troughcolor=C_BG,
             arrowcolor=C_INK_500, borderwidth=0)
 
-        # ── Separator ─────────────────────────────────────────────────────────
+        # ── Separator ──────────────────────────────────────────────────────────
         s.configure("TSeparator", background=C_LINE_200)
 
-        # ── Filter bar ────────────────────────────────────────────────────────
-        s.configure("Filter.TFrame",      background=C_BG)
-        s.configure("Filter.TLabel",      background=C_BG, foreground=C_INK_600,
-                    font=("Segoe UI", 9, "bold"), padding=(0, 0, 2, 0))
-        s.configure("Filter.TCheckbutton", background=C_BG, foreground=C_INK_900)
-        s.map("Filter.TCheckbutton",       background=[("active", C_BG)])
+        # ── Toolbar / filter bar helpers ───────────────────────────────────────
+        s.configure("Filter.TFrame", background=C_BG)
+        s.configure("Filter.TLabel", background=C_BG, foreground=C_INK_600,
+                    font=self.FONTS["label"], padding=(0, 0, 2, 0))
+        s.configure("Filter.TCheckbutton", background=C_BG, foreground=C_INK_900,
+                    font=self.FONTS["body"])
+        s.map("Filter.TCheckbutton", background=[("active", C_BG)])
+        s.configure("Count.TLabel", background=C_BG, foreground=C_INK_600,
+                    font=self.FONTS["body"])
 
-        # ── Status bar ────────────────────────────────────────────────────────
+        # ── Status bar (navy-900) ──────────────────────────────────────────────
         s.configure("Status.TFrame", background=C_NAVY_900)
         s.configure("Status.TLabel", background=C_NAVY_900, foreground=C_SURFACE,
-                    font=("Segoe UI", 9))
+                    font=self.FONTS["body"])
 
     # ---------- layout ----------
 
@@ -663,49 +706,73 @@ class App(tk.Tk):
         self.config(menu=menubar)
 
     def _build_header(self) -> None:
-        """Navy banner at the very top with the app title."""
-        hdr = tk.Frame(self, bg=C_NAVY_900, pady=8)
+        """Navy-900 app bar: rounded white logo chip + title (design system §appbar)."""
+        hdr = tk.Frame(self, bg=C_NAVY_900)
         hdr.pack(side="top", fill="x")
 
-        tk.Label(
-            hdr, text="  \U0001f3b2  Board Game Library",
-            bg=C_NAVY_900, fg=C_SURFACE,
-            font=("Segoe UI", 13, "bold"),
-        ).pack(side="left", padx=(8, 0))
+        inner = tk.Frame(hdr, bg=C_NAVY_900)
+        inner.pack(side="left", padx=self.SP["xl"], pady=self.SP["md"])
 
-        # Separator: white line, then a darker shadow stripe
-        tk.Frame(self, bg="#ffffff", height=3).pack(side="top", fill="x")
-        tk.Frame(self, bg="#c8d0e0", height=1).pack(side="top", fill="x")
+        # Logo chip — white square with the die glyph (closest Tk analogue to the
+        # rounded logo tile in the prototype)
+        logo = tk.Label(
+            inner, text="\U0001f3b2",
+            bg=C_SURFACE, fg=C_NAVY_900,
+            font=("Segoe UI", 16, "bold"),
+            width=2, padx=4, pady=2,
+        )
+        logo.pack(side="left", padx=(0, self.SP["md"]))
+
+        tk.Label(
+            inner, text="Board Game Library",
+            bg=C_NAVY_900, fg=C_SURFACE,
+            font=self.FONTS["title"],
+        ).pack(side="left")
+
+        # Hairline under the app bar (line_200 over the navy/grey seam)
+        tk.Frame(self, bg=C_LINE_200, height=1).pack(side="top", fill="x")
 
     def _build_toolbar(self, parent=None) -> None:
-        """Search bar + view toggle + filter bar. Called from _build_games_tab()."""
-        parent = parent or self
+        """Toolbar (search + segmented view toggle), filter bar, and chips row.
 
-        # ── toolbar row: search + view toggle ────────────────────────────────
-        bar = ttk.Frame(parent, padding=(16, 8, 16, 4))
+        Built from the prototype's .toolbar / .filters / .chips structure:
+          • search-first: one wide labelled input + a Quiet "Clear"
+          • one segmented Grid/Table toggle with a clear pressed state
+          • each filter = an UPPERCASE label sitting above its control
+          • a Quiet "Reset filters" and a live game count
+        """
+        parent = parent or self
+        SP = self.SP
+
+        # ── toolbar row: search field (expands) + segmented view toggle ─────────
+        bar = ttk.Frame(parent, padding=(SP["lg"], SP["md"], SP["lg"], SP["xs"]))
         bar.pack(side="top", fill="x")
 
-        # Search field (label above, entry below)
         search_field = ttk.Frame(bar, style="Filter.TFrame")
-        search_field.pack(side="left", fill="x", expand=True, padx=(0, 12))
+        search_field.pack(side="left", fill="x", expand=True, padx=(0, SP["md"]))
         ttk.Label(search_field, text="SEARCH", style="Filter.TLabel").pack(anchor="w")
+
         self.search_var = tk.StringVar()
         def _on_search_changed(*_):
             if self._search_after_id:
                 self.after_cancel(self._search_after_id)
             self._search_after_id = self.after(250, self.refresh_games)
         self.search_var.trace_add("write", _on_search_changed)
+
         search_row = ttk.Frame(search_field, style="Filter.TFrame")
         search_row.pack(fill="x")
-        ttk.Entry(search_row, textvariable=self.search_var).pack(
-            side="left", fill="x", expand=True)
+        search_entry = ttk.Entry(search_row, textvariable=self.search_var)
+        search_entry.pack(side="left", fill="x", expand=True)
         ttk.Button(search_row, text="Clear", style="Quiet.TButton",
-                   command=lambda: self.search_var.set("")).pack(side="left", padx=(4, 0))
+                   command=lambda: self.search_var.set("")).pack(side="left", padx=(SP["xs"], 0))
 
-        # View toggle — segmented control style
-        seg_frame = tk.Frame(bar, bg=C_SURFACE,
+        # Segmented Grid/Table control — pressed segment = blue-050 tint
+        seg_field = ttk.Frame(bar, style="Filter.TFrame")
+        seg_field.pack(side="right")
+        ttk.Label(seg_field, text="VIEW", style="Filter.TLabel").pack(anchor="w")
+        seg_frame = tk.Frame(seg_field, bg=C_SURFACE,
                              highlightbackground=C_LINE_200, highlightthickness=1, bd=0)
-        seg_frame.pack(side="right")
+        seg_frame.pack(anchor="e")
 
         def _view_btn(text, mode):
             active = self._view_mode == mode
@@ -714,31 +781,38 @@ class App(tk.Tk):
                 bg=C_BLUE_050 if active else C_SURFACE,
                 fg=C_BLUE_800 if active else C_INK_600,
                 activebackground=C_BLUE_050, activeforeground=C_BLUE_800,
-                relief="flat", bd=0,
-                font=("Segoe UI", 9, "bold"),
-                padx=12, pady=5, cursor="hand2",
+                relief="flat", bd=0, font=self.FONTS["control"],
+                padx=SP["md"], pady=SP["xs"] + 1, cursor="hand2",
                 command=lambda m=mode: self._set_view(m),
             )
             btn.pack(side="left")
             return btn
 
         self._btn_cards = _view_btn("⊞  Cards", "cards")
-        # divider between seg buttons
         tk.Frame(seg_frame, bg=C_LINE_200, width=1).pack(side="left", fill="y")
         self._btn_table = _view_btn("≡  Table", "table")
 
-        # ── filter bar: each filter is a labeled group (label above combobox) ──
-        fbar = ttk.Frame(parent, style="Filter.TFrame", padding=(16, 4, 16, 8))
+        # ── filter bar: labelled groups, bottom-aligned ────────────────────────
+        fbar = ttk.Frame(parent, style="Filter.TFrame",
+                         padding=(SP["lg"], SP["xs"], SP["lg"], SP["sm"]))
         fbar.pack(side="top", fill="x")
 
-        def fgroup(label_text, widget_factory, pack_kw=None):
-            """Create a labeled filter group: uppercase label above a widget."""
+        def fgroup(label_text, widget_factory):
             frame = ttk.Frame(fbar, style="Filter.TFrame")
-            frame.pack(side="left", **(pack_kw or {"padx": (0, 12)}))
+            frame.pack(side="left", padx=(0, SP["md"]), anchor="s")
             ttk.Label(frame, text=label_text, style="Filter.TLabel").pack(anchor="w")
             w = widget_factory(frame)
             w.pack(fill="x")
             return w
+
+        def fcheck(text, var):
+            """A checkbox bottom-aligned to sit level with the combobox controls."""
+            frame = ttk.Frame(fbar, style="Filter.TFrame")
+            frame.pack(side="left", padx=(0, SP["md"]), anchor="s")
+            ttk.Label(frame, text=" ", style="Filter.TLabel").pack(anchor="w")  # spacer
+            ttk.Checkbutton(frame, text=text, variable=var,
+                            command=self.refresh_games,
+                            style="Filter.TCheckbutton").pack(anchor="w", pady=(0, 3))
 
         self.players_var = tk.StringVar(value="Any")
         fgroup("PLAYERS", lambda p: ttk.Combobox(
@@ -746,14 +820,8 @@ class App(tk.Tk):
             values=["Any", "1", "2", "3", "4", "5", "6", "7", "8+"],
         )).bind("<<ComboboxSelected>>", lambda *_: self.refresh_games())
 
-        # "Exact only" checkbox — sits after Players, vertically bottom-aligned
-        exact_frame = ttk.Frame(fbar, style="Filter.TFrame")
-        exact_frame.pack(side="left", padx=(0, 12))
-        ttk.Label(exact_frame, text="", style="Filter.TLabel").pack(anchor="w")  # spacer
         self.exact_players_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(exact_frame, text="Exact", variable=self.exact_players_var,
-                        command=self.refresh_games,
-                        style="Filter.TCheckbutton").pack(anchor="w")
+        fcheck("Exact", self.exact_players_var)
 
         self.best_at_var = tk.StringVar(value="Any")
         fgroup("BEST AT", lambda p: ttk.Combobox(
@@ -763,53 +831,45 @@ class App(tk.Tk):
 
         self.time_var = tk.StringVar(value="Any")
         fgroup("PLAY TIME", lambda p: ttk.Combobox(
-            p, textvariable=self.time_var, width=11, state="readonly",
+            p, textvariable=self.time_var, width=12, state="readonly",
             values=["Any", "≤ 30 min", "31–60 min", "61–90 min", "91–120 min", "121+ min"],
         )).bind("<<ComboboxSelected>>", lambda *_: self.refresh_games())
 
         self.weight_var = tk.StringVar(value="Any")
         fgroup("COMPLEXITY", lambda p: ttk.Combobox(
-            p, textvariable=self.weight_var, width=11, state="readonly",
+            p, textvariable=self.weight_var, width=12, state="readonly",
             values=["Any", "Light (1–2)", "Medium (2–3)", "Heavy (3–5)"],
         )).bind("<<ComboboxSelected>>", lambda *_: self.refresh_games())
 
         self.status_filter_var = tk.StringVar(value="Any")
         fgroup("STATUS", lambda p: ttk.Combobox(
-            p, textvariable=self.status_filter_var, width=11, state="readonly",
+            p, textvariable=self.status_filter_var, width=12, state="readonly",
             values=["Any", "Available", "Checked out"],
         )).bind("<<ComboboxSelected>>", lambda *_: self.refresh_games())
 
-        # Favorites checkbox
-        fav_frame = ttk.Frame(fbar, style="Filter.TFrame")
-        fav_frame.pack(side="left", padx=(0, 12))
-        ttk.Label(fav_frame, text="", style="Filter.TLabel").pack(anchor="w")
         self.favorites_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(fav_frame, text="Favorites", variable=self.favorites_var,
-                        command=self.refresh_games,
-                        style="Filter.TCheckbutton").pack(anchor="w")
+        fcheck("Favorites", self.favorites_var)
 
         self.tag_filter_var = tk.StringVar(value="Any")
         self.tag_filter_cb = fgroup("TAG", lambda p: ttk.Combobox(
-            p, textvariable=self.tag_filter_var, width=11, state="readonly",
+            p, textvariable=self.tag_filter_var, width=12, state="readonly",
             values=["Any"],
         ))
         self.tag_filter_cb.bind("<<ComboboxSelected>>", lambda *_: self.refresh_games())
 
-        # Reset + count at the end
         reset_frame = ttk.Frame(fbar, style="Filter.TFrame")
-        reset_frame.pack(side="left", padx=(4, 0))
-        ttk.Label(reset_frame, text="", style="Filter.TLabel").pack(anchor="w")
+        reset_frame.pack(side="left", padx=(SP["xs"], 0), anchor="s")
+        ttk.Label(reset_frame, text=" ", style="Filter.TLabel").pack(anchor="w")
         ttk.Button(reset_frame, text="Reset filters", style="Quiet.TButton",
-                   command=self._reset_filters).pack(anchor="w")
+                   command=self._reset_filters).pack(anchor="w", pady=(0, 3))
 
-        # Game count (far right)
-        self._count_label = ttk.Label(fbar, text="", style="Filter.TLabel")
-        self._count_label.pack(side="right")
+        # Live game count, far right (meta row in the prototype)
+        self._count_label = ttk.Label(fbar, text="", style="Count.TLabel")
+        self._count_label.pack(side="right", anchor="s", pady=(0, 4))
 
-        # ── Active filter chips row (hidden when no filters active) ───────────
+        # ── active-filter chips row — packed on demand by _refresh_chips() ──────
         self._chips_frame = ttk.Frame(parent, style="Filter.TFrame",
-                                      padding=(16, 0, 16, 6))
-        # Packed on demand by _refresh_chips()
+                                      padding=(SP["lg"], 0, SP["lg"], SP["sm"] - 2))
 
     def _refresh_chips(self) -> None:
         """Rebuild the active-filter chips row below the filter bar."""
@@ -846,12 +906,13 @@ class App(tk.Tk):
         if active:
             self._chips_frame.pack(side="top", fill="x")
             for label, value, clear_fn in active:
+                # Pill chip: blue-050 fill, blue-800 text, tiny × dismiss button
                 chip = tk.Frame(self._chips_frame, bg=C_BLUE_050)
-                chip.pack(side="left", padx=(0, 4), pady=(0, 2))
+                chip.pack(side="left", padx=(0, self.SP["sm"]), pady=(0, 2))
                 tk.Label(chip, text=f"{label}: {value}",
                          bg=C_BLUE_050, fg=C_BLUE_800,
-                         font=("Segoe UI", 9, "bold"),
-                         padx=8, pady=3).pack(side="left")
+                         font=self.FONTS["label"],
+                         padx=self.SP["md"], pady=self.SP["xs"]).pack(side="left")
 
                 def _make_dismiss(fn):
                     def _dismiss():
@@ -863,7 +924,8 @@ class App(tk.Tk):
                           bg=C_BLUE_050, fg=C_BLUE_700,
                           activebackground=C_SURFACE, activeforeground=C_BLUE_700,
                           font=("Segoe UI", 11, "bold"),
-                          relief="flat", bd=0, padx=6, pady=1, cursor="hand2",
+                          relief="flat", bd=0, padx=self.SP["sm"], pady=1,
+                          cursor="hand2",
                           command=_make_dismiss(clear_fn)).pack(side="left")
         else:
             self._chips_frame.pack_forget()
@@ -891,18 +953,19 @@ class App(tk.Tk):
         self._build_dashboard_tab()
 
     def _build_status_bar(self) -> None:
+        """Navy-900 status strip pinned to the bottom edge."""
         self.status_var = tk.StringVar(value="Ready.")
         bar = ttk.Frame(self, style="Status.TFrame")
         bar.pack(side="bottom", fill="x")
         ttk.Label(
             bar, textvariable=self.status_var, anchor="w",
-            style="Status.TLabel", padding=(10, 4),
+            style="Status.TLabel", padding=(self.SP["md"], self.SP["xs"] + 1),
         ).pack(side="left", fill="x", expand=True)
 
     # ---------- dashboard tab ----------
 
     def _build_dashboard_tab(self) -> None:
-        outer = ttk.Frame(self.dashboard_tab, padding=16)
+        outer = ttk.Frame(self.dashboard_tab, padding=self.SP["xl"])
         outer.pack(fill="both", expand=True)
 
         # Scrollable canvas so the dashboard works at any window height
@@ -945,32 +1008,35 @@ class App(tk.Tk):
 
         def section(parent, title):
             ttk.Label(parent, text=title,
-                      font=("Segoe UI", 13, "bold"), foreground=C_NAVY_900).pack(anchor="w", pady=(16, 4))
-            ttk.Separator(parent, orient="horizontal").pack(fill="x", pady=(0, 8))
+                      font=self.FONTS["card_title"], foreground=C_NAVY_900,
+                      background=C_BG).pack(anchor="w", pady=(self.SP["lg"], self.SP["xs"]))
+            ttk.Separator(parent, orient="horizontal").pack(fill="x", pady=(0, self.SP["sm"]))
 
-        def stat_card(parent, label, value, color=C_NAVY, tab=None):
-            f = tk.Frame(parent, bg=color, padx=16, pady=10, relief="flat",
+        def stat_card(parent, label, value, color=C_NAVY_900, tab=None):
+            # Solid coloured stat tile (navy / green / purple / red per token map)
+            f = tk.Frame(parent, bg=color, padx=self.SP["lg"], pady=self.SP["md"],
+                         highlightbackground=color, highlightthickness=1,
                          cursor="hand2" if tab else "")
-            f.pack(side="left", expand=True, fill="both", padx=(0, 8))
-            val_lbl = tk.Label(f, text=str(value), bg=color, fg=C_WHITE,
-                               font=("Segoe UI", 22, "bold"))
+            f.pack(side="left", expand=True, fill="both", padx=(0, self.SP["sm"]))
+            val_lbl = tk.Label(f, text=str(value), bg=color, fg=C_SURFACE,
+                               font=self.FONTS["display"])
             val_lbl.pack()
-            txt_lbl = tk.Label(f, text=label, bg=color, fg=C_WHITE,
-                               font=("Segoe UI", 9))
+            txt_lbl = tk.Label(f, text=label, bg=color, fg=C_SURFACE,
+                               font=self.FONTS["label"])
             txt_lbl.pack()
             if tab is not None:
                 _jump = lambda e, t=tab: self.nb.select(t)
                 for w in (f, val_lbl, txt_lbl):
                     w.bind("<Button-1>", _jump)
-                f.bind("<Enter>", lambda e, fr=f: fr.configure(relief="raised"))
-                f.bind("<Leave>", lambda e, fr=f: fr.configure(relief="flat"))
+                f.bind("<Enter>", lambda e, fr=f: fr.configure(highlightbackground=C_SURFACE))
+                f.bind("<Leave>", lambda e, fr=f, cc=color: fr.configure(highlightbackground=cc))
 
         # ── stat cards row ────────────────────────────────────────────────────
         cards_row = tk.Frame(inner, bg=C_BG)
-        cards_row.pack(fill="x", pady=(0, 4))
+        cards_row.pack(fill="x", pady=(0, self.SP["xs"]))
         stat_card(cards_row, "Games",       summary["total_games"],   C_NAVY_900, tab=self.games_tab)
         stat_card(cards_row, "Total Plays", summary["total_plays"],   C_OK_SOLID, tab=self.plays_tab)
-        stat_card(cards_row, "Members",     summary["total_members"], "#4a148c",  tab=self.members_tab)
+        stat_card(cards_row, "Members",     summary["total_members"], "#4A148C",  tab=self.members_tab)
         stat_card(cards_row, "Checked Out", summary["checked_out"],
                   C_DR_SOLID if summary["checked_out"] else C_INK_600,
                   tab=self.history_tab)
@@ -978,7 +1044,8 @@ class App(tk.Tk):
         # ── currently checked out ────────────────────────────────────────────
         section(inner, "Currently Checked Out")
         if not checked_out:
-            ttk.Label(inner, text="All games are available.", foreground=C_INK_500).pack(anchor="w")
+            ttk.Label(inner, text="All games are available.",
+                      style="Muted.TLabel").pack(anchor="w")
         else:
             cols = ("Game", "Borrower", "Since", "Due")
             tree = ttk.Treeview(inner, columns=cols, show="headings", height=min(len(checked_out), 6))
@@ -988,7 +1055,8 @@ class App(tk.Tk):
             tree.column("Borrower", width=160)
             tree.column("Since",    width=100, anchor="center")
             tree.column("Due",      width=100, anchor="center")
-            tree.tag_configure("overdue", foreground=C_DR_TEXT, font=("Segoe UI", 9, "bold"))
+            tree.tag_configure("overdue", foreground=C_DR_TEXT,
+                               font=self.FONTS["body_strong"])
             for row in checked_out:
                 since = row["checked_out_at"][:10]
                 due   = row["due_date"] or "—"
@@ -1000,37 +1068,37 @@ class App(tk.Tk):
 
         # ── two-column lower section ─────────────────────────────────────────
         lower = tk.Frame(inner, bg=C_BG)
-        lower.pack(fill="both", expand=True, pady=(8, 0))
+        lower.pack(fill="both", expand=True, pady=(self.SP["sm"], 0))
         lower.columnconfigure(0, weight=1)
         lower.columnconfigure(1, weight=1)
 
         # Recent plays (left)
         lf = ttk.Frame(lower)
-        lf.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        lf.grid(row=0, column=0, sticky="nsew", padx=(0, self.SP["sm"]))
         section(lf, "Recent Plays")
         if not recent:
-            ttk.Label(lf, text="No plays logged yet.", foreground=C_INK_500).pack(anchor="w")
+            ttk.Label(lf, text="No plays logged yet.", style="Muted.TLabel").pack(anchor="w")
         else:
             for r in recent:
                 date = r["played_at"][:10]
                 winner = f"  🏆 {r['winner']}" if r["winner"] else ""
                 ttk.Label(lf, text=f"{date}  {r['game_name']}{winner}",
-                          font=("Segoe UI", 9)).pack(anchor="w", pady=1)
+                          font=self.FONTS["body"]).pack(anchor="w", pady=1)
 
         # Top games + top winners (right)
         rf = ttk.Frame(lower)
         rf.grid(row=0, column=1, sticky="nsew")
         section(rf, "Most Played")
         if not top_games:
-            ttk.Label(rf, text="No plays yet.", foreground=C_INK_500).pack(anchor="w")
+            ttk.Label(rf, text="No plays yet.", style="Muted.TLabel").pack(anchor="w")
         else:
             for i, r in enumerate(top_games, 1):
                 ttk.Label(rf, text=f"{i}. {r['name']}  ({r['play_count']} play{'s' if r['play_count'] != 1 else ''})",
-                          font=("Segoe UI", 9)).pack(anchor="w", pady=1)
+                          font=self.FONTS["body"]).pack(anchor="w", pady=1)
 
         section(rf, "Top Winners")
         if not top_wins:
-            ttk.Label(rf, text="No winners recorded yet.", foreground=C_INK_500).pack(anchor="w")
+            ttk.Label(rf, text="No winners recorded yet.", style="Muted.TLabel").pack(anchor="w")
         else:
             for i, r in enumerate(top_wins):
                 row = tk.Frame(rf, bg=C_BG)
@@ -1043,14 +1111,14 @@ class App(tk.Tk):
                     if key not in self._ribbon_photos:
                         self._ribbon_photos[key] = self._make_ribbon_photo(rank, 38)
                     ph = self._ribbon_photos[key]
-                    tk.Label(row, image=ph, bg=C_BG).pack(side="left", padx=(0, 6))
+                    tk.Label(row, image=ph, bg=C_BG).pack(side="left", padx=(0, self.SP["sm"] - 2))
                 else:
                     tk.Label(row, text=f"{i + 1}.", bg=C_BG,
-                             font=("Segoe UI", 9, "bold"),
-                             foreground=C_INK_500, width=3).pack(side="left", padx=(0, 6))
+                             font=self.FONTS["body_strong"],
+                             foreground=C_INK_500, width=3).pack(side="left", padx=(0, self.SP["sm"] - 2))
                 wins = r['win_count']
                 ttk.Label(row, text=f"{r['winner']}  ({wins} win{'s' if wins != 1 else ''})",
-                          font=("Segoe UI", 9)).pack(side="left")
+                          font=self.FONTS["body"]).pack(side="left")
 
     # ---------- games tab ----------
 
@@ -1152,19 +1220,20 @@ class App(tk.Tk):
         self.games_tree.tag_configure("expansion", background="#f3e5f5")
 
         # ── bulk-action toolbar (shown below tree, always present) ────────────
-        bulk_bar = ttk.Frame(parent)
-        bulk_bar.pack(side="bottom", fill="x", pady=(4, 0))
-        ttk.Label(bulk_bar, text="Selected:").pack(side="left", padx=(4, 6))
-        ttk.Button(bulk_bar, text="★ Favorite",
+        bulk_bar = ttk.Frame(parent, padding=(self.SP["xs"], self.SP["xs"], 0, 0))
+        bulk_bar.pack(side="bottom", fill="x")
+        ttk.Label(bulk_bar, text="Selected:",
+                  font=self.FONTS["body_strong"]).pack(side="left", padx=(self.SP["xs"], self.SP["sm"]))
+        ttk.Button(bulk_bar, text="★ Favorite", style="Ghost.TButton",
                    command=self._bulk_favorite).pack(side="left", padx=2)
-        ttk.Button(bulk_bar, text="☆ Unfavorite",
+        ttk.Button(bulk_bar, text="☆ Unfavorite", style="Ghost.TButton",
                    command=self._bulk_unfavorite).pack(side="left", padx=2)
-        ttk.Button(bulk_bar, text="Tag…",
+        ttk.Button(bulk_bar, text="Tag…", style="Ghost.TButton",
                    command=self._bulk_tag).pack(side="left", padx=2)
-        ttk.Button(bulk_bar, text="Delete",
+        ttk.Button(bulk_bar, text="Delete", style="Danger.TButton",
                    command=self._bulk_delete).pack(side="left", padx=2)
         ttk.Label(bulk_bar, text="(Ctrl+click or Shift+click to select multiple)",
-                  foreground=C_INK_500, font=("Segoe UI", 7)).pack(side="left", padx=(10, 0))
+                  style="Muted.TLabel").pack(side="left", padx=(self.SP["md"], 0))
 
     def _set_view(self, mode: str) -> None:
         if mode == self._view_mode:
@@ -1422,7 +1491,8 @@ class App(tk.Tk):
                 if self._filters_active()
                 else 'No games yet. Use File → Import from BGG… or Import collection CSV… to get started.'
             )
-            empty = ttk.Label(self.games_inner, text=msg, padding=20)
+            empty = ttk.Label(self.games_inner, text=msg, style="Muted.TLabel",
+                              padding=self.SP["xl"])
             empty.grid(row=0, column=0)
             self._cards.append(empty)
             self.games_canvas.itemconfigure(self.games_window_id, state="normal")
@@ -1686,6 +1756,19 @@ class App(tk.Tk):
         menu.tk_popup(event.x_root, event.y_root)
 
     def _build_card(self, game, loan, play_counts: dict) -> tuple:
+        """Build one game card per the design-system .card spec.
+
+        Layout, top → bottom:
+          • full-width cover image (200px) with the favourite ★ overlaid on the
+            cover's top-right corner, and an Expansion ribbon on the bottom-left
+          • status badge  (● + word + colour — never colour alone)
+          • optional loaned-to line
+          • card title (13 bold) + year (11, ink-600)
+          • specs row (players · time) and best-at (star colour)
+          • insert / plays meta badges
+          • ONE filled primary action, then a 2-col Ghost action grid
+        """
+        SP = self.SP
         out_to = None
         if loan is not None:
             out_to = f"{loan['first_name']} {loan['last_name']}".strip()
@@ -1694,23 +1777,23 @@ class App(tk.Tk):
         is_fav    = bool(game["is_favorite"])
         has_insert = bool(game["has_insert"])
         n_plays   = play_counts.get(bgg_id, 0)
+        due       = loan["due_date"] if loan else None
 
-        # ── determine status badge up front ───────────────────────────────────
+        # ── status badge (text + dot + colour) ─────────────────────────────────
         if out_to:
-            overdue = (loan and loan["due_date"]
-                       and loan["due_date"] < datetime.now().strftime("%Y-%m-%d"))
+            overdue = bool(due and due < datetime.now().strftime("%Y-%m-%d"))
             if overdue:
-                badge_txt, badge_bg, badge_fg = f"● Overdue — {out_to}", C_DR_BG, C_DR_TEXT
+                badge_txt, badge_bg, badge_fg = "● Overdue", C_DR_BG, C_DR_TEXT
             else:
-                badge_txt, badge_bg, badge_fg = f"● Checked out — {out_to}", C_WN_BG, C_WN_TEXT
+                badge_txt, badge_bg, badge_fg = "● Checked out", C_WN_BG, C_WN_TEXT
         else:
             badge_txt, badge_bg, badge_fg = "● Available", C_OK_BG, C_OK_TEXT
 
-        # ── card shell ────────────────────────────────────────────────────────
+        # ── card shell: white surface, 1px line-200 border (faux elevation) ────
         card = tk.Frame(self.games_inner, bg=C_SURFACE,
                         highlightbackground=C_LINE_200, highlightthickness=1, bd=0)
 
-        # ── cover: full-width image, fixed height ─────────────────────────────
+        # ── cover image (full width, fixed height) ─────────────────────────────
         _IH = 200
         img_canvas = tk.Canvas(card, height=_IH, bg=C_LINE_100,
                                highlightthickness=0, bd=0)
@@ -1721,110 +1804,100 @@ class App(tk.Tk):
         img_canvas.itemconfigure(_img_id, image=ph)
         img_canvas._card_img_ref = ph
 
-        def _on_cover_resize(e, iid=_img_id, h=_IH):
-            img_canvas.coords(iid, e.width // 2, h // 2)
-        img_canvas.bind("<Configure>", _on_cover_resize)
-
-        # Expansion badge at bottom-left of cover (info colors from design system)
-        if game["is_expansion"]:
-            img_canvas.create_rectangle(0, _IH - 20, 74, _IH,
-                                        fill=C_BLUE_050, outline="", width=0)
-            img_canvas.create_text(5, _IH - 10, anchor="w",
-                                   text="Expansion", fill=C_BLUE_800,
-                                   font=("Segoe UI", 7, "bold"))
-
-        # ── star button (header strip above cover) ────────────────────────────
-        header = tk.Frame(card, bg=C_SURFACE, pady=3)
-        header.pack(fill="x")
-        header.lift()  # ensure it renders above cover
-
-        star_lbl = tk.Label(
-            header,
-            text="★" if is_fav else "☆",
-            font=("Segoe UI", 13),
-            fg=C_STAR_FILL if is_fav else C_LINE_200,
-            bg=C_SURFACE, cursor="hand2",
+        # Favourite star — circular chip overlaid on the cover's top-right corner
+        star_bg = img_canvas.create_oval(0, 0, 0, 0, fill=C_SURFACE, outline="")
+        star_id = img_canvas.create_text(
+            0, 0, text="★" if is_fav else "☆",
+            fill=C_STAR_FILL if is_fav else C_INK_500,
+            font=("Segoe UI", 14), anchor="center",
         )
-        star_lbl.pack(side="right", padx=(0, 8))
-        star_lbl.bind("<Button-1>", lambda e, g=game: self.on_toggle_favorite(g))
 
-        # Re-pack so header appears ABOVE the image canvas
-        header.pack_forget()
-        img_canvas.pack_forget()
-        header.pack(fill="x")
-        img_canvas.pack(fill="x")
+        def _place_overlays(e=None, iid=_img_id, h=_IH):
+            w = img_canvas.winfo_width()
+            img_canvas.coords(iid, w // 2, h // 2)
+            sx, sy, r = w - 22, 22, 15
+            img_canvas.coords(star_bg, sx - r, sy - r, sx + r, sy + r)
+            img_canvas.coords(star_id, sx, sy)
+        img_canvas.bind("<Configure>", _place_overlays)
 
-        # ── card body ─────────────────────────────────────────────────────────
-        body = tk.Frame(card, bg=C_SURFACE, padx=16, pady=12)
-        body.pack(fill="x")
+        for _it in (star_bg, star_id):
+            img_canvas.tag_bind(_it, "<Button-1>",
+                                lambda e, g=game: self.on_toggle_favorite(g))
 
-        # Status badge — above title per design system
-        tk.Label(
-            body, text=badge_txt,
-            bg=badge_bg, fg=badge_fg,
-            font=("Segoe UI", 9, "bold"), padx=10, pady=4,
-        ).pack(anchor="w", pady=(0, 6))
+        # Expansion ribbon — info colours, bottom-left of cover
+        if game["is_expansion"]:
+            img_canvas.create_rectangle(0, _IH - 22, 80, _IH,
+                                        fill=C_BLUE_050, outline="")
+            img_canvas.create_text(SP["sm"], _IH - 11, anchor="w",
+                                   text="Expansion", fill=C_BLUE_800,
+                                   font=self.FONTS["label"])
 
-        # Title
-        ttk.Label(
-            body,
-            text=_shorten(game["name"]),
-            wraplength=220, justify="left",
-            font=("Segoe UI", 13, "bold"),
-            foreground=C_INK_900,
-        ).pack(anchor="w")
+        # ── card body ──────────────────────────────────────────────────────────
+        body = tk.Frame(card, bg=C_SURFACE, padx=SP["lg"], pady=SP["md"])
+        body.pack(fill="both", expand=True)
 
-        # Year
-        year_text = f"({game['year']})" if game["year"] else ""
-        ttk.Label(body, text=year_text, foreground=C_INK_600,
-                  font=("Segoe UI", 10)).pack(anchor="w")
+        # Status badge (above the title)
+        tk.Label(body, text=badge_txt, bg=badge_bg, fg=badge_fg,
+                 font=self.FONTS["label"], padx=SP["md"], pady=SP["xs"]
+                 ).pack(anchor="w", pady=(0, SP["sm"]))
 
-        # Specs: players + time on one row
+        # Loaned-to line
+        if out_to:
+            due_txt = f" · due {due}" if due else ""
+            tk.Label(body, text=f"To {out_to}{due_txt}",
+                     bg=C_SURFACE, fg=C_INK_600, font=self.FONTS["body"],
+                     anchor="w", justify="left").pack(anchor="w", pady=(0, SP["xs"]))
+
+        # Title (card_title) + year (body, ink-600)
+        tk.Label(body, text=_shorten(game["name"]),
+                 bg=C_SURFACE, fg=C_INK_900, font=self.FONTS["card_title"],
+                 wraplength=210, justify="left", anchor="w").pack(anchor="w")
+        if game["year"]:
+            tk.Label(body, text=str(game["year"]), bg=C_SURFACE, fg=C_INK_600,
+                     font=self.FONTS["body"]).pack(anchor="w")
+
+        # Specs row: players · time
         info = (
-            f"\U0001f465 {fmt_players(game['min_players'], game['max_players'])}  "
+            f"\U0001f465 {fmt_players(game['min_players'], game['max_players'])}   "
             f"⏱ {fmt_time(game['min_playtime'], game['max_playtime'], game['playing_time'])}"
         )
-        ttk.Label(body, text=info, foreground=C_INK_600,
-                  font=("Segoe UI", 10)).pack(anchor="w", pady=(3, 0))
+        tk.Label(body, text=info, bg=C_SURFACE, fg=C_INK_600,
+                 font=self.FONTS["body"]).pack(anchor="w", pady=(SP["xs"], 0))
 
-        # Best-at
+        # Best-at (star colour)
         if game["best_players"]:
-            ttk.Label(
-                body,
-                text=f"★ Best at {game['best_players']}",
-                foreground=C_STAR_TEXT,
-                font=("Segoe UI", 10),
-            ).pack(anchor="w")
+            tk.Label(body, text=f"★ Best at {game['best_players']}",
+                     bg=C_SURFACE, fg=C_STAR_TEXT,
+                     font=self.FONTS["body_strong"]).pack(anchor="w")
 
-        # Extra badges (insert, plays)
-        badge_row = ttk.Frame(body)
-        badge_row.pack(anchor="w", pady=(4, 0))
-        if has_insert:
-            tk.Label(badge_row, text="📦 Insert",
-                     bg=C_BLUE_050, fg=C_BLUE_700,
-                     font=("Segoe UI", 9), padx=5, pady=1,
-                     ).pack(side="left", padx=(0, 4))
-        if n_plays:
-            tk.Label(badge_row, text=f"🎮 {n_plays} play{'s' if n_plays != 1 else ''}",
-                     bg=C_OK_BG, fg=C_OK_TEXT,
-                     font=("Segoe UI", 9), padx=5, pady=1,
-                     ).pack(side="left")
+        # Meta badges: insert / plays
+        if has_insert or n_plays:
+            badge_row = tk.Frame(body, bg=C_SURFACE)
+            badge_row.pack(anchor="w", pady=(SP["xs"], 0))
+            if has_insert:
+                tk.Label(badge_row, text="📦 Insert", bg=C_BLUE_050, fg=C_BLUE_700,
+                         font=self.FONTS["label"], padx=SP["sm"] - 2, pady=1
+                         ).pack(side="left", padx=(0, SP["xs"]))
+            if n_plays:
+                tk.Label(badge_row,
+                         text=f"🎮 {n_plays} play{'s' if n_plays != 1 else ''}",
+                         bg=C_OK_BG, fg=C_OK_TEXT,
+                         font=self.FONTS["label"], padx=SP["sm"] - 2, pady=1
+                         ).pack(side="left")
 
-        # ── actions ───────────────────────────────────────────────────────────
-        tk.Frame(body, bg=C_SURFACE, height=8).pack()  # spacer
+        # ── actions: one filled primary, then 2-col Ghost grid ─────────────────
+        tk.Frame(body, bg=C_SURFACE, height=SP["sm"]).pack()  # spacer
 
-        # Primary action — full width
         if out_to:
             ttk.Button(body, text="Check In",
                        command=lambda g=game: self.on_check_in(g)
-                       ).pack(fill="x", pady=(0, 4))
+                       ).pack(fill="x", pady=(0, SP["xs"]))
         else:
             ttk.Button(body, text="Check Out",
                        command=lambda g=game: self.on_check_out(g)
-                       ).pack(fill="x", pady=(0, 4))
+                       ).pack(fill="x", pady=(0, SP["xs"]))
 
-        # Secondary — 2-column grid
-        sec = ttk.Frame(body)
+        sec = tk.Frame(body, bg=C_SURFACE)
         sec.pack(fill="x")
         sec.columnconfigure(0, weight=1)
         sec.columnconfigure(1, weight=1)
@@ -1836,19 +1909,16 @@ class App(tk.Tk):
                    ).grid(row=0, column=1, sticky="ew", padx=(2, 0))
         ttk.Button(sec, text="Edit", style="Ghost.TButton",
                    command=lambda g=game: self.on_edit_game(g)
-                   ).grid(row=1, column=0, columnspan=2, sticky="ew",
-                          pady=(3, 0))
+                   ).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(SP["xs"] - 1, 0))
 
-        # Hover highlight on card border
-        def _on_enter(e): card.configure(highlightbackground=C_INK_500)
-        def _on_leave(e): card.configure(highlightbackground=C_LINE_200)
-        card.bind("<Enter>", _on_enter)
-        card.bind("<Leave>", _on_leave)
+        # Hover: darken the card border (faux lift)
+        card.bind("<Enter>", lambda e: card.configure(highlightbackground=C_INK_500))
+        card.bind("<Leave>", lambda e: card.configure(highlightbackground=C_LINE_200))
 
-        # Right-click context menu
+        # Right-click context menu on the whole card
         def _card_right_click(event, g=game):
             self._show_card_context_menu(event, g)
-        for w in (card, header, img_canvas, body, sec):
+        for w in (card, img_canvas, body, sec):
             w.bind("<Button-3>", _card_right_click)
 
         self._bind_canvas_scroll(card)
@@ -1910,23 +1980,29 @@ class App(tk.Tk):
     # ---------- members tab ----------
 
     def _build_members_tab(self) -> None:
-        frame = ttk.Frame(self.members_tab, padding=8)
+        SP = self.SP
+        frame = ttk.Frame(self.members_tab, padding=SP["lg"])
         frame.pack(fill="both", expand=True)
 
+        ttk.Label(frame, text="Members", style="Section.TLabel").pack(anchor="w")
+        ttk.Separator(frame, orient="horizontal").pack(fill="x", pady=(SP["xs"], SP["md"]))
+
+        # Add-member form: labelled inputs, one primary + one ghost action
         form = ttk.Frame(frame)
         form.pack(fill="x")
-        ttk.Label(form, text="First name:").pack(side="left")
+        ttk.Label(form, text="First name", style="Filter.TLabel").pack(side="left", padx=(0, SP["xs"]))
         self.first_name_var = tk.StringVar()
         first_entry = ttk.Entry(form, textvariable=self.first_name_var, width=18)
-        first_entry.pack(side="left", padx=(4, 8))
+        first_entry.pack(side="left", padx=(0, SP["md"]))
         first_entry.bind("<Return>", lambda *_: self.on_add_member())
-        ttk.Label(form, text="Last name:").pack(side="left")
+        ttk.Label(form, text="Last name", style="Filter.TLabel").pack(side="left", padx=(0, SP["xs"]))
         self.last_name_var = tk.StringVar()
         last_entry = ttk.Entry(form, textvariable=self.last_name_var, width=18)
-        last_entry.pack(side="left", padx=(4, 8))
+        last_entry.pack(side="left", padx=(0, SP["md"]))
         last_entry.bind("<Return>", lambda *_: self.on_add_member())
         ttk.Button(form, text="Add member", command=self.on_add_member).pack(side="left")
-        ttk.Button(form, text="Remove selected", command=self.on_delete_member).pack(side="left", padx=(8, 0))
+        ttk.Button(form, text="Remove selected", style="Ghost.TButton",
+                   command=self.on_delete_member).pack(side="left", padx=(SP["sm"], 0))
 
         cols = ("name", "out", "since")
         self.members_tree = ttk.Treeview(frame, columns=cols, show="headings")
@@ -1936,12 +2012,11 @@ class App(tk.Tk):
         self.members_tree.column("name", width=240)
         self.members_tree.column("out", width=120, anchor="center")
         self.members_tree.column("since", width=160, anchor="center")
-        self.members_tree.pack(fill="both", expand=True, pady=(8, 0))
+        self.members_tree.pack(fill="both", expand=True, pady=(SP["md"], 0))
         self.members_tree.bind("<Double-1>", self._on_member_double_click)
 
-        tip = ttk.Label(frame, text="Double-click a member to see their checkout history.",
-                        foreground=C_INK_500, font=("Segoe UI", 8))
-        tip.pack(anchor="w", pady=(4, 0))
+        ttk.Label(frame, text="Double-click a member to see their checkout history.",
+                  style="Muted.TLabel").pack(anchor="w", pady=(SP["xs"], 0))
 
     def refresh_members(self) -> None:
         self.members_tree.delete(*self.members_tree.get_children())
@@ -2083,16 +2158,20 @@ class App(tk.Tk):
     # ---------- history tab ----------
 
     def _build_history_tab(self) -> None:
-        frame = ttk.Frame(self.history_tab, padding=8)
+        SP = self.SP
+        frame = ttk.Frame(self.history_tab, padding=SP["lg"])
         frame.pack(fill="both", expand=True)
+
+        ttk.Label(frame, text="Checkout History", style="Section.TLabel").pack(anchor="w")
+        ttk.Separator(frame, orient="horizontal").pack(fill="x", pady=(SP["xs"], SP["md"]))
 
         controls = ttk.Frame(frame)
         controls.pack(fill="x")
-        ttk.Label(controls, text="Filter:").pack(side="left")
+        ttk.Label(controls, text="Filter", style="Filter.TLabel").pack(side="left", padx=(0, SP["sm"]))
         self.history_filter = tk.StringVar(value="all")
-        ttk.Radiobutton(controls, text="All", variable=self.history_filter, value="all", command=self.refresh_history).pack(side="left", padx=4)
-        ttk.Radiobutton(controls, text="Currently out", variable=self.history_filter, value="open", command=self.refresh_history).pack(side="left", padx=4)
-        ttk.Radiobutton(controls, text="Returned", variable=self.history_filter, value="closed", command=self.refresh_history).pack(side="left", padx=4)
+        ttk.Radiobutton(controls, text="All", variable=self.history_filter, value="all", command=self.refresh_history).pack(side="left", padx=SP["xs"])
+        ttk.Radiobutton(controls, text="Currently out", variable=self.history_filter, value="open", command=self.refresh_history).pack(side="left", padx=SP["xs"])
+        ttk.Radiobutton(controls, text="Returned", variable=self.history_filter, value="closed", command=self.refresh_history).pack(side="left", padx=SP["xs"])
 
         cols = ("game", "member", "out", "due", "returned", "notes")
         self.history_tree = ttk.Treeview(frame, columns=cols, show="headings")
@@ -2109,14 +2188,13 @@ class App(tk.Tk):
         self.history_tree.column("returned", width=110, anchor="center")
         self.history_tree.column("notes",    width=180)
         self.history_tree.tag_configure("overdue", foreground=C_DR_TEXT,
-                                        font=("Segoe UI", 9, "bold"))
-        self.history_tree.pack(fill="both", expand=True, pady=(8, 0))
+                                        font=self.FONTS["body_strong"])
+        self.history_tree.pack(fill="both", expand=True, pady=(SP["md"], 0))
         self.history_tree.bind("<Double-1>",  self._on_history_double_click)
         self.history_tree.bind("<Button-3>",  self._on_history_right_click)
 
-        tip2 = ttk.Label(frame, text="Double-click or right-click a row to edit check-out / check-in details.",
-                         foreground=C_INK_500, font=("Segoe UI", 8))
-        tip2.pack(anchor="w", pady=(4, 0))
+        ttk.Label(frame, text="Double-click or right-click a row to edit check-out / check-in details.",
+                  style="Muted.TLabel").pack(anchor="w", pady=(SP["xs"], 0))
 
     def refresh_history(self) -> None:
         self.history_tree.delete(*self.history_tree.get_children())
@@ -3610,37 +3688,43 @@ class App(tk.Tk):
     # ---------- plays tab ----------
 
     def _build_plays_tab(self) -> None:
-        frame = ttk.Frame(self.plays_tab, padding=8)
+        SP = self.SP
+        frame = ttk.Frame(self.plays_tab, padding=SP["lg"])
         frame.pack(fill="both", expand=True)
 
-        controls = ttk.Frame(frame)
-        controls.pack(fill="x", pady=(0, 6))
+        ttk.Label(frame, text="Plays", style="Section.TLabel").pack(anchor="w")
+        ttk.Separator(frame, orient="horizontal").pack(fill="x", pady=(SP["xs"], SP["md"]))
 
-        ttk.Button(controls, text="Log Play...", command=lambda: self.on_log_play(
+        controls = ttk.Frame(frame)
+        controls.pack(fill="x", pady=(0, SP["sm"]))
+
+        # Primary action first; everything else is Ghost / Quiet
+        ttk.Button(controls, text="Log Play…", command=lambda: self.on_log_play(
             {"name": self.plays_game_var.get()}
             if self.plays_game_var.get() != "All games" else None
         )).pack(side="left")
-        ttk.Button(controls, text="Edit selected",
-                   command=self.on_edit_play).pack(side="left", padx=(6, 0))
+        ttk.Button(controls, text="Edit selected", style="Ghost.TButton",
+                   command=self.on_edit_play).pack(side="left", padx=(SP["sm"], 0))
 
-        ttk.Label(controls, text="  Filter by game:").pack(side="left")
+        ttk.Label(controls, text="FILTER BY GAME", style="Filter.TLabel"
+                  ).pack(side="left", padx=(SP["md"], SP["xs"]))
         self.plays_game_var = tk.StringVar(value="All games")
         self.plays_game_cb = ttk.Combobox(
             controls, textvariable=self.plays_game_var, width=30, state="readonly",
         )
-        self.plays_game_cb.pack(side="left", padx=(4, 0))
+        self.plays_game_cb.pack(side="left")
         self.plays_game_cb.bind("<<ComboboxSelected>>", lambda *_: self.refresh_plays())
 
         ttk.Button(controls, text="Clear filter", style="Quiet.TButton",
                    command=lambda: [self.plays_game_var.set("All games"), self.refresh_plays()]
-                   ).pack(side="left", padx=(4, 0))
+                   ).pack(side="left", padx=(SP["xs"], 0))
 
         self._lb_showing = False
-        self._lb_btn = ttk.Button(controls, text="🏆 Leaderboard",
+        self._lb_btn = ttk.Button(controls, text="🏆 Leaderboard", style="Ghost.TButton",
                                   command=self._toggle_leaderboard)
-        self._lb_btn.pack(side="left", padx=(6, 0))
+        self._lb_btn.pack(side="left", padx=(SP["sm"], 0))
 
-        ttk.Button(controls, text="Delete selected",
+        ttk.Button(controls, text="Delete selected", style="Danger.TButton",
                    command=self.on_delete_play).pack(side="right")
 
         # ── Play log pane ────────────────────────────────────────────────
