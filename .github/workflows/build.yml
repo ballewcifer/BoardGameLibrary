@@ -83,11 +83,9 @@ jobs:
           if-no-files-found: error
 
   # ── macOS: .dmg installer ────────────────────────────────────────────────────
-  # macos-13 is Intel (x86_64): runs natively on Intel Macs and via Rosetta
-  # on Apple Silicon. macos-14+ are arm64-only and won't run on Intel Macs.
   build-macos:
-    name: macOS installer (universal via Intel runner)
-    runs-on: macos-13
+    name: macOS installer (Apple Silicon)
+    runs-on: macos-latest
     if: github.event_name == 'push' || inputs.platform == 'all' || inputs.platform == 'macos'
 
     steps:
@@ -178,7 +176,7 @@ jobs:
             | Platform | File |
             |----------|------|
             | Windows 10/11 | `BoardGameLibrarySetup-v${{ steps.ver.outputs.VERSION }}.exe` |
-            | macOS 12+ | `BoardGameLibraryInstaller-v${{ steps.ver.outputs.VERSION }}.dmg` |
+            | macOS (Apple Silicon) | `BoardGameLibraryInstaller-v${{ steps.ver.outputs.VERSION }}.dmg` |
 
             Both installers are fully self-contained — no Python installation required.
 
