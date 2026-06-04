@@ -134,8 +134,8 @@ def _kr_set_password(pwd: str) -> None:
 from paths import DATA_DIR, DB_PATH, CONFIG_PATH, IMAGES_DIR
 from version import __version__ as APP_VERSION
 
-THUMB_SIZE = (140, 140)
-PLACEHOLDER_BG = "#dcdcdc"
+THUMB_SIZE = (240, 240)
+PLACEHOLDER_BG = C_LINE_100
 APP_CREATED   = "May 5, 2026"
 APP_AUTHOR    = "Ballewcifer"
 APP_CONTACT   = "ballewcifer@gmail.com"
@@ -676,120 +676,131 @@ class App(tk.Tk):
     def _build_toolbar(self, parent=None) -> None:
         """Search bar + view toggle + filter bar. Called from _build_games_tab()."""
         parent = parent or self
-        bar = ttk.Frame(parent, padding=(8, 6))
+
+        # ── toolbar row: search + view toggle ────────────────────────────────
+        bar = ttk.Frame(parent, padding=(16, 8, 16, 4))
         bar.pack(side="top", fill="x")
 
-        # ── search ────────────────────────────────────────────────────────────
-        ttk.Label(bar, text="SEARCH:", style="Filter.TLabel").pack(side="left")
+        # Search field (label above, entry below)
+        search_field = ttk.Frame(bar, style="Filter.TFrame")
+        search_field.pack(side="left", fill="x", expand=True, padx=(0, 12))
+        ttk.Label(search_field, text="SEARCH", style="Filter.TLabel").pack(anchor="w")
         self.search_var = tk.StringVar()
         def _on_search_changed(*_):
             if self._search_after_id:
                 self.after_cancel(self._search_after_id)
             self._search_after_id = self.after(250, self.refresh_games)
         self.search_var.trace_add("write", _on_search_changed)
-        entry = ttk.Entry(bar, textvariable=self.search_var, width=30)
-        entry.pack(side="left", padx=(4, 0))
-        ttk.Button(bar, text="Clear", style="Quiet.TButton",
+        search_row = ttk.Frame(search_field, style="Filter.TFrame")
+        search_row.pack(fill="x")
+        ttk.Entry(search_row, textvariable=self.search_var).pack(
+            side="left", fill="x", expand=True)
+        ttk.Button(search_row, text="Clear", style="Quiet.TButton",
                    command=lambda: self.search_var.set("")).pack(side="left", padx=(4, 0))
 
-        # ── view toggle ───────────────────────────────────────────────────────
-        ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=10)
-        ttk.Label(bar, text="View:").pack(side="left")
+        # View toggle — segmented control style
+        seg_frame = tk.Frame(bar, bg=C_SURFACE,
+                             highlightbackground=C_LINE_200, highlightthickness=1, bd=0)
+        seg_frame.pack(side="right")
 
         def _view_btn(text, mode):
             active = self._view_mode == mode
             btn = tk.Button(
-                bar, text=text,
-                bg=C_NAVY if active else C_WHITE,
-                fg=C_WHITE if active else C_NAVY,
-                activebackground=C_BLUE, activeforeground=C_WHITE,
-                relief="solid", bd=1,
+                seg_frame, text=text,
+                bg=C_BLUE_050 if active else C_SURFACE,
+                fg=C_BLUE_800 if active else C_INK_600,
+                activebackground=C_BLUE_050, activeforeground=C_BLUE_800,
+                relief="flat", bd=0,
                 font=("Segoe UI", 9, "bold"),
-                padx=10, pady=3, cursor="hand2",
+                padx=12, pady=5, cursor="hand2",
                 command=lambda m=mode: self._set_view(m),
             )
-            btn.pack(side="left", padx=(4, 0))
+            btn.pack(side="left")
             return btn
 
         self._btn_cards = _view_btn("⊞  Cards", "cards")
+        # divider between seg buttons
+        tk.Frame(seg_frame, bg=C_LINE_200, width=1).pack(side="left", fill="y")
         self._btn_table = _view_btn("≡  Table", "table")
 
-        # --- filter bar (second row, light-blue background) ---
-        fbar = ttk.Frame(parent, style="Filter.TFrame", padding=(8, 4, 8, 6))
+        # ── filter bar: each filter is a labeled group (label above combobox) ──
+        fbar = ttk.Frame(parent, style="Filter.TFrame", padding=(16, 4, 16, 8))
         fbar.pack(side="top", fill="x")
 
-        def flabel(text): return ttk.Label(fbar, text=text, style="Filter.TLabel")
-        def fcheck(text, var, cmd): return ttk.Checkbutton(fbar, text=text, variable=var,
-                                                           command=cmd, style="Filter.TCheckbutton")
+        def fgroup(label_text, widget_factory, pack_kw=None):
+            """Create a labeled filter group: uppercase label above a widget."""
+            frame = ttk.Frame(fbar, style="Filter.TFrame")
+            frame.pack(side="left", **(pack_kw or {"padx": (0, 12)}))
+            ttk.Label(frame, text=label_text, style="Filter.TLabel").pack(anchor="w")
+            w = widget_factory(frame)
+            w.pack(fill="x")
+            return w
 
-        # ── left-aligned filter widgets ───────────────────────────────────────
-        flabel("PLAYERS:").pack(side="left")
         self.players_var = tk.StringVar(value="Any")
-        players_cb = ttk.Combobox(
-            fbar, textvariable=self.players_var, width=6, state="readonly",
+        fgroup("PLAYERS", lambda p: ttk.Combobox(
+            p, textvariable=self.players_var, width=7, state="readonly",
             values=["Any", "1", "2", "3", "4", "5", "6", "7", "8+"],
-        )
-        players_cb.pack(side="left", padx=(4, 4))
-        players_cb.bind("<<ComboboxSelected>>", lambda *_: self.refresh_games())
+        )).bind("<<ComboboxSelected>>", lambda *_: self.refresh_games())
 
+        # "Exact only" checkbox — sits after Players, vertically bottom-aligned
+        exact_frame = ttk.Frame(fbar, style="Filter.TFrame")
+        exact_frame.pack(side="left", padx=(0, 12))
+        ttk.Label(exact_frame, text="", style="Filter.TLabel").pack(anchor="w")  # spacer
         self.exact_players_var = tk.BooleanVar(value=False)
-        fcheck("Exact only", self.exact_players_var, self.refresh_games).pack(side="left", padx=(0, 8))
+        ttk.Checkbutton(exact_frame, text="Exact", variable=self.exact_players_var,
+                        command=self.refresh_games,
+                        style="Filter.TCheckbutton").pack(anchor="w")
 
-        flabel("BEST AT:").pack(side="left")
         self.best_at_var = tk.StringVar(value="Any")
-        best_at_cb = ttk.Combobox(
-            fbar, textvariable=self.best_at_var, width=6, state="readonly",
+        fgroup("BEST AT", lambda p: ttk.Combobox(
+            p, textvariable=self.best_at_var, width=7, state="readonly",
             values=["Any", "1", "2", "3", "4", "5", "6", "7", "8+"],
-        )
-        best_at_cb.pack(side="left", padx=(4, 12))
-        best_at_cb.bind("<<ComboboxSelected>>", lambda *_: self.refresh_games())
+        )).bind("<<ComboboxSelected>>", lambda *_: self.refresh_games())
 
-        flabel("PLAY TIME:").pack(side="left")
         self.time_var = tk.StringVar(value="Any")
-        time_cb = ttk.Combobox(
-            fbar, textvariable=self.time_var, width=12, state="readonly",
+        fgroup("PLAY TIME", lambda p: ttk.Combobox(
+            p, textvariable=self.time_var, width=11, state="readonly",
             values=["Any", "≤ 30 min", "31–60 min", "61–90 min", "91–120 min", "121+ min"],
-        )
-        time_cb.pack(side="left", padx=(4, 12))
-        time_cb.bind("<<ComboboxSelected>>", lambda *_: self.refresh_games())
+        )).bind("<<ComboboxSelected>>", lambda *_: self.refresh_games())
 
-        flabel("COMPLEXITY:").pack(side="left")
         self.weight_var = tk.StringVar(value="Any")
-        weight_cb = ttk.Combobox(
-            fbar, textvariable=self.weight_var, width=12, state="readonly",
+        fgroup("COMPLEXITY", lambda p: ttk.Combobox(
+            p, textvariable=self.weight_var, width=11, state="readonly",
             values=["Any", "Light (1–2)", "Medium (2–3)", "Heavy (3–5)"],
-        )
-        weight_cb.pack(side="left", padx=(4, 12))
-        weight_cb.bind("<<ComboboxSelected>>", lambda *_: self.refresh_games())
+        )).bind("<<ComboboxSelected>>", lambda *_: self.refresh_games())
 
-        flabel("STATUS:").pack(side="left")
         self.status_filter_var = tk.StringVar(value="Any")
-        status_cb = ttk.Combobox(
-            fbar, textvariable=self.status_filter_var, width=12, state="readonly",
+        fgroup("STATUS", lambda p: ttk.Combobox(
+            p, textvariable=self.status_filter_var, width=11, state="readonly",
             values=["Any", "Available", "Checked out"],
-        )
-        status_cb.pack(side="left", padx=(4, 12))
-        status_cb.bind("<<ComboboxSelected>>", lambda *_: self.refresh_games())
+        )).bind("<<ComboboxSelected>>", lambda *_: self.refresh_games())
 
+        # Favorites checkbox
+        fav_frame = ttk.Frame(fbar, style="Filter.TFrame")
+        fav_frame.pack(side="left", padx=(0, 12))
+        ttk.Label(fav_frame, text="", style="Filter.TLabel").pack(anchor="w")
         self.favorites_var = tk.BooleanVar(value=False)
-        fcheck("Favorites only", self.favorites_var, self.refresh_games).pack(side="left", padx=(0, 12))
+        ttk.Checkbutton(fav_frame, text="Favorites", variable=self.favorites_var,
+                        command=self.refresh_games,
+                        style="Filter.TCheckbutton").pack(anchor="w")
 
-        flabel("TAG:").pack(side="left")
         self.tag_filter_var = tk.StringVar(value="Any")
-        self.tag_filter_cb = ttk.Combobox(
-            fbar, textvariable=self.tag_filter_var, width=12, state="readonly",
+        self.tag_filter_cb = fgroup("TAG", lambda p: ttk.Combobox(
+            p, textvariable=self.tag_filter_var, width=11, state="readonly",
             values=["Any"],
-        )
-        self.tag_filter_cb.pack(side="left", padx=(4, 12))
+        ))
         self.tag_filter_cb.bind("<<ComboboxSelected>>", lambda *_: self.refresh_games())
 
-        ttk.Button(fbar, text="Reset filters", style="Quiet.TButton",
-                   command=self._reset_filters).pack(side="left")
+        # Reset + count at the end
+        reset_frame = ttk.Frame(fbar, style="Filter.TFrame")
+        reset_frame.pack(side="left", padx=(4, 0))
+        ttk.Label(reset_frame, text="", style="Filter.TLabel").pack(anchor="w")
+        ttk.Button(reset_frame, text="Reset filters", style="Quiet.TButton",
+                   command=self._reset_filters).pack(anchor="w")
 
-        # ── game count — left-aligned after Reset filters, not floating right ──
-        ttk.Separator(fbar, orient="vertical").pack(side="left", fill="y", padx=10)
+        # Game count (far right)
         self._count_label = ttk.Label(fbar, text="", style="Filter.TLabel")
-        self._count_label.pack(side="left")
+        self._count_label.pack(side="right")
 
     def _build_tabs(self) -> None:
         self.nb = ttk.Notebook(self)
@@ -1095,11 +1106,11 @@ class App(tk.Tk):
         self._view_mode = mode
         self.settings["view_mode"] = mode
         config.save(self.settings)
-        # Update button colours
+        # Update button colours (segmented control)
         for btn, m in ((self._btn_cards, "cards"), (self._btn_table, "table")):
             active = (m == mode)
-            btn.configure(bg=C_NAVY if active else C_WHITE,
-                           fg=C_WHITE if active else C_NAVY)
+            btn.configure(bg=C_BLUE_050 if active else C_SURFACE,
+                          fg=C_BLUE_800 if active else C_INK_600)
         if mode == "table":
             self._card_frame.pack_forget()
             self._table_frame.pack(fill="both", expand=True)
@@ -1132,8 +1143,8 @@ class App(tk.Tk):
     def _layout_cards(self, container_width: int) -> None:
         if not self._cards:
             return
-        card_w = 180
-        gap = 12
+        card_w = 260
+        gap = 16
         cols = max(1, (container_width - gap) // (card_w + gap))
         rows_used = 0
         for i, card in enumerate(self._cards):
@@ -1612,132 +1623,15 @@ class App(tk.Tk):
         if loan is not None:
             out_to = f"{loan['first_name']} {loan['last_name']}".strip()
 
-        bgg_id = game["bgg_id"]
-        is_fav = bool(game["is_favorite"])
+        bgg_id    = game["bgg_id"]
+        is_fav    = bool(game["is_favorite"])
         has_insert = bool(game["has_insert"])
-        n_plays = play_counts.get(bgg_id, 0)
+        n_plays   = play_counts.get(bgg_id, 0)
 
-        # White card on gray canvas — 1px border per design system
-        card = tk.Frame(self.games_inner, bg=C_SURFACE, padx=8, pady=8,
-                        highlightbackground=C_LINE_200, highlightthickness=1, bd=0)
-        card.configure(width=180)
-
-        # --- header row: star right, expansion badge truly centred ---
-        header = tk.Frame(card, bg=C_SURFACE)
-        header.pack(fill="x")
-        star_lbl = tk.Label(
-            header,
-            text="★" if is_fav else "☆",
-            font=("Segoe UI", 13),
-            fg=C_STAR_FILL if is_fav else C_LINE_200,
-            bg=C_SURFACE, cursor="hand2",
-        )
-        star_lbl.pack(side="right")
-        star_lbl.bind("<Button-1>", lambda e, g=game: self.on_toggle_favorite(g))
-        if game["is_expansion"]:
-            # place() centres relative to the full header width, not just
-            # the space remaining after the star.
-            tk.Label(
-                header, text="Expansion",
-                bg="#ede7f6", fg="#4527a0",
-                font=("Segoe UI", 7, "bold"), padx=4, pady=1,
-            ).place(relx=0.5, rely=0.5, anchor="center")
-
-        # --- image canvas (fixed size, centred in card) ---
-        _CW, _CH = THUMB_SIZE[0], THUMB_SIZE[1]  # 140 × 140
-        img_frame = tk.Frame(card, bg=C_SURFACE)
-        img_frame.pack(anchor="center")
-        img_canvas = tk.Canvas(
-            img_frame, width=_CW, height=_CH,
-            bg=C_SURFACE, highlightthickness=0, bd=0,
-        )
-        img_canvas.pack()
-
-        _img_id = img_canvas.create_image(_CW // 2, _CH // 2, anchor="center")
-        # Always start with a placeholder; the lazy loader will fill in the real image
-        ph = self._get_placeholder()
-        img_canvas.itemconfigure(_img_id, image=ph)
-        img_canvas._card_img_ref = ph
-
-        # --- name + year -------------------------------------------------------
-        ttk.Label(
-            card,
-            text=_shorten(game["name"]),
-            wraplength=160,
-            justify="center",
-            font=("Segoe UI", 10, "bold"),
-            foreground=C_INK_900,
-        ).pack(pady=(6, 0))
-
-        year_text = f"({game['year']})" if game["year"] else ""
-        ttk.Label(card, text=year_text, foreground=C_INK_600,
-                  font=("Segoe UI", 8)).pack()
-
-        # --- player count + time ----------------------------------------------
-        info = (
-            f"\U0001f465 {fmt_players(game['min_players'], game['max_players'])}   "
-            f"⏱ {fmt_time(game['min_playtime'], game['max_playtime'], game['playing_time'])}"
-        )
-        ttk.Label(card, text=info, foreground=C_INK_600,
-                  font=("Segoe UI", 8)).pack(pady=(3, 0))
-
-        # --- best-at line -----------------------------------------------------
-        ttk.Label(
-            card,
-            text=f"★ Best at {game['best_players']}" if game["best_players"] else "",
-            foreground=C_STAR_TEXT,
-            font=("Segoe UI", 8),
-        ).pack()
-
-        # --- badges row -------------------------------------------------------
-        badge_row = ttk.Frame(card)
-        badge_row.pack(pady=(3, 0))
-        if has_insert:
-            tk.Label(
-                badge_row, text="📦 Insert",
-                bg="#E7F0FB", fg=C_BLUE_700,
-                font=("Segoe UI", 8), padx=5, pady=1,
-            ).pack(side="left", padx=(0, 3))
-        if n_plays:
-            tk.Label(
-                badge_row, text=f"🎮 {n_plays} play{'s' if n_plays != 1 else ''}",
-                bg=C_OK_BG, fg=C_OK_TEXT,
-                font=("Segoe UI", 8), padx=5, pady=1,
-            ).pack(side="left")
-
-        # --- bottom-anchored buttons (design system: 1 primary + ghost rest) --
-        # Pack bottom-to-top so the primary action is always at the very bottom.
-        btn_row2 = ttk.Frame(card)
-        btn_row2.pack(side="bottom", fill="x", pady=(2, 0))
-        ttk.Button(btn_row2, text="Edit",     style="Ghost.TButton",
-                   command=lambda g=game: self.on_edit_game(g)
-                   ).pack(side="left", expand=True, fill="x")
-        ttk.Button(btn_row2, text="Log Play", style="Ghost.TButton",
-                   command=lambda g=game: self.on_log_play(g)
-                   ).pack(side="left", expand=True, fill="x", padx=(2, 0))
-
-        btn_row = ttk.Frame(card)
-        btn_row.pack(side="bottom", fill="x", pady=(3, 0))
+        # ── determine status badge up front ───────────────────────────────────
         if out_to:
-            # Primary action = Check In (most likely next step)
-            ttk.Button(btn_row, text="Check In",
-                       command=lambda g=game: self.on_check_in(g)
-                       ).pack(side="left", expand=True, fill="x")
-        else:
-            ttk.Button(btn_row, text="Check Out",
-                       command=lambda g=game: self.on_check_out(g)
-                       ).pack(side="left", expand=True, fill="x")
-        ttk.Button(btn_row, text="Details", style="Ghost.TButton",
-                   command=lambda g=game: self.show_details(g)
-                   ).pack(side="left", expand=True, fill="x", padx=(2, 0))
-
-        # --- status badge (dot + word pill — design-system pattern) -----------
-        if out_to:
-            overdue = (
-                loan is not None
-                and loan["due_date"]
-                and loan["due_date"] < datetime.now().strftime("%Y-%m-%d")
-            )
+            overdue = (loan and loan["due_date"]
+                       and loan["due_date"] < datetime.now().strftime("%Y-%m-%d"))
             if overdue:
                 badge_txt, badge_bg, badge_fg = f"● Overdue — {out_to}", C_DR_BG, C_DR_TEXT
             else:
@@ -1745,19 +1639,151 @@ class App(tk.Tk):
         else:
             badge_txt, badge_bg, badge_fg = "● Available", C_OK_BG, C_OK_TEXT
 
-        tk.Label(
-            card, text=badge_txt,
-            bg=badge_bg, fg=badge_fg,
-            font=("Segoe UI", 8, "bold"), padx=8, pady=3,
-        ).pack(side="bottom", fill="x", pady=(4, 0))
+        # ── card shell ────────────────────────────────────────────────────────
+        card = tk.Frame(self.games_inner, bg=C_SURFACE,
+                        highlightbackground=C_LINE_200, highlightthickness=1, bd=0)
 
-        # Right-click anywhere on the card for the full action menu (incl. Delete)
+        # ── cover: full-width image, fixed height ─────────────────────────────
+        _IH = 200
+        img_canvas = tk.Canvas(card, height=_IH, bg=C_LINE_100,
+                               highlightthickness=0, bd=0)
+        img_canvas.pack(fill="x")
+
+        _img_id = img_canvas.create_image(130, _IH // 2, anchor="center")
+        ph = self._get_placeholder()
+        img_canvas.itemconfigure(_img_id, image=ph)
+        img_canvas._card_img_ref = ph
+
+        def _on_cover_resize(e, iid=_img_id, h=_IH):
+            img_canvas.coords(iid, e.width // 2, h // 2)
+        img_canvas.bind("<Configure>", _on_cover_resize)
+
+        # Expansion badge at bottom-left of cover
+        if game["is_expansion"]:
+            img_canvas.create_rectangle(0, _IH - 20, 70, _IH,
+                                        fill="#ede7f6", outline="", width=0)
+            img_canvas.create_text(5, _IH - 10, anchor="w",
+                                   text="Expansion", fill="#4527a0",
+                                   font=("Segoe UI", 7, "bold"))
+
+        # ── star button (header strip above cover) ────────────────────────────
+        header = tk.Frame(card, bg=C_SURFACE, pady=3)
+        header.pack(fill="x")
+        header.lift()  # ensure it renders above cover
+
+        star_lbl = tk.Label(
+            header,
+            text="★" if is_fav else "☆",
+            font=("Segoe UI", 13),
+            fg=C_STAR_FILL if is_fav else C_LINE_200,
+            bg=C_SURFACE, cursor="hand2",
+        )
+        star_lbl.pack(side="right", padx=(0, 8))
+        star_lbl.bind("<Button-1>", lambda e, g=game: self.on_toggle_favorite(g))
+
+        # Re-pack so header appears ABOVE the image canvas
+        header.pack_forget()
+        img_canvas.pack_forget()
+        header.pack(fill="x")
+        img_canvas.pack(fill="x")
+
+        # ── card body ─────────────────────────────────────────────────────────
+        body = tk.Frame(card, bg=C_SURFACE, padx=12, pady=8)
+        body.pack(fill="x")
+
+        # Status badge — above title per design system
+        tk.Label(
+            body, text=badge_txt,
+            bg=badge_bg, fg=badge_fg,
+            font=("Segoe UI", 9, "bold"), padx=8, pady=2,
+        ).pack(anchor="w", pady=(0, 5))
+
+        # Title
+        ttk.Label(
+            body,
+            text=_shorten(game["name"]),
+            wraplength=224, justify="left",
+            font=("Segoe UI", 12, "bold"),
+            foreground=C_INK_900,
+        ).pack(anchor="w")
+
+        # Year
+        year_text = f"({game['year']})" if game["year"] else ""
+        ttk.Label(body, text=year_text, foreground=C_INK_600,
+                  font=("Segoe UI", 10)).pack(anchor="w")
+
+        # Specs: players + time on one row
+        info = (
+            f"\U0001f465 {fmt_players(game['min_players'], game['max_players'])}  "
+            f"⏱ {fmt_time(game['min_playtime'], game['max_playtime'], game['playing_time'])}"
+        )
+        ttk.Label(body, text=info, foreground=C_INK_600,
+                  font=("Segoe UI", 10)).pack(anchor="w", pady=(3, 0))
+
+        # Best-at
+        if game["best_players"]:
+            ttk.Label(
+                body,
+                text=f"★ Best at {game['best_players']}",
+                foreground=C_STAR_TEXT,
+                font=("Segoe UI", 10),
+            ).pack(anchor="w")
+
+        # Extra badges (insert, plays)
+        badge_row = ttk.Frame(body)
+        badge_row.pack(anchor="w", pady=(4, 0))
+        if has_insert:
+            tk.Label(badge_row, text="📦 Insert",
+                     bg=C_BLUE_050, fg=C_BLUE_700,
+                     font=("Segoe UI", 9), padx=5, pady=1,
+                     ).pack(side="left", padx=(0, 4))
+        if n_plays:
+            tk.Label(badge_row, text=f"🎮 {n_plays} play{'s' if n_plays != 1 else ''}",
+                     bg=C_OK_BG, fg=C_OK_TEXT,
+                     font=("Segoe UI", 9), padx=5, pady=1,
+                     ).pack(side="left")
+
+        # ── actions ───────────────────────────────────────────────────────────
+        tk.Frame(body, bg=C_SURFACE, height=6).pack()  # spacer
+
+        # Primary action — full width
+        if out_to:
+            ttk.Button(body, text="Check In",
+                       command=lambda g=game: self.on_check_in(g)
+                       ).pack(fill="x", pady=(0, 4))
+        else:
+            ttk.Button(body, text="Check Out",
+                       command=lambda g=game: self.on_check_out(g)
+                       ).pack(fill="x", pady=(0, 4))
+
+        # Secondary — 2-column grid
+        sec = ttk.Frame(body)
+        sec.pack(fill="x")
+        sec.columnconfigure(0, weight=1)
+        sec.columnconfigure(1, weight=1)
+        ttk.Button(sec, text="Details", style="Ghost.TButton",
+                   command=lambda g=game: self.show_details(g)
+                   ).grid(row=0, column=0, sticky="ew", padx=(0, 2))
+        ttk.Button(sec, text="Log Play", style="Ghost.TButton",
+                   command=lambda g=game: self.on_log_play(g)
+                   ).grid(row=0, column=1, sticky="ew", padx=(2, 0))
+        ttk.Button(sec, text="Edit", style="Ghost.TButton",
+                   command=lambda g=game: self.on_edit_game(g)
+                   ).grid(row=1, column=0, columnspan=2, sticky="ew",
+                          pady=(3, 0))
+
+        # Hover highlight on card border
+        def _on_enter(e): card.configure(highlightbackground=C_INK_500)
+        def _on_leave(e): card.configure(highlightbackground=C_LINE_200)
+        card.bind("<Enter>", _on_enter)
+        card.bind("<Leave>", _on_leave)
+
+        # Right-click context menu
         def _card_right_click(event, g=game):
             self._show_card_context_menu(event, g)
-        for widget in (card, header, img_frame, img_canvas, btn_row, btn_row2):
-            widget.bind("<Button-3>", _card_right_click)
+        for w in (card, header, img_canvas, body, sec):
+            w.bind("<Button-3>", _card_right_click)
 
-        # Ensure mouse-wheel scroll works when the cursor is over any part of the card.
         self._bind_canvas_scroll(card)
 
         return card, (img_canvas, _img_id, game)
