@@ -80,7 +80,6 @@ export default function Games({ isActive = true }: { isActive?: boolean }) {
   const [menuOpen, setMenuOpen]         = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [bggUsername, setBggUsername]   = useState('');
-  const [bggToken, setBggToken]         = useState('');
   const [bggPassword, setBggPassword]   = useState('');
 
   // Separate loans/counts from games so loan changes never re-mount image components
@@ -106,7 +105,7 @@ export default function Games({ isActive = true }: { isActive?: boolean }) {
     if (!isActive) return;
     if (!mountedRef[0]) { mountedRef[1](true); loadGames(); }
     loadLoans();
-    loadSettings().then(s => { setBggUsername(s.bgg_username); setBggToken(s.bgg_token); });
+    loadSettings().then(s => { setBggUsername(s.bgg_username); });
   }, [isActive]);
 
   // ── Sync ──────────────────────────────────────────────────────────────────
@@ -114,7 +113,11 @@ export default function Games({ isActive = true }: { isActive?: boolean }) {
   const onSync = async () => {
     const settings = await loadSettings();
     if (!settings.bgg_username) {
-      Alert.alert('BGG Username required', 'Tap ⋯ → Settings to set your BGG username.');
+      // No username — open Settings so they can enter one immediately
+      setMenuOpen(false);
+      const s = await loadSettings();
+      setBggUsername(s.bgg_username); setBggPassword(s.bgg_password);
+      setSettingsOpen(true);
       return;
     }
     setSyncing(true);
@@ -166,8 +169,7 @@ export default function Games({ isActive = true }: { isActive?: boolean }) {
     setAddSelected(null);
     setAddDetails(null);
     try {
-      const settings = await loadSettings();
-      const results = await bgg.searchGames(addQuery.trim(), settings.bgg_token || undefined);
+      const results = await bgg.searchGames(addQuery.trim());
       setAddResults(results.slice(0, 30));
     } catch (e: any) {
       Alert.alert('Search failed', e.message ?? String(e));
@@ -181,8 +183,7 @@ export default function Games({ isActive = true }: { isActive?: boolean }) {
     setAddDetails(null);
     setAddSaving(false);
     try {
-      const settings = await loadSettings();
-      const details = await bgg.fetchGameDetails(result.bgg_id, settings.bgg_token || undefined);
+      const details = await bgg.fetchGameDetails(result.bgg_id);
       setAddDetails(details);
     } catch (e: any) {
       Alert.alert('Error loading details', e.message ?? String(e));
@@ -245,12 +246,14 @@ export default function Games({ isActive = true }: { isActive?: boolean }) {
   const openSettings = async () => {
     setMenuOpen(false);
     const s = await loadSettings();
-    setBggUsername(s.bgg_username); setBggToken(s.bgg_token); setBggPassword(s.bgg_password);
+    setBggUsername(s.bgg_username); setBggPassword(s.bgg_password);
     setSettingsOpen(true);
   };
 
   const saveAndClose = async () => {
-    await saveSettings({ bgg_username: bggUsername.trim(), bgg_token: bggToken.trim(), bgg_password: bggPassword });
+    // Preserve the existing token (from build-time env var) — don't expose or overwrite it
+    const existing = await loadSettings();
+    await saveSettings({ bgg_username: bggUsername.trim(), bgg_token: existing.bgg_token, bgg_password: bggPassword });
     setSettingsOpen(false);
   };
 
@@ -492,10 +495,9 @@ export default function Games({ isActive = true }: { isActive?: boolean }) {
           <Text style={s.sheetTitle}>BGG Settings</Text>
           <Text style={s.label}>BGG Username</Text>
           <TextInput style={s.input} value={bggUsername} onChangeText={setBggUsername} placeholder="e.g. Ballewcifer" placeholderTextColor={DS.ink500} autoCapitalize="none" autoCorrect={false} />
-          <Text style={s.label}>BGG Token</Text>
-          <TextInput style={s.input} value={bggToken} onChangeText={setBggToken} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" placeholderTextColor={DS.ink500} autoCapitalize="none" autoCorrect={false} />
-          <Text style={s.label}>BGG Password (fallback)</Text>
-          <TextInput style={s.input} value={bggPassword} onChangeText={setBggPassword} placeholder="Only needed if no token" placeholderTextColor={DS.ink500} secureTextEntry autoCapitalize="none" autoCorrect={false} />
+          <Text style={s.label}>BGG Password</Text>
+          <Text style={s.settingsHint}>Needed for private collections. Leave blank if your collection is public.</Text>
+          <TextInput style={s.input} value={bggPassword} onChangeText={setBggPassword} placeholder="Optional" placeholderTextColor={DS.ink500} secureTextEntry autoCapitalize="none" autoCorrect={false} />
           <TouchableOpacity style={s.sheetBtn} onPress={saveAndClose}>
             <Text style={s.sheetBtnTxt}>Save</Text>
           </TouchableOpacity>
@@ -580,6 +582,7 @@ const s = StyleSheet.create({
 
   // Form elements
   label: { ...FONT.label, color: DS.ink600, marginBottom: SP.xs },
+  settingsHint: { fontSize: 12, color: DS.ink500, marginBottom: SP.xs, fontStyle: 'italic' },
   input: { borderWidth: 1, borderColor: DS.line200, borderRadius: R.md, padding: SP.sm + 2, fontSize: 15, color: DS.ink900, marginBottom: SP.md, backgroundColor: DS.surface },
 
   // Primary action button

@@ -23,17 +23,25 @@ async function fetchXml(url: string, attempts = 10, token?: string): Promise<any
     const headers: Record<string, string> = { 'User-Agent': UA };
     if (token) headers['Authorization'] = `Bearer ${token}`;
     const res = await fetch(url, { headers, credentials: 'include' });
+    if (res.status === 202) {
+      // BGG is queuing the request — wait and retry
+      await new Promise(r => setTimeout(r, 3000));
+      continue;
+    }
     if (res.status === 200) {
       const text = await res.text();
-      return parser.parse(text);
-    }
-    if (res.status === 202) {
-      await new Promise(r => setTimeout(r, 2500));
-      continue;
+      const doc = parser.parse(text);
+      // BGG sometimes returns 200 with a <message> element while still
+      // processing the request (same as 202 semantically). Retry if so.
+      if (doc?.message && !doc?.items && !doc?.item) {
+        await new Promise(r => setTimeout(r, 3000));
+        continue;
+      }
+      return doc;
     }
     throw new Error(`BGG HTTP ${res.status}`);
   }
-  throw new Error('BGG kept returning 202 — try again in a moment.');
+  throw new Error('BGG is still processing — wait a moment and try again.');
 }
 
 // ── BGG login ─────────────────────────────────────────────────────────────────
@@ -97,9 +105,10 @@ export interface SearchResult {
   year?: number;
 }
 
-export async function searchGames(query: string, token?: string): Promise<SearchResult[]> {
+export async function searchGames(query: string): Promise<SearchResult[]> {
+  // BGG /search is public — no token needed (sending an invalid token causes 401)
   const params = new URLSearchParams({ query, type: 'boardgame,boardgameexpansion' });
-  const doc = await fetchXml(`${BASE}/search?${params}`, 8, token);
+  const doc = await fetchXml(`${BASE}/search?${params}`, 8);
   const items: any[] = doc?.items?.item ?? [];
   const results: SearchResult[] = items.map((item: any) => ({
     bgg_id: item._id,
@@ -133,8 +142,9 @@ export interface GameDetails {
   is_expansion: boolean;
 }
 
-export async function fetchGameDetails(bggId: number, token?: string): Promise<GameDetails | null> {
-  const doc = await fetchXml(`${BASE}/thing?id=${bggId}&stats=1`, 10, token);
+export async function fetchGameDetails(bggId: number): Promise<GameDetails | null> {
+  // BGG /thing is public — no token needed (sending an invalid token causes 401)
+  const doc = await fetchXml(`${BASE}/thing?id=${bggId}&stats=1`, 10);
   const items: any[] = doc?.items?.item ?? [];
   const item = items[0];
   if (!item) return null;
