@@ -1288,9 +1288,10 @@ class App(tk.Tk):
             card.grid(row=r, column=c, padx=gap // 2, pady=gap // 2, sticky="nsew")
         for c in range(cols):
             self.games_inner.grid_columnconfigure(c, weight=1)
-        # Give each row uniform weight so cards in the same row share a height
+        # weight=1 makes every row expand to the tallest card in that row,
+        # so all cards share the same height and buttons line up at the bottom.
         for r in range(rows_used):
-            self.games_inner.grid_rowconfigure(r, weight=0)
+            self.games_inner.grid_rowconfigure(r, weight=1)
 
     def _reset_filters(self) -> None:
         self.players_var.set("Any")
@@ -1886,7 +1887,9 @@ class App(tk.Tk):
                          ).pack(side="left")
 
         # ── actions: one filled primary, then 2-col Ghost grid ─────────────────
-        tk.Frame(body, bg=C_SURFACE, height=SP["sm"]).pack()  # spacer
+        # Expanding spacer — pushes buttons to the bottom of every card in the
+        # row so they line up horizontally regardless of content above them.
+        tk.Frame(body, bg=C_SURFACE).pack(fill="both", expand=True)
 
         if out_to:
             ttk.Button(body, text="Check In",
