@@ -1,7 +1,12 @@
 name: Build Installers
 
-# Triggered by a version tag (git tag v1.2 && git push --tags)
-# or manually from the Actions tab.
+# Triggered by a version tag (git tag v6.2.5 && git push --tags)
+# or manually from the Actions tab (pick a specific platform or leave as "all").
+#
+# Required GitHub Secrets:
+#   BGG_APP_TOKEN — BGG application token (shared by desktop + mobile)
+#   EXPO_TOKEN    — Expo account access token for EAS Build authentication
+#                   Create at: https://expo.dev/accounts/[you]/settings/access-tokens
 on:
   push:
     tags:
@@ -17,6 +22,7 @@ on:
           - all
           - windows
           - macos
+          - mobile
 
 # Opt into Node.js 24 for all actions now, ahead of the June 2026 deadline.
 env:
@@ -41,11 +47,9 @@ jobs:
       - name: Extract version from tag
         id: ver
         shell: bash
-        # strips the leading "v" from the tag name (v1.2 → 1.2)
         run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
       - name: Stamp version.py
-        # Makes version.py the single source of truth at build time
         shell: bash
         run: echo "__version__ = \"${{ steps.ver.outputs.VERSION }}\"" > version.py
 
@@ -134,13 +138,93 @@ jobs:
           path: dist/BoardGameLibraryInstaller-*.dmg
           if-no-files-found: error
 
-  # ── GitHub Release: attach both installers ───────────────────────────────────
+  # ── Mobile: Android APK via EAS Build ────────────────────────────────────────
+  # EAS Build runs on Expo's cloud infrastructure. The EXPO_TOKEN secret
+  # authenticates the build. BGG_APP_TOKEN is injected as EXPO_PUBLIC_BGG_TOKEN
+  # so the compiled app bundle can make authenticated BGG API calls.
+  build-mobile:
+    name: Mobile app (Android APK)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || inputs.platform == 'all' || inputs.platform == 'mobile'
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install dependencies
+        working-directory: mobile
+        run: npm ci
+
+      - name: Set up Expo + EAS CLI
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Extract version from tag
+        id: ver
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_NAME}" == v* ]]; then
+            echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "VERSION=0.0.0" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Stamp app.json version
+        working-directory: mobile
+        run: |
+          node -e "
+            const fs = require('fs');
+            const cfg = JSON.parse(fs.readFileSync('app.json', 'utf8'));
+            cfg.expo.version = '${{ steps.ver.outputs.VERSION }}';
+            fs.writeFileSync('app.json', JSON.stringify(cfg, null, 2));
+          "
+
+      - name: Create artifacts directory
+        run: mkdir -p "${{ github.workspace }}/artifacts"
+
+      - name: Build Android APK (EAS cloud)
+        working-directory: mobile
+        env:
+          # Injected into the JS bundle as process.env.EXPO_PUBLIC_BGG_TOKEN
+          EXPO_PUBLIC_BGG_TOKEN: ${{ secrets.BGG_APP_TOKEN }}
+        run: |
+          eas build \
+            --platform android \
+            --profile preview \
+            --non-interactive \
+            --output "${{ github.workspace }}/artifacts/BoardGameLibraryMobile-v${{ steps.ver.outputs.VERSION }}.apk"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-apk
+          path: artifacts/BoardGameLibraryMobile-v${{ steps.ver.outputs.VERSION }}.apk
+          if-no-files-found: error
+
+  # ── GitHub Release: attach all built installers ───────────────────────────────
   release:
     name: Create GitHub Release
-    needs: [build-windows, build-macos]
+    needs: [build-windows, build-macos, build-mobile]
     runs-on: ubuntu-22.04
     timeout-minutes: 15
-    if: startsWith(github.ref, 'refs/tags/v') && always() && !failure() && !cancelled()
+    # Run if triggered by a tag AND at least one build succeeded
+    if: |
+      startsWith(github.ref, 'refs/tags/v') &&
+      always() &&
+      (
+        needs.build-windows.result == 'success' ||
+        needs.build-macos.result  == 'success' ||
+        needs.build-mobile.result == 'success'
+      )
 
     permissions:
       contents: write
@@ -151,15 +235,24 @@ jobs:
         run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
       - name: Download Windows installer
+        if: needs.build-windows.result == 'success'
         uses: actions/download-artifact@v4
         with:
           name: windows-installer
           path: artifacts/
 
       - name: Download macOS DMG
+        if: needs.build-macos.result == 'success'
         uses: actions/download-artifact@v4
         with:
           name: macos-dmg
+          path: artifacts/
+
+      - name: Download mobile APK
+        if: needs.build-mobile.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: mobile-apk
           path: artifacts/
 
       - name: Create Release
@@ -177,8 +270,10 @@ jobs:
             |----------|------|
             | Windows 10/11 | `BoardGameLibrarySetup-v${{ steps.ver.outputs.VERSION }}.exe` |
             | macOS (Apple Silicon) | `BoardGameLibraryInstaller-v${{ steps.ver.outputs.VERSION }}.dmg` |
+            | Android | `BoardGameLibraryMobile-v${{ steps.ver.outputs.VERSION }}.apk` |
 
-            Both installers are fully self-contained — no Python installation required.
+            Desktop installers are self-contained — no Python required.
+            Android APK can be sideloaded (enable "Install from unknown sources" in Settings).
 
             ### What's included
             - Full game library synced from BoardGameGeek
