@@ -6,7 +6,30 @@ import { searchGames, fetchGameDetails } from '../lib/bgg';
 import * as db from '../lib/db';
 import type { SearchResult } from '../lib/bgg';
 
-const NAVY = '#1a237e';
+const DS = {
+  navy900: '#0E2A47',
+  navy800: '#13395F',
+  navy700: '#1B4B79',
+  blue600: '#1366C9',
+  blue700: '#0F52A3',
+  blue800: '#0B3F80',
+  blue050: '#E7F0FB',
+  ink900:  '#16202B',
+  ink600:  '#51606E',
+  ink500:  '#6B7785',
+  line200: '#D9E0E7',
+  line100: '#EAEEF2',
+  surface: '#FFFFFF',
+  bg:      '#F4F6F8',
+  okText:     '#1E6E32', okBg:   '#E6F4EA', okSolid:   '#2E7D32',
+  warnText:   '#8A5300', warnBg: '#FFF3E0', warnSolid: '#B26A00',
+  dangerText: '#B3261E', dangerBg:'#FCEBEA', dangerSolid:'#C62828',
+  infoText:   '#0F52A3', infoBg: '#E7F0FB',
+  starText:   '#B07A00', starFill:'#F2A900',
+};
+
+const SP = { xs: 4, sm: 8, md: 12, lg: 16, xl: 20, xxl: 24, xxxl: 32 };
+const R  = { sm: 6, md: 10, lg: 14, pill: 999 };
 
 export default function AddGame() {
   const [query, setQuery] = useState('');
@@ -67,6 +90,7 @@ export default function AddGame() {
           value={query}
           onChangeText={setQuery}
           placeholder="Search BoardGameGeek…"
+          placeholderTextColor={DS.ink500}
           returnKeyType="search"
           onSubmitEditing={search}
           autoFocus
@@ -75,11 +99,11 @@ export default function AddGame() {
           <Ionicons name="search" size={20} color="#fff" />
         </TouchableOpacity>
       </View>
-      {loading && <ActivityIndicator style={{ marginTop: 30 }} color={NAVY} size="large" />}
+      {loading && <ActivityIndicator style={{ marginTop: SP.xxxl }} color={DS.blue600} size="large" />}
       {adding && (
         <View style={s.overlay}>
-          <ActivityIndicator color={NAVY} size="large" />
-          <Text style={{ marginTop: 10, color: NAVY, fontWeight: '600' }}>Fetching details…</Text>
+          <ActivityIndicator color={DS.blue600} size="large" />
+          <Text style={s.overlayText}>Fetching details…</Text>
         </View>
       )}
       <FlatList
@@ -91,10 +115,10 @@ export default function AddGame() {
               <Text style={s.resultName}>{item.name}</Text>
               {item.year ? <Text style={s.resultYear}>{item.year}</Text> : null}
             </View>
-            <Ionicons name="add-circle-outline" size={24} color={NAVY} />
+            <Ionicons name="add-circle-outline" size={24} color={DS.blue600} />
           </TouchableOpacity>
         )}
-        contentContainerStyle={{ padding: 10 }}
+        contentContainerStyle={{ padding: SP.md }}
         ItemSeparatorComponent={() => <View style={s.sep} />}
         ListEmptyComponent={!loading ? <Text style={s.empty}>Search BGG to add a game to your library.</Text> : null}
       />
@@ -103,17 +127,99 @@ export default function AddGame() {
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f4f6fa' },
-  header: { backgroundColor: NAVY, flexDirection: 'row', alignItems: 'center', padding: 12, paddingTop: Platform.OS === 'ios' ? 50 : 12 },
-  back: { padding: 6, marginRight: 8 },
-  title: { color: '#fff', fontWeight: '700', fontSize: 17 },
-  searchRow: { flexDirection: 'row', gap: 8, padding: 12, paddingBottom: 0 },
-  input: { flex: 1, backgroundColor: '#fff', borderRadius: 10, padding: 12, fontSize: 15, shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 4, elevation: 2 },
-  searchBtn: { backgroundColor: NAVY, borderRadius: 10, paddingHorizontal: 16, justifyContent: 'center' },
-  result: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', padding: 14, borderRadius: 10 },
-  resultName: { fontSize: 15, fontWeight: '600', color: '#1a1a2e' },
-  resultYear: { fontSize: 12, color: '#9e9e9e', marginTop: 2 },
-  sep: { height: 6 },
-  empty: { textAlign: 'center', color: '#9e9e9e', padding: 40, fontSize: 14 },
-  overlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(255,255,255,.85)', alignItems: 'center', justifyContent: 'center', zIndex: 10 },
+  container: {
+    flex: 1,
+    backgroundColor: DS.bg,
+  },
+  header: {
+    backgroundColor: DS.navy900,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: SP.lg,
+    paddingBottom: SP.md,
+    paddingTop: Platform.OS === 'ios' ? 50 : SP.md,
+  },
+  back: {
+    padding: SP.sm,
+    marginRight: SP.sm,
+  },
+  title: {
+    color: '#fff',
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  searchRow: {
+    flexDirection: 'row',
+    gap: SP.sm,
+    padding: SP.md,
+    paddingBottom: 0,
+  },
+  input: {
+    flex: 1,
+    backgroundColor: DS.surface,
+    borderRadius: R.md,
+    borderWidth: 1,
+    borderColor: DS.line200,
+    paddingVertical: SP.md,
+    paddingHorizontal: SP.md,
+    fontSize: 15,
+    color: DS.ink900,
+    shadowColor: 'rgba(16,32,47,0.08)',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 1,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  searchBtn: {
+    backgroundColor: DS.blue600,
+    borderRadius: R.md,
+    paddingHorizontal: SP.lg,
+    justifyContent: 'center',
+  },
+  result: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: DS.surface,
+    paddingVertical: SP.md,
+    paddingHorizontal: SP.lg,
+    borderRadius: R.md,
+    borderWidth: 1,
+    borderColor: DS.line200,
+  },
+  resultName: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: DS.ink900,
+  },
+  resultYear: {
+    fontSize: 12,
+    color: DS.ink600,
+    marginTop: SP.xs,
+  },
+  sep: {
+    height: SP.sm,
+  },
+  empty: {
+    textAlign: 'center',
+    color: DS.ink500,
+    padding: SP.xxxl + SP.sm,
+    fontSize: 14,
+  },
+  overlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(255,255,255,0.85)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+  },
+  overlayText: {
+    marginTop: SP.md,
+    color: DS.blue600,
+    fontWeight: '600',
+    fontSize: 14,
+  },
 });

@@ -8,7 +8,30 @@ import type { Stats, Loan, Play } from '../../lib/types';
 import ScreenHeader from '../../components/ScreenHeader';
 import RibbonBadge from '../../components/RibbonBadge';
 
-const NAVY = '#1a237e';
+const DS = {
+  navy900: '#0E2A47',
+  navy800: '#13395F',
+  navy700: '#1B4B79',
+  blue600: '#1366C9',
+  blue700: '#0F52A3',
+  blue800: '#0B3F80',
+  blue050: '#E7F0FB',
+  ink900:  '#16202B',
+  ink600:  '#51606E',
+  ink500:  '#6B7785',
+  line200: '#D9E0E7',
+  line100: '#EAEEF2',
+  surface: '#FFFFFF',
+  bg:      '#F4F6F8',
+  okText:     '#1E6E32', okBg:   '#E6F4EA', okSolid:   '#2E7D32',
+  warnText:   '#8A5300', warnBg: '#FFF3E0', warnSolid: '#B26A00',
+  dangerText: '#B3261E', dangerBg:'#FCEBEA', dangerSolid:'#C62828',
+  infoText:   '#0F52A3', infoBg: '#E7F0FB',
+  starText:   '#B07A00', starFill:'#F2A900',
+};
+
+const SP = { xs: 4, sm: 8, md: 12, lg: 16, xl: 20, xxl: 24, xxxl: 32 };
+const R  = { sm: 6, md: 10, lg: 14, pill: 999 };
 
 export default function Dashboard({ isActive = true }: { isActive?: boolean }) {
   const [stats, setStats]           = useState<Stats>({ total_games: 0, total_plays: 0, total_members: 0, checked_out: 0 });
@@ -49,7 +72,7 @@ export default function Dashboard({ isActive = true }: { isActive?: boolean }) {
   };
 
   return (
-    <View style={{ flex: 1 }}>
+    <View style={{ flex: 1, backgroundColor: DS.bg }}>
       <ScreenHeader title="🎲 Board Game Library" />
 
       <ScrollView
@@ -58,11 +81,11 @@ export default function Dashboard({ isActive = true }: { isActive?: boolean }) {
       >
         {/* Stat cards */}
         <View style={s.statGrid}>
-          <TouchableOpacity style={[s.statCard, { backgroundColor: '#1a237e' }]} onPress={() => router.push('/games')} accessibilityRole="button" accessibilityLabel={`Games: ${stats.total_games}, navigate to games list`}>
+          <TouchableOpacity style={[s.statCard, { backgroundColor: DS.navy900 }]} onPress={() => router.push('/games')} accessibilityRole="button" accessibilityLabel={`Games: ${stats.total_games}, navigate to games list`}>
             <Text style={s.statNum}>{stats.total_games}</Text>
             <Text style={s.statLbl}>Games</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[s.statCard, { backgroundColor: '#1b5e20' }]} onPress={() => router.push('/plays')} accessibilityRole="button" accessibilityLabel={`Total Plays: ${stats.total_plays}, navigate to plays`}>
+          <TouchableOpacity style={[s.statCard, { backgroundColor: DS.okSolid }]} onPress={() => router.push('/plays')} accessibilityRole="button" accessibilityLabel={`Total Plays: ${stats.total_plays}, navigate to plays`}>
             <Text style={s.statNum}>{stats.total_plays}</Text>
             <Text style={s.statLbl}>Total Plays</Text>
           </TouchableOpacity>
@@ -70,7 +93,7 @@ export default function Dashboard({ isActive = true }: { isActive?: boolean }) {
             <Text style={s.statNum}>{stats.total_members}</Text>
             <Text style={s.statLbl}>Members</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[s.statCard, { backgroundColor: stats.checked_out ? '#b71c1c' : '#37474f' }]} onPress={() => router.push('/history')} accessibilityRole="button" accessibilityLabel={`Checked Out: ${stats.checked_out}, navigate to history`}>
+          <TouchableOpacity style={[s.statCard, { backgroundColor: stats.checked_out ? DS.dangerSolid : DS.ink500 }]} onPress={() => router.push('/history')} accessibilityRole="button" accessibilityLabel={`Checked Out: ${stats.checked_out}, navigate to history`}>
             <Text style={s.statNum}>{stats.checked_out}</Text>
             <Text style={s.statLbl}>Checked Out</Text>
           </TouchableOpacity>
@@ -82,10 +105,10 @@ export default function Dashboard({ isActive = true }: { isActive?: boolean }) {
             {checkedOut.map(loan => {
               const overdue = !!(loan.due_date && loan.due_date < today);
               return (
-                <View key={loan.id} style={[s.row, overdue && s.overdueRow]}>
-                  <Text style={[s.rowTitle, overdue && s.overdueText]}>{loan.game_name}</Text>
-                  <Text style={s.rowSub}>{loan.first_name} {loan.last_name} · {loan.checked_out_at?.slice(0, 10)}</Text>
-                  {loan.due_date && <Text style={[s.rowSub, overdue && s.overdueText]}>Due: {loan.due_date}</Text>}
+                <View key={loan.id} style={[s.row, overdue ? s.overdueRow : s.loanRow]}>
+                  <Text style={[s.rowTitle, overdue ? s.overdueText : s.loanText]}>{loan.game_name}</Text>
+                  <Text style={[s.rowSub, overdue ? s.overdueText : s.loanSubText]}>{loan.first_name} {loan.last_name} · {loan.checked_out_at?.slice(0, 10)}</Text>
+                  {loan.due_date && <Text style={[s.rowSub, overdue ? s.overdueText : s.loanSubText]}>Due: {loan.due_date}</Text>}
                 </View>
               );
             })}
@@ -104,7 +127,7 @@ export default function Dashboard({ isActive = true }: { isActive?: boolean }) {
                 </Text>
               ))}
           </View>
-          <View style={{ flex: 1, gap: 10 }}>
+          <View style={{ flex: 1, gap: SP.sm }}>
             <View style={s.card}>
               <Text style={s.sectionTitle}>Most Played</Text>
               {topGames.length === 0
@@ -133,12 +156,12 @@ export default function Dashboard({ isActive = true }: { isActive?: boolean }) {
           <Text style={s.sectionTitle}>Backup & Restore</Text>
           <View style={s.backupRow}>
             <TouchableOpacity style={s.backupBtn} onPress={onExport} accessibilityRole="button" accessibilityLabel="Export backup">
-              <Ionicons name="download-outline" size={20} color={NAVY} />
+              <Ionicons name="download-outline" size={20} color={DS.surface} />
               <Text style={s.backupBtnTxt}>Export Backup</Text>
               <Text style={s.backupBtnSub}>Save to Drive, email, etc.</Text>
             </TouchableOpacity>
             <TouchableOpacity style={s.backupBtn} onPress={onImport} accessibilityRole="button" accessibilityLabel="Import backup from a JSON file">
-              <Ionicons name="cloud-upload-outline" size={20} color={NAVY} />
+              <Ionicons name="cloud-upload-outline" size={20} color={DS.surface} />
               <Text style={s.backupBtnTxt}>Import Backup</Text>
               <Text style={s.backupBtnSub}>Restore from a .json file</Text>
             </TouchableOpacity>
@@ -150,28 +173,31 @@ export default function Dashboard({ isActive = true }: { isActive?: boolean }) {
 }
 
 const s = StyleSheet.create({
-  scroll:     { flex: 1, backgroundColor: '#f4f6fa' },
-  statGrid:   { flexDirection: 'row', flexWrap: 'wrap', gap: 10, padding: 14 },
-  statCard:   { flex: 1, minWidth: '45%', borderRadius: 10, padding: 14, alignItems: 'center' },
-  statNum:    { color: '#fff', fontSize: 28, fontWeight: '700' },
-  statLbl:    { color: 'rgba(255,255,255,.85)', fontSize: 12, marginTop: 2 },
-  card:       { backgroundColor: '#fff', borderRadius: 10, padding: 14, margin: 7, marginTop: 0, shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 4, elevation: 2 },
-  sectionTitle: { fontSize: 14, fontWeight: '700', color: NAVY, marginBottom: 8 },
-  twoCol:     { flexDirection: 'column' },
-  row:        { paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
-  rowTitle:   { fontSize: 14, fontWeight: '600' },
-  rowSub:     { fontSize: 12, color: '#6b7280', marginTop: 2 },
-  overdueRow: { backgroundColor: '#fff5f5' },
-  overdueText:{ color: '#b71c1c' },
-  listItem:   { fontSize: 13, paddingVertical: 3, color: '#333' },
-  dim:        { color: '#9e9e9e' },
-  empty:      { fontSize: 13, color: '#9e9e9e', fontStyle: 'italic' },
-  winnerRow:  { flexDirection: 'row', alignItems: 'center', paddingVertical: 4, gap: 8 },
-  winnerNum:  { width: 36, textAlign: 'center', fontSize: 13, color: '#9e9e9e', fontWeight: '600' },
-  winnerName: { flex: 1, fontSize: 13, color: '#333' },
-  winnerCount:{ fontSize: 12, color: '#9e9e9e' },
-  backupRow:  { flexDirection: 'row', gap: 10 },
-  backupBtn:  { flex: 1, borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 8, padding: 12, alignItems: 'center', gap: 4 },
-  backupBtnTxt: { fontSize: 13, fontWeight: '600', color: NAVY, textAlign: 'center' },
-  backupBtnSub: { fontSize: 11, color: '#9e9e9e', textAlign: 'center' },
+  scroll:       { flex: 1, backgroundColor: DS.bg },
+  statGrid:     { flexDirection: 'row', flexWrap: 'wrap', gap: SP.sm, padding: SP.lg },
+  statCard:     { flex: 1, minWidth: '45%', borderRadius: R.md, padding: SP.lg, alignItems: 'center' },
+  statNum:      { color: DS.surface, fontSize: 28, fontWeight: '700' },
+  statLbl:      { color: 'rgba(255,255,255,0.85)', fontSize: 12, marginTop: SP.xs },
+  card:         { backgroundColor: DS.surface, borderRadius: R.lg, padding: SP.lg, margin: SP.sm, marginTop: 0, borderWidth: 1, borderColor: DS.line200, shadowColor: 'rgba(16,32,47,0.08)', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 1, shadowRadius: 3, elevation: 2 },
+  sectionTitle: { fontSize: 17, fontWeight: '700', color: DS.navy900, marginBottom: SP.sm },
+  twoCol:       { flexDirection: 'column' },
+  row:          { paddingVertical: SP.sm, borderBottomWidth: 1, borderBottomColor: DS.line100, borderRadius: R.sm, paddingHorizontal: SP.sm, marginBottom: SP.xs },
+  rowTitle:     { fontSize: 14, fontWeight: '600', color: DS.ink900 },
+  rowSub:       { fontSize: 12, color: DS.ink600, marginTop: 2 },
+  loanRow:      { backgroundColor: DS.warnBg },
+  loanText:     { color: DS.warnText },
+  loanSubText:  { color: DS.warnText },
+  overdueRow:   { backgroundColor: DS.dangerBg },
+  overdueText:  { color: DS.dangerText },
+  listItem:     { fontSize: 13, paddingVertical: 3, color: DS.ink900 },
+  dim:          { color: DS.ink500 },
+  empty:        { fontSize: 13, color: DS.ink500, fontStyle: 'italic' },
+  winnerRow:    { flexDirection: 'row', alignItems: 'center', paddingVertical: SP.xs, gap: SP.sm },
+  winnerNum:    { width: 36, textAlign: 'center', fontSize: 13, color: DS.ink500, fontWeight: '600' },
+  winnerName:   { flex: 1, fontSize: 13, color: DS.ink900 },
+  winnerCount:  { fontSize: 12, color: DS.ink500 },
+  backupRow:    { flexDirection: 'row', gap: SP.sm },
+  backupBtn:    { flex: 1, backgroundColor: DS.blue600, borderRadius: R.md, padding: SP.md, alignItems: 'center', gap: SP.xs },
+  backupBtnTxt: { fontSize: 13, fontWeight: '600', color: DS.surface, textAlign: 'center' },
+  backupBtnSub: { fontSize: 11, color: 'rgba(255,255,255,0.80)', textAlign: 'center' },
 });

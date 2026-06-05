@@ -1,7 +1,15 @@
 import { View, Text, StyleSheet } from 'react-native';
 import type { ReactNode } from 'react';
 
-const NAVY = '#1a237e';
+const DS = {
+  navy900: '#0E2A47',
+}
+
+const FONT = {
+  title: { fontSize: 17, fontWeight: '700' as const },
+}
+
+const SP = { lg: 16 }
 
 export default function ScreenHeader({ title, right }: { title: string; right?: ReactNode }) {
   return (
@@ -13,7 +21,7 @@ export default function ScreenHeader({ title, right }: { title: string; right?: 
 }
 
 const s = StyleSheet.create({
-  header: { backgroundColor: NAVY, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14 },
-  title:  { color: '#fff', fontSize: 20, fontWeight: '700' },
+  header: { backgroundColor: DS.navy900, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: SP.lg, paddingVertical: SP.lg },
+  title:  { color: '#fff', ...FONT.title },
   right:  { flexDirection: 'row', alignItems: 'center', gap: 4 },
 });

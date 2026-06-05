@@ -10,7 +10,30 @@ import ScreenHeader from '../../components/ScreenHeader';
 import DateInput from '../../components/DateInput';
 import RibbonBadge from '../../components/RibbonBadge';
 
-const NAVY = '#1a237e';
+const DS = {
+  navy900: '#0E2A47',
+  navy800: '#13395F',
+  navy700: '#1B4B79',
+  blue600: '#1366C9',
+  blue700: '#0F52A3',
+  blue800: '#0B3F80',
+  blue050: '#E7F0FB',
+  ink900:  '#16202B',
+  ink600:  '#51606E',
+  ink500:  '#6B7785',
+  line200: '#D9E0E7',
+  line100: '#EAEEF2',
+  surface: '#FFFFFF',
+  bg:      '#F4F6F8',
+  okText:     '#1E6E32', okBg:   '#E6F4EA', okSolid:   '#2E7D32',
+  warnText:   '#8A5300', warnBg: '#FFF3E0', warnSolid: '#B26A00',
+  dangerText: '#B3261E', dangerBg:'#FCEBEA',dangerSolid:'#C62828',
+  infoText:   '#0F52A3', infoBg: '#E7F0FB',
+  starText:   '#B07A00', starFill:'#F2A900',
+};
+
+const SP = { xs: 4, sm: 8, md: 12, lg: 16, xl: 20, xxl: 24, xxxl: 32 };
+const R  = { sm: 6, md: 10, lg: 14, pill: 999 };
 
 export default function Plays({ isActive = true }: { isActive?: boolean }) {
   const [plays, setPlays]           = useState<Play[]>([]);
@@ -22,7 +45,6 @@ export default function Plays({ isActive = true }: { isActive?: boolean }) {
   const [modalOpen, setModalOpen]   = useState(false);
   const [editingPlay, setEditingPlay] = useState<Play | null>(null);
 
-  // Form fields
   const [selGame, setSelGame]   = useState<Game | null>(null);
   const [date, setDate]         = useState('');
   const [players, setPlayers]   = useState('');
@@ -37,7 +59,7 @@ export default function Plays({ isActive = true }: { isActive?: boolean }) {
 
   const load = useCallback(() => {
     setPlays(db.listPlays());
-    setGames(db.listGames('', false)); // include play-log-only games
+    setGames(db.listGames('', false));
     setUsers(db.listUsers());
     setWinners(db.topWinners(0));
   }, []);
@@ -45,7 +67,6 @@ export default function Plays({ isActive = true }: { isActive?: boolean }) {
 
   const openLog = (p?: Play) => {
     if (p) {
-      // Edit mode — pre-fill from existing play
       setEditingPlay(p);
       const g = games.find(g => g.bgg_id === p.game_id) ?? null;
       setSelGame(g);
@@ -117,7 +138,7 @@ export default function Plays({ isActive = true }: { isActive?: boolean }) {
         avg_rating: details.avg_rating, description: details.description,
         categories: details.categories?.join(', '), mechanics: details.mechanics?.join(', '),
         designers: details.designers?.join(', '), publishers: details.publishers?.join(', '),
-        own: 0,   // not in collection — play-log only
+        own: 0,
         is_expansion: details.is_expansion ? 1 : 0,
       });
       const newGame = db.getGame(details.bgg_id);
@@ -157,7 +178,7 @@ export default function Plays({ isActive = true }: { isActive?: boolean }) {
           data={winners}
           keyExtractor={w => w.winner}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); setRefreshing(false); }} />}
-          contentContainerStyle={{ padding: 14 }}
+          contentContainerStyle={{ padding: SP.lg, backgroundColor: DS.bg }}
           ListEmptyComponent={<Text style={s.empty}>No wins recorded yet. Log some plays!</Text>}
           ListHeaderComponent={
             <Text style={s.lbHeader}>
@@ -182,7 +203,7 @@ export default function Plays({ isActive = true }: { isActive?: boolean }) {
                   </View>
                   <View style={s.lbBarBg}>
                     <View style={[s.lbBarFill, { width: `${pct}%` as any,
-                      backgroundColor: index === 0 ? '#f0c050' : index === 1 ? '#aab8c2' : index === 2 ? '#cd7f32' : NAVY }]} />
+                      backgroundColor: index === 0 ? DS.starFill : index === 1 ? '#AAB8C2' : index === 2 ? '#CD7F32' : DS.blue600 }]} />
                   </View>
                 </View>
               </View>
@@ -196,8 +217,8 @@ export default function Plays({ isActive = true }: { isActive?: boolean }) {
             data={plays}
             keyExtractor={p => String(p.id)}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); setRefreshing(false); }} />}
-            contentContainerStyle={{ padding: 12 }}
-            ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
+            contentContainerStyle={{ padding: SP.md, backgroundColor: DS.bg }}
+            ItemSeparatorComponent={() => <View style={{ height: SP.sm }} />}
             ListEmptyComponent={<Text style={s.empty}>No plays logged yet.</Text>}
             renderItem={({ item: p }) => (
               <View style={s.card}>
@@ -205,10 +226,10 @@ export default function Plays({ isActive = true }: { isActive?: boolean }) {
                   <Text style={s.gameName} numberOfLines={1}>{p.game_name}</Text>
                   <View style={s.cardActions}>
                     <TouchableOpacity onPress={() => openLog(p)} style={s.iconBtn} accessibilityRole="button" accessibilityLabel={`Edit play of ${p.game_name}`}>
-                      <Ionicons name="pencil-outline" size={17} color={NAVY} />
+                      <Ionicons name="pencil-outline" size={17} color={DS.blue600} />
                     </TouchableOpacity>
                     <TouchableOpacity onPress={() => deletePlay(p)} style={s.iconBtn} accessibilityRole="button" accessibilityLabel={`Delete play of ${p.game_name}`}>
-                      <Ionicons name="trash-outline" size={17} color="#b71c1c" />
+                      <Ionicons name="trash-outline" size={17} color={DS.dangerSolid} />
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -235,7 +256,7 @@ export default function Plays({ isActive = true }: { isActive?: boolean }) {
               <Text style={selGame ? s.gamePickerTxt : s.gamePickerPlaceholder}>
                 {selGame ? selGame.name : '— select game —'}
               </Text>
-              <Ionicons name="chevron-down" size={16} color="#9e9e9e" />
+              <Ionicons name="chevron-down" size={16} color={DS.ink500} />
             </TouchableOpacity>
 
             <Text style={s.label}>Date *</Text>
@@ -245,16 +266,16 @@ export default function Plays({ isActive = true }: { isActive?: boolean }) {
             <PlayerPicker users={users} value={players} onChange={setPlayers} />
 
             <Text style={s.label}>Winner</Text>
-            <TextInput style={s.input} value={winner} onChangeText={setWinner} placeholder="Name, All, or None" />
+            <TextInput style={s.input} value={winner} onChangeText={setWinner} placeholder="Name, All, or None" placeholderTextColor={DS.ink500} />
 
             <Text style={s.label}>Duration (minutes)</Text>
-            <TextInput style={s.input} value={duration} onChangeText={setDuration} keyboardType="number-pad" placeholder="90" />
+            <TextInput style={s.input} value={duration} onChangeText={setDuration} keyboardType="number-pad" placeholder="90" placeholderTextColor={DS.ink500} />
 
             <Text style={s.label}>Scores</Text>
-            <TextInput style={s.input} value={scores} onChangeText={setScores} placeholder='e.g. "Alice: 45, Bob: 37"' />
+            <TextInput style={s.input} value={scores} onChangeText={setScores} placeholder='e.g. "Alice: 45, Bob: 37"' placeholderTextColor={DS.ink500} />
 
             <Text style={s.label}>Notes</Text>
-            <TextInput style={s.input} value={notes} onChangeText={setNotes} />
+            <TextInput style={s.input} value={notes} onChangeText={setNotes} placeholderTextColor={DS.ink500} />
 
             <TouchableOpacity style={s.sheetBtn} onPress={savePlay}>
               <Text style={s.sheetBtnTxt}>{editingPlay ? 'Save Changes' : 'Log Play'}</Text>
@@ -269,7 +290,7 @@ export default function Plays({ isActive = true }: { isActive?: boolean }) {
         <View style={[s.sheet, { maxHeight: '85%' }]}>
           <Text style={s.sheetTitle}>Select Game</Text>
           <View style={s.pickerSearchRow}>
-            <TextInput style={[s.input, { flex: 1, marginBottom: 0 }]} value={gameSearch} onChangeText={v => { setGameSearch(v); setBggResults([]); }} placeholder="Search your library…" autoFocus />
+            <TextInput style={[s.input, { flex: 1, marginBottom: 0 }]} value={gameSearch} onChangeText={v => { setGameSearch(v); setBggResults([]); }} placeholder="Search your library…" placeholderTextColor={DS.ink500} autoFocus />
             <TouchableOpacity style={s.bggBtn} onPress={searchBGG} accessibilityLabel="Search BGG for this game">
               {bggSearching ? <ActivityIndicator color="#fff" size="small" /> : <Text style={s.bggBtnTxt}>BGG</Text>}
             </TouchableOpacity>
@@ -288,7 +309,7 @@ export default function Plays({ isActive = true }: { isActive?: boolean }) {
                   {g.year ? <Text style={s.gameItemYear}>{g.year}</Text> : null}
                 </TouchableOpacity>
               )}
-              ItemSeparatorComponent={() => <View style={{ height: 1, backgroundColor: '#f0f0f0' }} />}
+              ItemSeparatorComponent={() => <View style={{ height: 1, backgroundColor: DS.line100 }} />}
             />
           )}
 
@@ -306,10 +327,10 @@ export default function Plays({ isActive = true }: { isActive?: boolean }) {
                       <Text style={s.gameItemTxt}>{r.name}</Text>
                       {r.year ? <Text style={s.gameItemYear}>{r.year}</Text> : null}
                     </View>
-                    <Ionicons name="add-circle-outline" size={20} color={NAVY} />
+                    <Ionicons name="add-circle-outline" size={20} color={DS.blue600} />
                   </TouchableOpacity>
                 )}
-                ItemSeparatorComponent={() => <View style={{ height: 1, backgroundColor: '#f0f0f0' }} />}
+                ItemSeparatorComponent={() => <View style={{ height: 1, backgroundColor: DS.line100 }} />}
               />
             </>
           )}
@@ -320,50 +341,50 @@ export default function Plays({ isActive = true }: { isActive?: boolean }) {
 }
 
 const s = StyleSheet.create({
-  container:    { flex: 1, backgroundColor: '#fff' },
-  count:        { paddingHorizontal: 14, paddingVertical: 6, color: '#9e9e9e', fontSize: 12 },
-  card:         { backgroundColor: '#fff', borderRadius: 10, padding: 14, shadowColor: '#000', shadowOpacity: 0.07, shadowRadius: 4, elevation: 2 },
-  cardTop:      { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 },
-  gameName:     { fontSize: 15, fontWeight: '700', flex: 1, marginRight: 8 },
-  cardActions:  { flexDirection: 'row', gap: 4 },
-  iconBtn:      { padding: 4 },
-  date:         { fontSize: 12, color: '#9e9e9e', marginBottom: 4 },
-  detail:       { fontSize: 13, color: '#555', marginTop: 2 },
-  empty:        { textAlign: 'center', color: '#9e9e9e', marginTop: 40, fontStyle: 'italic' },
+  container:    { flex: 1, backgroundColor: DS.bg },
+  count:        { paddingHorizontal: SP.lg, paddingVertical: SP.sm, color: DS.ink500, fontSize: 12 },
+  card:         { backgroundColor: DS.surface, borderRadius: R.lg, borderWidth: 1, borderColor: DS.line200, padding: SP.lg, shadowColor: 'rgba(16,32,47,0.08)', shadowOpacity: 1, shadowOffset: { width: 0, height: 1 }, shadowRadius: 3, elevation: 2 },
+  cardTop:      { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SP.xs },
+  gameName:     { fontSize: 15, fontWeight: '700', color: DS.ink900, flex: 1, marginRight: SP.sm },
+  cardActions:  { flexDirection: 'row', gap: SP.xs },
+  iconBtn:      { padding: SP.xs },
+  date:         { fontSize: 12, color: DS.ink500, marginBottom: SP.xs },
+  detail:       { fontSize: 13, color: DS.ink600, marginTop: SP.xs },
+  empty:        { textAlign: 'center', color: DS.ink500, marginTop: 40, fontStyle: 'italic' },
   // Toggle
-  toggle:       { flexDirection: 'row', backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
+  toggle:       { flexDirection: 'row', backgroundColor: DS.surface, borderBottomWidth: 1, borderBottomColor: DS.line200 },
   toggleBtn:    { flex: 1, paddingVertical: 11, alignItems: 'center' },
-  toggleActive: { borderBottomWidth: 3, borderBottomColor: NAVY },
-  toggleTxt:    { fontSize: 14, color: '#9e9e9e', fontWeight: '600' },
-  toggleTxtActive: { color: NAVY },
+  toggleActive: { borderBottomWidth: 3, borderBottomColor: DS.blue600 },
+  toggleTxt:    { fontSize: 14, color: DS.ink500, fontWeight: '600' },
+  toggleTxtActive: { color: DS.blue600 },
   // Leaderboard
-  lbHeader:     { fontSize: 12, color: '#9e9e9e', marginBottom: 10 },
-  lbRow:        { backgroundColor: '#fff', borderRadius: 10, padding: 14, marginBottom: 8, flexDirection: 'row', alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 3, elevation: 1 },
-  lbRowTop:     { shadowOpacity: 0.12, elevation: 3 },
-  lbRank:       { fontSize: 16, width: 64, textAlign: 'center', color: '#6b7280', fontWeight: '600' },
-  lbInfo:       { flex: 1, marginLeft: 8 },
-  lbNameRow:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
-  lbName:       { fontSize: 15, color: '#333', flex: 1 },
-  lbNameBold:   { fontWeight: '700', fontSize: 16 },
-  lbWins:       { fontSize: 13, color: '#6b7280', fontWeight: '600' },
-  lbBarBg:      { height: 6, backgroundColor: '#f0f0f0', borderRadius: 3, overflow: 'hidden' },
-  lbBarFill:    { height: 6, borderRadius: 3 },
+  lbHeader:     { fontSize: 12, color: DS.ink500, marginBottom: SP.md },
+  lbRow:        { backgroundColor: DS.surface, borderRadius: R.lg, borderWidth: 1, borderColor: DS.line200, padding: SP.lg, marginBottom: SP.sm, flexDirection: 'row', alignItems: 'center', shadowColor: 'rgba(16,32,47,0.08)', shadowOpacity: 1, shadowOffset: { width: 0, height: 1 }, shadowRadius: 3, elevation: 1 },
+  lbRowTop:     { shadowColor: 'rgba(16,32,47,0.10)', shadowOffset: { width: 0, height: 4 }, shadowRadius: 12, elevation: 3 },
+  lbRank:       { fontSize: 16, width: 64, textAlign: 'center', color: DS.ink500, fontWeight: '600' },
+  lbInfo:       { flex: 1, marginLeft: SP.sm },
+  lbNameRow:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SP.sm },
+  lbName:       { fontSize: 15, color: DS.ink900, flex: 1 },
+  lbNameBold:   { fontWeight: '700', fontSize: 16, color: DS.ink900 },
+  lbWins:       { fontSize: 13, color: DS.ink600, fontWeight: '600' },
+  lbBarBg:      { height: 6, backgroundColor: DS.line200, borderRadius: R.pill, overflow: 'hidden' },
+  lbBarFill:    { height: 6, borderRadius: R.pill },
   // Modal/sheet
-  overlay:      { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
-  sheet:        { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 24, paddingBottom: 44, maxHeight: '90%' },
-  sheetTitle:   { fontSize: 18, fontWeight: '700', color: NAVY, marginBottom: 16 },
-  label:        { fontSize: 13, fontWeight: '600', marginBottom: 4, color: '#333' },
-  input:        { borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 8, padding: 10, fontSize: 15, marginBottom: 12 },
-  gamePicker:   { borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 8, padding: 10, marginBottom: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  gamePickerTxt: { fontSize: 15, color: '#333' },
-  gamePickerPlaceholder: { fontSize: 15, color: '#aaa' },
-  sheetBtn:     { backgroundColor: NAVY, borderRadius: 8, padding: 14, alignItems: 'center', marginTop: 4, marginBottom: 8 },
+  overlay:      { flex: 1, backgroundColor: 'rgba(11,26,42,0.35)' },
+  sheet:        { backgroundColor: DS.surface, borderTopLeftRadius: 18, borderTopRightRadius: 18, padding: SP.xxl, paddingBottom: 44, maxHeight: '90%' },
+  sheetTitle:   { fontSize: 17, fontWeight: '700', color: DS.ink900, marginBottom: SP.lg },
+  label:        { fontSize: 12, fontWeight: '700', letterSpacing: 0.4, textTransform: 'uppercase', marginBottom: SP.xs, color: DS.ink600 },
+  input:        { borderWidth: 1, borderColor: DS.line200, borderRadius: R.md, padding: SP.md, fontSize: 15, marginBottom: SP.md, color: DS.ink900, backgroundColor: DS.surface },
+  gamePicker:   { borderWidth: 1, borderColor: DS.line200, borderRadius: R.md, padding: SP.md, marginBottom: SP.md, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: DS.surface },
+  gamePickerTxt: { fontSize: 15, color: DS.ink900 },
+  gamePickerPlaceholder: { fontSize: 15, color: DS.ink500 },
+  sheetBtn:     { backgroundColor: DS.blue600, borderRadius: R.md, padding: SP.lg, alignItems: 'center', marginTop: SP.xs, marginBottom: SP.sm },
   sheetBtnTxt:  { color: '#fff', fontWeight: '700', fontSize: 15 },
-  gameItem:       { paddingVertical: 12, paddingHorizontal: 4, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  gameItemTxt:    { fontSize: 15, flex: 1 },
-  gameItemYear:   { fontSize: 13, color: '#9e9e9e' },
-  pickerSearchRow:{ flexDirection: 'row', gap: 8, marginBottom: 10, alignItems: 'center' },
-  bggBtn:         { backgroundColor: NAVY, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 10, justifyContent: 'center', minWidth: 52, alignItems: 'center' },
+  gameItem:       { paddingVertical: SP.md, paddingHorizontal: SP.xs, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  gameItemTxt:    { fontSize: 15, flex: 1, color: DS.ink900 },
+  gameItemYear:   { fontSize: 13, color: DS.ink500 },
+  pickerSearchRow:{ flexDirection: 'row', gap: SP.sm, marginBottom: SP.md, alignItems: 'center' },
+  bggBtn:         { backgroundColor: DS.blue600, borderRadius: R.md, paddingHorizontal: SP.lg, paddingVertical: SP.md, justifyContent: 'center', minWidth: 52, alignItems: 'center' },
   bggBtnTxt:      { color: '#fff', fontWeight: '700', fontSize: 13 },
-  pickerHint:     { fontSize: 12, color: '#9e9e9e', fontStyle: 'italic', paddingVertical: 8, textAlign: 'center' },
+  pickerHint:     { fontSize: 12, color: DS.ink500, fontStyle: 'italic', paddingVertical: SP.sm, textAlign: 'center' },
 });

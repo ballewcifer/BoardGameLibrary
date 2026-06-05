@@ -1,4 +1,4 @@
-/**
+﻿/**
  * RibbonBadge — award-ribbon rosette with scalloped outer ring,
  * gold centre circle, rank text, and two hanging tails.
  *
@@ -9,14 +9,24 @@ import Svg, {
   Circle, Ellipse, Path, Text as SvgText, G,
 } from 'react-native-svg';
 
+// Design tokens
+const DS = {
+  navy900: '#0E2A47',
+  navy700: '#1B4B79',
+  okSolid:    '#2E7D32',
+  dangerSolid:'#C62828',
+  starFill:   '#F2A900',
+  starText:   '#B07A00',
+};
+
 const CONFIGS = {
-  1: { body: '#1a237e', bodyDark: '#0d1457', label: '1st', a11y: 'First place'  },
-  2: { body: '#b71c1c', bodyDark: '#7f0000', label: '2nd', a11y: 'Second place' },
-  3: { body: '#1b5e20', bodyDark: '#003300', label: '3rd', a11y: 'Third place'  },
+  1: { body: DS.navy900,    bodyDark: DS.navy700,    label: '1st', a11y: 'First place'  },
+  2: { body: DS.dangerSolid, bodyDark: '#8B1A1A',    label: '2nd', a11y: 'Second place' },
+  3: { body: DS.okSolid,    bodyDark: '#1B5226',     label: '3rd', a11y: 'Third place'  },
 } as const;
 
-const GOLD   = '#f0c050';
-const GOLD_D = '#c8922a';
+const GOLD   = DS.starFill;
+const GOLD_D = DS.starText;
 const W = 54;
 const H = 82;
 const CX = W / 2;          // 32
