@@ -883,33 +883,32 @@ class App(tk.Tk):
         self.tag_filter_cb.bind("<<ComboboxSelected>>", lambda *_: self.refresh_games())
 
         reset_frame = ttk.Frame(fbar, style="Filter.TFrame")
-        reset_frame.pack(side="left", padx=(SP["xs"], 0), anchor="s")
+        reset_frame.pack(side="left", padx=(SP["xs"], SP["lg"]), anchor="s")
         ttk.Label(reset_frame, text=" ", style="Filter.TLabel").pack(anchor="w")
         ttk.Button(reset_frame, text="Reset filters", style="Quiet.TButton",
                    command=self._reset_filters).pack(anchor="w", pady=(0, 3))
 
-        # ── active-filter chips row — packed on demand by _refresh_chips() ──────
-        self._chips_frame = ttk.Frame(parent, style="Filter.TFrame",
-                                      padding=(SP["lg"], 0, SP["lg"], SP["xs"]))
-
-        # ── meta row: "X games · showing Y"  +  Sort by [dropdown] ──────────────
-        meta = ttk.Frame(parent, style="Filter.TFrame",
-                         padding=(SP["lg"], SP["xs"], SP["lg"], SP["xs"]))
-        meta.pack(side="top", fill="x")  # always visible
-        self._count_label = ttk.Label(meta, text="", style="Count.TLabel")
-        self._count_label.pack(side="left", anchor="w")
-
-        sort_rhs = ttk.Frame(meta, style="Filter.TFrame")
-        sort_rhs.pack(side="right", anchor="e")
-        ttk.Label(sort_rhs, text="Sort by", style="Count.TLabel").pack(side="left",
-                                                                         padx=(0, SP["xs"]))
+        # ── Sort by + game count — right side of the same filter bar row ─────────
+        sort_rhs = ttk.Frame(fbar, style="Filter.TFrame")
+        sort_rhs.pack(side="right", anchor="s", pady=(0, 3))
         self._sort_var = tk.StringVar(value="Title (A–Z)")
         sort_cb = ttk.Combobox(sort_rhs, textvariable=self._sort_var, state="readonly",
-                               width=14,
+                               width=13,
                                values=["Title (A–Z)", "Year (newest)", "Most played",
                                        "Complexity ↑", "Complexity ↓"])
-        sort_cb.pack(side="left")
+        sort_cb.pack(side="right")
+        ttk.Label(sort_rhs, text="Sort by", style="Count.TLabel").pack(side="right",
+                                                                        padx=(SP["md"], SP["xs"]))
+        self._count_label = ttk.Label(sort_rhs, text="", style="Count.TLabel")
+        self._count_label.pack(side="right", padx=(0, SP["lg"]))
         sort_cb.bind("<<ComboboxSelected>>", lambda *_: self.refresh_games())
+
+        # ── active-filter chips row — always packed here so it stays in the
+        # correct position above the card grid; children are added/removed by
+        # _refresh_chips() without ever re-packing the frame itself.
+        self._chips_frame = ttk.Frame(parent, style="Filter.TFrame",
+                                      padding=(SP["lg"], 0, SP["lg"], SP["xs"]))
+        self._chips_frame.pack(side="top", fill="x")
 
     def _refresh_chips(self) -> None:
         """Rebuild the active-filter chips row below the filter bar."""
@@ -943,32 +942,29 @@ class App(tk.Tk):
             v = self.tag_filter_var.get()
             active.append(("Tag", v, lambda _v=v: self.tag_filter_var.set("Any")))
 
-        if active:
-            self._chips_frame.pack(side="top", fill="x")
-            for label, value, clear_fn in active:
-                # Pill chip: blue-050 fill, blue-800 text, tiny × dismiss button
-                chip = tk.Frame(self._chips_frame, bg=C_BLUE_050)
-                chip.pack(side="left", padx=(0, self.SP["sm"]), pady=(0, 2))
-                tk.Label(chip, text=f"{label}: {value}",
-                         bg=C_BLUE_050, fg=C_BLUE_800,
-                         font=self.FONTS["chip"],
-                         padx=self.SP["md"], pady=self.SP["xs"]).pack(side="left")
+        # Never re-pack the frame — it's already in the correct position above
+        # the card grid. Just populate or clear its children.
+        for label, value, clear_fn in active:
+            chip = tk.Frame(self._chips_frame, bg=C_BLUE_050)
+            chip.pack(side="left", padx=(0, self.SP["sm"]), pady=(0, 2))
+            tk.Label(chip, text=f"{label}: {value}",
+                     bg=C_BLUE_050, fg=C_BLUE_800,
+                     font=self.FONTS["chip"],
+                     padx=self.SP["md"], pady=self.SP["xs"]).pack(side="left")
 
-                def _make_dismiss(fn):
-                    def _dismiss():
-                        fn()
-                        self.refresh_games()
-                    return _dismiss
+            def _make_dismiss(fn):
+                def _dismiss():
+                    fn()
+                    self.refresh_games()
+                return _dismiss
 
-                tk.Button(chip, text="×",
-                          bg=C_BLUE_050, fg=C_BLUE_700,
-                          activebackground=C_SURFACE, activeforeground=C_BLUE_700,
-                          font=("Segoe UI", 11, "bold"),
-                          relief="flat", bd=0, padx=self.SP["sm"], pady=1,
-                          cursor="hand2",
-                          command=_make_dismiss(clear_fn)).pack(side="left")
-        else:
-            self._chips_frame.pack_forget()
+            tk.Button(chip, text="×",
+                      bg=C_BLUE_050, fg=C_BLUE_700,
+                      activebackground=C_SURFACE, activeforeground=C_BLUE_700,
+                      font=("Segoe UI", 11, "bold"),
+                      relief="flat", bd=0, padx=self.SP["sm"], pady=1,
+                      cursor="hand2",
+                      command=_make_dismiss(clear_fn)).pack(side="left")
 
     def _build_tabs(self) -> None:
         self.nb = ttk.Notebook(self)
