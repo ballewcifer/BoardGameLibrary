@@ -371,13 +371,35 @@ class App(tk.Tk):
     FONT_FAMILY = "Segoe UI"
     FONTS = {
         "display":     ("Segoe UI", 22, "bold"),   # app header
-        "title":       ("Segoe UI", 15, "bold"),   # section / dialog titles
-        "card_title":  ("Segoe UI", 13, "bold"),   # game name on a card
-        "body":        ("Segoe UI", 11),           # specs, descriptions
+        "title":       ("Segoe UI", 19, "bold"),   # section / dialog titles (prototype: 19px)
+        "card_title":  ("Segoe UI", 16, "bold"),   # game name on a card (prototype: 16px)
+        "card_year":   ("Segoe UI", 13),           # year below card title (prototype: 13px)
+        "card_specs":  ("Segoe UI", 13),           # players/time specs (prototype: 13.5→13 in Tk)
+        "card_bestat": ("Segoe UI", 13, "bold"),   # best-at line
+        "body":        ("Segoe UI", 11),           # general body text
         "body_strong": ("Segoe UI", 11, "bold"),
         "control":     ("Segoe UI", 11, "bold"),   # button text
-        "label":       ("Segoe UI",  9, "bold"),   # UPPERCASE filter labels, captions
+        "label":       ("Segoe UI", 12, "bold"),   # UPPERCASE filter labels (prototype: 12px)
+        "chip":        ("Segoe UI", 13, "bold"),   # active-filter chips (prototype: 13px)
+        "meta":        ("Segoe UI", 14),           # count / sort row (prototype: 14px)
+        "loaned_to":   ("Segoe UI", 13),           # "To Name · due Date" line
     }
+
+    # Gradient palette for cover placeholders (inspired by prototype game colours)
+    _COVER_PALETTES = [
+        ("#7B341E", "#C05621"),  # rust-orange
+        ("#553C9A", "#9F7AEA"),  # purple
+        ("#975A16", "#D69E2E"),  # amber-gold
+        ("#1A365D", "#4299E1"),  # deep blue
+        ("#276749", "#48BB78"),  # forest green
+        ("#822727", "#E53E3E"),  # crimson
+        ("#285E61", "#38B2AC"),  # teal
+        ("#322659", "#6B46C1"),  # indigo
+        ("#0E2A47", "#1B4B79"),  # navy (design-system)
+        ("#7B2D00", "#C05621"),  # burnt sienna
+        ("#1A202C", "#4A5568"),  # charcoal
+        ("#3C1A54", "#805AD5"),  # violet
+    ]
     # ── Spacing scale — multiples of 4 (design-tokens.json) ──
     SP = {"xs": 4, "sm": 8, "md": 12, "lg": 16, "xl": 24}
 
@@ -394,7 +416,8 @@ class App(tk.Tk):
         if _stale_pwd := self.settings.pop("bgg_password", None):
             _kr_set_password(_stale_pwd)
             config.save(self.settings)
-        self._image_cache: dict[str, ImageTk.PhotoImage] = {}
+        self._image_cache:    dict[str, ImageTk.PhotoImage] = {}
+        self._gradient_cache: dict[int, ImageTk.PhotoImage] = {}  # palette_idx → gradient
         self._placeholder_img: Optional[ImageTk.PhotoImage] = None
         self._search_after_id: Optional[str] = None
         self._view_mode: str = self.settings.get("view_mode", "cards")
@@ -652,6 +675,8 @@ class App(tk.Tk):
         s.configure("Filter.TFrame", background=C_BG)
         s.configure("Filter.TLabel", background=C_BG, foreground=C_INK_600,
                     font=self.FONTS["label"], padding=(0, 0, 2, 0))
+        s.configure("Count.TLabel",  background=C_BG, foreground=C_INK_600,
+                    font=self.FONTS["meta"])
         s.configure("Filter.TCheckbutton", background=C_BG, foreground=C_INK_900,
                     font=self.FONTS["body"])
         s.map("Filter.TCheckbutton", background=[("active", C_BG)])
@@ -718,15 +743,15 @@ class App(tk.Tk):
         logo = tk.Label(
             inner, text="\U0001f3b2",
             bg=C_SURFACE, fg=C_NAVY_900,
-            font=("Segoe UI", 16, "bold"),
-            width=2, padx=4, pady=2,
+            font=("Segoe UI", 20, "bold"),
+            width=2, padx=6, pady=4,
         )
         logo.pack(side="left", padx=(0, self.SP["md"]))
 
         tk.Label(
             inner, text="Board Game Library",
             bg=C_NAVY_900, fg=C_SURFACE,
-            font=self.FONTS["title"],
+            font=self.FONTS["title"],   # now 19pt bold
         ).pack(side="left")
 
         # Hairline under the app bar (line_200 over the navy/grey seam)
@@ -821,7 +846,7 @@ class App(tk.Tk):
         )).bind("<<ComboboxSelected>>", lambda *_: self.refresh_games())
 
         self.exact_players_var = tk.BooleanVar(value=False)
-        fcheck("Exact", self.exact_players_var)
+        fcheck("Exact count", self.exact_players_var)
 
         self.best_at_var = tk.StringVar(value="Any")
         fgroup("BEST AT", lambda p: ttk.Combobox(
@@ -863,13 +888,28 @@ class App(tk.Tk):
         ttk.Button(reset_frame, text="Reset filters", style="Quiet.TButton",
                    command=self._reset_filters).pack(anchor="w", pady=(0, 3))
 
-        # Live game count, far right (meta row in the prototype)
-        self._count_label = ttk.Label(fbar, text="", style="Count.TLabel")
-        self._count_label.pack(side="right", anchor="s", pady=(0, 4))
-
         # ── active-filter chips row — packed on demand by _refresh_chips() ──────
         self._chips_frame = ttk.Frame(parent, style="Filter.TFrame",
-                                      padding=(SP["lg"], 0, SP["lg"], SP["sm"] - 2))
+                                      padding=(SP["lg"], 0, SP["lg"], SP["xs"]))
+
+        # ── meta row: "X games · showing Y"  +  Sort by [dropdown] ──────────────
+        meta = ttk.Frame(parent, style="Filter.TFrame",
+                         padding=(SP["lg"], SP["xs"], SP["lg"], SP["xs"]))
+        meta.pack(side="top", fill="x")  # always visible
+        self._count_label = ttk.Label(meta, text="", style="Count.TLabel")
+        self._count_label.pack(side="left", anchor="w")
+
+        sort_rhs = ttk.Frame(meta, style="Filter.TFrame")
+        sort_rhs.pack(side="right", anchor="e")
+        ttk.Label(sort_rhs, text="Sort by", style="Count.TLabel").pack(side="left",
+                                                                         padx=(0, SP["xs"]))
+        self._sort_var = tk.StringVar(value="Title (A–Z)")
+        sort_cb = ttk.Combobox(sort_rhs, textvariable=self._sort_var, state="readonly",
+                               width=14,
+                               values=["Title (A–Z)", "Year (newest)", "Most played",
+                                       "Complexity ↑", "Complexity ↓"])
+        sort_cb.pack(side="left")
+        sort_cb.bind("<<ComboboxSelected>>", lambda *_: self.refresh_games())
 
     def _refresh_chips(self) -> None:
         """Rebuild the active-filter chips row below the filter bar."""
@@ -911,7 +951,7 @@ class App(tk.Tk):
                 chip.pack(side="left", padx=(0, self.SP["sm"]), pady=(0, 2))
                 tk.Label(chip, text=f"{label}: {value}",
                          bg=C_BLUE_050, fg=C_BLUE_800,
-                         font=self.FONTS["label"],
+                         font=self.FONTS["chip"],
                          padx=self.SP["md"], pady=self.SP["xs"]).pack(side="left")
 
                 def _make_dismiss(fn):
@@ -1452,7 +1492,20 @@ class App(tk.Tk):
         games = self._apply_filters(list(games), open_loans)
         self._refresh_chips()
 
-        # Update count label
+        # Apply sort (card view and table view both respect this)
+        sort_key = getattr(self, '_sort_var', None)
+        sort_val  = sort_key.get() if sort_key else "Title (A–Z)"
+        if sort_val == "Year (newest)":
+            games = sorted(games, key=lambda g: g["year"] or 0, reverse=True)
+        elif sort_val == "Most played":
+            games = sorted(games, key=lambda g: play_counts.get(g["bgg_id"], 0), reverse=True)
+        elif sort_val == "Complexity ↑":
+            games = sorted(games, key=lambda g: g["weight"] or 0)
+        elif sort_val == "Complexity ↓":
+            games = sorted(games, key=lambda g: g["weight"] or 0, reverse=True)
+        # Default "Title (A–Z)" is already the DB order
+
+        # Update count label — "266 games" or "8 of 266 games" when filtered
         shown = len(games)
         if self._filters_active():
             self._count_label.configure(text=f"{shown} of {total_count} games")
@@ -1557,6 +1610,10 @@ class App(tk.Tk):
             if canvas.winfo_exists():
                 canvas.itemconfigure(img_id, image=tk_img)
                 canvas._card_img_ref = tk_img
+                # Hide the cover-title text overlay now that a real image is showing
+                tid = getattr(canvas, "_cover_title_id", None)
+                if tid:
+                    canvas.itemconfigure(tid, state="hidden")
         except tk.TclError:
             pass
 
@@ -1570,6 +1627,10 @@ class App(tk.Tk):
             self._image_cache[path] = tk_img
             canvas.itemconfigure(img_id, image=tk_img)
             canvas._card_img_ref = tk_img
+            # Hide the cover-title text overlay now that a real image is showing
+            tid = getattr(canvas, "_cover_title_id", None)
+            if tid:
+                canvas.itemconfigure(tid, state="hidden")
         except tk.TclError:
             pass
 
@@ -1790,42 +1851,65 @@ class App(tk.Tk):
         else:
             badge_txt, badge_bg, badge_fg = "● Available", C_OK_BG, C_OK_TEXT
 
-        # ── card shell: white surface, 1px line-200 border (faux elevation) ────
+        overdue = bool(out_to and due and due < datetime.now().strftime("%Y-%m-%d"))
+
+        # ── card shell ────────────────────────────────────────────────────────
         card = tk.Frame(self.games_inner, bg=C_SURFACE,
                         highlightbackground=C_LINE_200, highlightthickness=1, bd=0)
 
-        # ── cover image (full width, fixed height) ─────────────────────────────
+        # ── cover: gradient placeholder + game-name overlay + star chip ───────
         _IH = 200
-        img_canvas = tk.Canvas(card, height=_IH, bg=C_LINE_100,
-                               highlightthickness=0, bd=0)
+        img_canvas = tk.Canvas(card, height=_IH, highlightthickness=0, bd=0)
         img_canvas.pack(fill="x")
 
+        # Gradient placeholder image (replaced when real photo loads)
+        ph = self._get_gradient_placeholder(bgg_id)
         _img_id = img_canvas.create_image(130, _IH // 2, anchor="center")
-        ph = self._get_placeholder()
         img_canvas.itemconfigure(_img_id, image=ph)
         img_canvas._card_img_ref = ph
 
-        # Favourite star — circular chip overlaid on the cover's top-right corner
-        star_bg = img_canvas.create_oval(0, 0, 0, 0, fill=C_SURFACE, outline="")
-        star_id = img_canvas.create_text(
-            0, 0, text="★" if is_fav else "☆",
+        # Game-name text overlay (uppercase, white, centered on cover)
+        # Hidden once a real cover image is loaded
+        cover_lines = self._cover_title_lines(game["name"])
+        _title_id = img_canvas.create_text(
+            130, _IH // 2,
+            text="\n".join(cover_lines),
+            fill="white", font=("Segoe UI", 20, "bold"),
+            anchor="center", justify="center",
+        )
+        img_canvas._cover_title_id = _title_id  # lazy-loader hides this
+
+        # Favourite star — 34×34px circular chip, top-right of cover
+        _star_bg = img_canvas.create_oval(0, 0, 0, 0,
+                                          fill="white", outline="", tags="star")
+        _star_id = img_canvas.create_text(
+            0, 0,
+            text="★" if is_fav else "☆",
             fill=C_STAR_FILL if is_fav else C_INK_500,
-            font=("Segoe UI", 14), anchor="center",
+            font=("Segoe UI", 15, "bold"),
+            anchor="center", tags="star",
         )
 
         def _place_overlays(e=None, iid=_img_id, h=_IH):
             w = img_canvas.winfo_width()
             img_canvas.coords(iid, w // 2, h // 2)
-            sx, sy, r = w - 22, 22, 15
-            img_canvas.coords(star_bg, sx - r, sy - r, sx + r, sy + r)
-            img_canvas.coords(star_id, sx, sy)
+            img_canvas.coords(_title_id, w // 2, h // 2)
+            # Star: 34×34px circle, 10px inset from top-right
+            sx, sy, r = w - 10 - 17, 10 + 17, 17
+            img_canvas.coords(_star_bg, sx - r, sy - r, sx + r, sy + r)
+            img_canvas.coords(_star_id, sx, sy)
         img_canvas.bind("<Configure>", _place_overlays)
 
-        for _it in (star_bg, star_id):
+        for _it in (_star_bg, _star_id):
             img_canvas.tag_bind(_it, "<Button-1>",
                                 lambda e, g=game: self.on_toggle_favorite(g))
+            img_canvas.tag_bind(_it, "<Enter>",
+                                lambda e: img_canvas.itemconfigure(_star_bg, fill="white"))
+            img_canvas.tag_bind(_it, "<Leave>",
+                                lambda e: img_canvas.itemconfigure(_star_bg,
+                                          fill="white" if True else C_SURFACE))
 
-        # Expansion ribbon — info colours, bottom-left of cover
+        # Expansion ribbon — bottom-left of cover
         if game["is_expansion"]:
             img_canvas.create_rectangle(0, _IH - 22, 80, _IH,
                                         fill=C_BLUE_050, outline="")
@@ -1837,39 +1921,40 @@ class App(tk.Tk):
         body = tk.Frame(card, bg=C_SURFACE, padx=SP["lg"], pady=SP["md"])
         body.pack(fill="both", expand=True)
 
-        # Status badge (above the title)
+        # Status badge (prototype: 12.5px bold, 4px/10px padding)
         tk.Label(body, text=badge_txt, bg=badge_bg, fg=badge_fg,
-                 font=self.FONTS["label"], padx=SP["md"], pady=SP["xs"]
-                 ).pack(anchor="w", pady=(0, SP["sm"]))
+                 font=("Segoe UI", 12, "bold"), padx=10, pady=4,
+                 ).pack(anchor="w", pady=(0, SP["xs"]))
 
-        # Loaned-to line
+        # Loaned-to line: "To Name · due Date" (prototype: 13px ink-600)
         if out_to:
             due_txt = f" · due {due}" if due else ""
             tk.Label(body, text=f"To {out_to}{due_txt}",
-                     bg=C_SURFACE, fg=C_INK_600, font=self.FONTS["body"],
+                     bg=C_SURFACE, fg=C_INK_600,
+                     font=self.FONTS["loaned_to"],
                      anchor="w", justify="left").pack(anchor="w", pady=(0, SP["xs"]))
 
-        # Title (card_title) + year (body, ink-600)
+        # Title (prototype: 16px bold) + year (prototype: 13px ink-600)
         tk.Label(body, text=_shorten(game["name"]),
                  bg=C_SURFACE, fg=C_INK_900, font=self.FONTS["card_title"],
                  wraplength=210, justify="left", anchor="w").pack(anchor="w")
         if game["year"]:
             tk.Label(body, text=str(game["year"]), bg=C_SURFACE, fg=C_INK_600,
-                     font=self.FONTS["body"]).pack(anchor="w")
+                     font=self.FONTS["card_year"]).pack(anchor="w")
 
-        # Specs row: players · time
+        # Specs row (prototype: 13.5px ink-600)
         info = (
-            f"\U0001f465 {fmt_players(game['min_players'], game['max_players'])}   "
+            f"\U0001f465 {fmt_players(game['min_players'], game['max_players'])}  "
             f"⏱ {fmt_time(game['min_playtime'], game['max_playtime'], game['playing_time'])}"
         )
         tk.Label(body, text=info, bg=C_SURFACE, fg=C_INK_600,
-                 font=self.FONTS["body"]).pack(anchor="w", pady=(SP["xs"], 0))
+                 font=self.FONTS["card_specs"]).pack(anchor="w", pady=(SP["xs"], 0))
 
-        # Best-at (star colour)
+        # Best-at (prototype: 13px bold, star colour)
         if game["best_players"]:
             tk.Label(body, text=f"★ Best at {game['best_players']}",
                      bg=C_SURFACE, fg=C_STAR_TEXT,
-                     font=self.FONTS["body_strong"]).pack(anchor="w")
+                     font=self.FONTS["card_bestat"]).pack(anchor="w")
 
         # Meta badges: insert / plays
         if has_insert or n_plays:
@@ -1877,20 +1962,20 @@ class App(tk.Tk):
             badge_row.pack(anchor="w", pady=(SP["xs"], 0))
             if has_insert:
                 tk.Label(badge_row, text="📦 Insert", bg=C_BLUE_050, fg=C_BLUE_700,
-                         font=self.FONTS["label"], padx=SP["sm"] - 2, pady=1
+                         font=("Segoe UI", 9, "bold"), padx=SP["sm"] - 2, pady=1
                          ).pack(side="left", padx=(0, SP["xs"]))
             if n_plays:
                 tk.Label(badge_row,
                          text=f"🎮 {n_plays} play{'s' if n_plays != 1 else ''}",
                          bg=C_OK_BG, fg=C_OK_TEXT,
-                         font=self.FONTS["label"], padx=SP["sm"] - 2, pady=1
+                         font=("Segoe UI", 9, "bold"), padx=SP["sm"] - 2, pady=1
                          ).pack(side="left")
 
-        # ── actions: one filled primary, then 2-col Ghost grid ─────────────────
-        # Expanding spacer — pushes buttons to the bottom of every card in the
-        # row so they line up horizontally regardless of content above them.
+        # ── actions ────────────────────────────────────────────────────────────
+        # Expanding spacer pushes buttons to the row's baseline
         tk.Frame(body, bg=C_SURFACE).pack(fill="both", expand=True)
 
+        # Primary button — full width
         if out_to:
             ttk.Button(body, text="Check In",
                        command=lambda g=game: self.on_check_in(g)
@@ -1900,6 +1985,9 @@ class App(tk.Tk):
                        command=lambda g=game: self.on_check_out(g)
                        ).pack(fill="x", pady=(0, SP["xs"]))
 
+        # Secondary 2-column grid:
+        # Overdue → "Details" + "Remind"   (prototype pattern)
+        # Checked out / Available → "Details" + "Log Play"
         sec = tk.Frame(body, bg=C_SURFACE)
         sec.pack(fill="x")
         sec.columnconfigure(0, weight=1)
@@ -1907,18 +1995,20 @@ class App(tk.Tk):
         ttk.Button(sec, text="Details", style="Ghost.TButton",
                    command=lambda g=game: self.show_details(g)
                    ).grid(row=0, column=0, sticky="ew", padx=(0, 2))
-        ttk.Button(sec, text="Log Play", style="Ghost.TButton",
-                   command=lambda g=game: self.on_log_play(g)
-                   ).grid(row=0, column=1, sticky="ew", padx=(2, 0))
-        ttk.Button(sec, text="Edit", style="Ghost.TButton",
-                   command=lambda g=game: self.on_edit_game(g)
-                   ).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(SP["xs"] - 1, 0))
+        if overdue:
+            ttk.Button(sec, text="Remind", style="Ghost.TButton",
+                       command=lambda g=game: self._remind_borrower(g)
+                       ).grid(row=0, column=1, sticky="ew", padx=(2, 0))
+        else:
+            ttk.Button(sec, text="Log Play", style="Ghost.TButton",
+                       command=lambda g=game: self.on_log_play(g)
+                       ).grid(row=0, column=1, sticky="ew", padx=(2, 0))
 
-        # Hover: darken the card border (faux lift)
+        # Hover: lift card border
         card.bind("<Enter>", lambda e: card.configure(highlightbackground=C_INK_500))
         card.bind("<Leave>", lambda e: card.configure(highlightbackground=C_LINE_200))
 
-        # Right-click context menu on the whole card
+        # Right-click context menu
         def _card_right_click(event, g=game):
             self._show_card_context_menu(event, g)
         for w in (card, img_canvas, body, sec):
@@ -1927,6 +2017,67 @@ class App(tk.Tk):
         self._bind_canvas_scroll(card)
 
         return card, (img_canvas, _img_id, game)
+
+    # ---------- card cover helpers ----------
+
+    def _get_gradient_placeholder(self, bgg_id: int) -> ImageTk.PhotoImage:
+        """Return a cached PIL gradient image for this game's palette slot."""
+        palette_idx = bgg_id % len(self._COVER_PALETTES)
+        if palette_idx not in self._gradient_cache:
+            c1, c2 = self._COVER_PALETTES[palette_idx]
+            def _parse(h): return (int(h[1:3],16), int(h[3:5],16), int(h[5:7],16))
+            r1,g1,b1 = _parse(c1);  r2,g2,b2 = _parse(c2)
+            W, H = 300, 200
+            # Build a 1-px-wide vertical gradient strip, then resize to full size
+            strip = Image.new("RGB", (1, H))
+            for y in range(H):
+                t = y / (H - 1)
+                strip.putpixel((0, y), (
+                    int(r1 + (r2-r1)*t),
+                    int(g1 + (g2-g1)*t),
+                    int(b1 + (b2-b1)*t),
+                ))
+            img = strip.resize((W, H), Image.NEAREST)
+            self._gradient_cache[palette_idx] = ImageTk.PhotoImage(img)
+        return self._gradient_cache[palette_idx]
+
+    def _cover_title_lines(self, name: str, max_chars: int = 14) -> list[str]:
+        """Split a game name into short uppercase lines for the cover overlay."""
+        words = name.upper().split()
+        lines: list[str] = []
+        current = ""
+        for word in words:
+            candidate = (current + " " + word).strip()
+            if len(candidate) <= max_chars:
+                current = candidate
+            else:
+                if current:
+                    lines.append(current)
+                current = word
+        if current:
+            lines.append(current)
+        return lines[:4]   # cap at 4 lines so text stays readable
+
+    def _remind_borrower(self, game) -> None:
+        """Show a reminder dialog for an overdue game."""
+        with db.connect() as c:
+            loan = c.execute(
+                """SELECT loans.*, users.first_name, users.last_name
+                   FROM loans JOIN users ON users.id = loans.user_id
+                   WHERE loans.game_id = ? AND loans.returned_at IS NULL""",
+                (game["bgg_id"],),
+            ).fetchone()
+        if not loan:
+            return
+        name = f"{loan['first_name']} {loan['last_name']}"
+        due  = loan["due_date"] or "no due date set"
+        messagebox.showinfo(
+            "Remind borrower",
+            f"\"{game['name']}\" is overdue.\n\n"
+            f"Borrower:  {name}\n"
+            f"Due date:  {due}\n\n"
+            "Contact them to arrange a return.",
+        )
 
     def _show_card_context_menu(self, event: tk.Event, game) -> None:
         """Right-click context menu for a game card — mirrors the table-view menu."""
@@ -2418,30 +2569,21 @@ class App(tk.Tk):
             foreground=C_INK_500,
         ).grid(row=1, column=1, sticky="w", padx=(8, 0), pady=(0, 8))
 
-        # ── BGG API token ─────────────────────────────────────────────────────
-        ttk.Label(frame, text="BGG API token:").grid(row=2, column=0, sticky="w", pady=4)
-        token_var = tk.StringVar(value=self.settings.get("bgg_token", ""))
-        ttk.Entry(frame, textvariable=token_var, width=38).grid(row=2, column=1, sticky="w", padx=(8, 0))
-        ttk.Label(
-            frame, text="Register at boardgamegeek.com/applications — never share or commit this",
-            foreground=C_INK_500,
-        ).grid(row=3, column=1, sticky="w", padx=(8, 0), pady=(0, 8))
-
         # ── BGG password (keychain) ───────────────────────────────────────────
-        ttk.Label(frame, text="BGG password:").grid(row=4, column=0, sticky="w", pady=4)
+        ttk.Label(frame, text="BGG password:").grid(row=2, column=0, sticky="w", pady=4)
         pwd_var = tk.StringVar(value=_kr_get_password())
         pwd_entry = ttk.Entry(frame, textvariable=pwd_var, width=32, show="●")
-        pwd_entry.grid(row=4, column=1, sticky="w", padx=(8, 0))
+        pwd_entry.grid(row=2, column=1, sticky="w", padx=(8, 0))
         _stored = bool(_kr_get_password())
         _pwd_hint = "✓ Saved securely (DPAPI)" if _stored else "Optional — needed for private collections"
         pwd_hint_var = tk.StringVar(value=_pwd_hint)
         ttk.Label(frame, textvariable=pwd_hint_var, foreground=C_INK_500 if not _stored else C_OK_SOLID,
-                  ).grid(row=5, column=1, sticky="w", padx=(8, 0), pady=(0, 4))
+                  ).grid(row=3, column=1, sticky="w", padx=(8, 0), pady=(0, 4))
         ttk.Button(
             frame, text="Clear saved password", style="Ghost.TButton",
             command=lambda: [_kr_set_password(""), pwd_var.set(""),
                              pwd_hint_var.set("Cleared — enter a new password to save")]
-        ).grid(row=6, column=1, sticky="w", padx=(8, 0), pady=(0, 12))
+        ).grid(row=4, column=1, sticky="w", padx=(8, 0), pady=(0, 12))
 
         # ── sync plays toggle ─────────────────────────────────────────────────
         sync_var = tk.BooleanVar(value=bool(self.settings.get("bgg_sync_plays", False)))
@@ -2449,11 +2591,11 @@ class App(tk.Tk):
             frame,
             text="Offer to post plays to BGG when logging a play",
             variable=sync_var,
-        ).grid(row=7, column=0, columnspan=2, sticky="w", pady=(0, 4))
+        ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(0, 4))
 
         def save() -> None:
             self.settings["bgg_username"] = username_var.get().strip()
-            self.settings["bgg_token"]    = token_var.get().strip()
+            # Preserve the existing token — managed via build secrets, not user-entered
             self.settings.pop("bgg_password", None)   # never in JSON
             self.settings["bgg_sync_plays"] = sync_var.get()
             config.save(self.settings)
@@ -2464,12 +2606,12 @@ class App(tk.Tk):
 
         # ── danger zone ───────────────────────────────────────────────────────
         tk.Frame(frame, bg=C_PALE, height=1).grid(
-            row=9, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+            row=7, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         tk.Label(
             frame, text="Danger zone",
             bg=C_BG, fg=C_DR_TEXT,
             font=("Segoe UI", 9, "bold"),
-        ).grid(row=10, column=0, sticky="w", pady=(8, 4))
+        ).grid(row=8, column=0, sticky="w", pady=(8, 4))
 
         tk.Button(
             frame, text="Clear collection…",
@@ -2478,17 +2620,17 @@ class App(tk.Tk):
             relief="flat", font=("Segoe UI", 9, "bold"),
             padx=12, pady=4, cursor="hand2",
             command=self.on_clear_collection,
-        ).grid(row=11, column=0, sticky="w")
+        ).grid(row=9, column=0, sticky="w")
         tk.Label(
             frame,
             text="Removes all games, images, play logs,\nand loan history. Members are kept.",
-            bg=C_BG, fg="#888",
+            bg=C_BG, fg=C_INK_500,
             font=("Segoe UI", 8), justify="left",
-        ).grid(row=11, column=1, sticky="w", padx=(12, 0))
+        ).grid(row=9, column=1, sticky="w", padx=(12, 0))
 
         # ── buttons ───────────────────────────────────────────────────────────
         btn_row = ttk.Frame(frame)
-        btn_row.grid(row=12, column=0, columnspan=2, sticky="e", pady=(20, 0))
+        btn_row.grid(row=10, column=0, columnspan=2, sticky="e", pady=(20, 0))
         ttk.Button(btn_row, text="Cancel", command=win.destroy).pack(side="left", padx=(0, 6))
         ttk.Button(btn_row, text="Save", command=save).pack(side="left")
 
@@ -2523,6 +2665,7 @@ class App(tk.Tk):
         except Exception:
             pass
         self._image_cache.clear()
+        self._gradient_cache.clear()
         self._placeholder_img = None
         self.refresh_all()
         self.status("Collection cleared.")
