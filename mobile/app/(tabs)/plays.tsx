@@ -1,5 +1,5 @@
 import { useCallback, useState, useEffect } from 'react';
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, Alert, Modal, TextInput, Pressable, RefreshControl, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, FlatList, TouchableOpacity, StyleSheet, Alert, Modal, TextInput, Pressable, RefreshControl, ScrollView, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as db from '../../lib/db';
 import * as bgg from '../../lib/bgg';
@@ -7,6 +7,7 @@ import { loadSettings } from '../../lib/settings';
 import { useFocusEffect } from 'expo-router';
 import type { Play, Game, User } from '../../lib/types';
 import PlayerPicker from '../../components/PlayerPicker';
+import WinnerPicker from '../../components/WinnerPicker';
 import ScreenHeader from '../../components/ScreenHeader';
 import DateInput from '../../components/DateInput';
 import RibbonBadge from '../../components/RibbonBadge';
@@ -248,6 +249,7 @@ export default function Plays({ isActive = true }: { isActive?: boolean }) {
 
       {/* ── Log / Edit Play modal ────────────────────────────────────────── */}
       <Modal visible={modalOpen} transparent animationType="slide" onRequestClose={() => setModalOpen(false)} accessibilityViewIsModal={true}>
+        <KeyboardAvoidingView style={s.modalRoot} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <Pressable style={s.overlay} onPress={() => setModalOpen(false)} />
         <View style={s.sheet}>
           <Text style={s.sheetTitle}>{editingPlay ? 'Edit Play' : 'Log a Play'}</Text>
@@ -267,7 +269,7 @@ export default function Plays({ isActive = true }: { isActive?: boolean }) {
             <PlayerPicker users={users} value={players} onChange={setPlayers} />
 
             <Text style={s.label}>Winner</Text>
-            <TextInput style={s.input} value={winner} onChangeText={setWinner} placeholder="Name, All, or None" placeholderTextColor={DS.ink500} />
+            <WinnerPicker players={players} value={winner} onChange={setWinner} />
 
             <Text style={s.label}>Duration (minutes)</Text>
             <TextInput style={s.input} value={duration} onChangeText={setDuration} keyboardType="number-pad" placeholder="90" placeholderTextColor={DS.ink500} />
@@ -283,10 +285,12 @@ export default function Plays({ isActive = true }: { isActive?: boolean }) {
             </TouchableOpacity>
           </ScrollView>
         </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Game picker modal */}
       <Modal visible={pickingGame} transparent animationType="slide" onRequestClose={() => { setPickingGame(false); setBggResults([]); setGameSearch(''); }} accessibilityViewIsModal={true}>
+        <KeyboardAvoidingView style={s.modalRoot} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <Pressable style={s.overlay} onPress={() => { setPickingGame(false); setBggResults([]); setGameSearch(''); }} />
         <View style={[s.sheet, { maxHeight: '85%' }]}>
           <Text style={s.sheetTitle}>Select Game</Text>
@@ -336,6 +340,7 @@ export default function Plays({ isActive = true }: { isActive?: boolean }) {
             </>
           )}
         </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
@@ -371,6 +376,7 @@ const s = StyleSheet.create({
   lbBarBg:      { height: 6, backgroundColor: DS.line200, borderRadius: R.pill, overflow: 'hidden' },
   lbBarFill:    { height: 6, borderRadius: R.pill },
   // Modal/sheet
+  modalRoot:    { flex: 1 },
   overlay:      { flex: 1, backgroundColor: 'rgba(11,26,42,0.35)' },
   sheet:        { backgroundColor: DS.surface, borderTopLeftRadius: 18, borderTopRightRadius: 18, padding: SP.xxl, paddingBottom: 44, maxHeight: '90%' },
   sheetTitle:   { fontSize: 17, fontWeight: '700', color: DS.ink900, marginBottom: SP.lg },

@@ -6,6 +6,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as db from '../../lib/db';
 import type { Game, Loan, User } from '../../lib/types';
 import PlayerPicker from '../../components/PlayerPicker';
+import WinnerPicker from '../../components/WinnerPicker';
 import DateInput from '../../components/DateInput';
 
 // Design tokens
@@ -343,7 +344,7 @@ export default function GameDetail() {
             <Text style={s.label}>Players</Text>
             <PlayerPicker users={users} value={players} onChange={setPlayers} />
             <Text style={s.label}>Winner</Text>
-            <TextInput style={s.input} value={winner} onChangeText={setWinner} placeholder="Alice" placeholderTextColor={DS.ink500} />
+            <WinnerPicker players={players} value={winner} onChange={setWinner} />
             <Text style={s.label}>Duration (minutes)</Text>
             <TextInput style={s.input} value={duration} onChangeText={setDuration} keyboardType="number-pad" placeholder="90" placeholderTextColor={DS.ink500} />
             <Text style={s.label}>Scores</Text>
