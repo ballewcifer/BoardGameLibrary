@@ -2,8 +2,9 @@ import { useCallback, useState, memo, useEffect } from 'react';
 import {
   View, Text, TextInput, FlatList, TouchableOpacity, StyleSheet,
   Image, RefreshControl, Modal, Pressable, Alert, ActivityIndicator, ScrollView,
+  KeyboardAvoidingView, Platform,
 } from 'react-native';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as db from '../../lib/db';
 import * as bgg from '../../lib/bgg';
@@ -99,14 +100,20 @@ export default function Games({ isActive = true }: { isActive?: boolean }) {
     loadLoans();
   }, [loadGames, loadLoans, search]);
 
-  // On focus: always refresh loans; only reload games on first mount
-  const mountedRef = useState(false);
+  // Reload whenever this tab is active AND the screen (re)gains focus — e.g.
+  // returning from the game detail after a favorite or check-out change, or
+  // switching back to this tab. The memoised GameThumb (keyed on uri) keeps
+  // images from re-mounting on reload, so there's no flicker.
+  useFocusEffect(
+    useCallback(() => {
+      if (isActive) load();
+    }, [isActive, load])
+  );
+
+  // One-time: load the saved BGG username for the Settings sheet
   useEffect(() => {
-    if (!isActive) return;
-    if (!mountedRef[0]) { mountedRef[1](true); loadGames(); }
-    loadLoans();
     loadSettings().then(s => { setBggUsername(s.bgg_username); });
-  }, [isActive]);
+  }, []);
 
   // ── Sync ──────────────────────────────────────────────────────────────────
 
@@ -401,6 +408,7 @@ export default function Games({ isActive = true }: { isActive?: boolean }) {
 
       {/* ── Add Game modal ─────────────────────────────────────────────────── */}
       <Modal visible={addOpen} transparent animationType="slide" onRequestClose={() => setAddOpen(false)} accessibilityViewIsModal={true}>
+        <KeyboardAvoidingView style={s.modalRoot} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <Pressable style={s.overlay} onPress={() => setAddOpen(false)} />
         <View style={s.sheet}>
           <View style={s.grabHandle} />
@@ -485,6 +493,7 @@ export default function Games({ isActive = true }: { isActive?: boolean }) {
             </ScrollView>
           )}
         </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Settings modal */}
@@ -566,6 +575,7 @@ const s = StyleSheet.create({
   favBadgeTxt: { fontSize: 12, color: DS.navy900 },
 
   // Modal overlay
+  modalRoot: { flex: 1 },
   overlay: { flex: 1, backgroundColor: 'rgba(11,26,42,0.35)' },
 
   // ⋯ dropdown menu

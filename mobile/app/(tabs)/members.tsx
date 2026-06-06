@@ -1,5 +1,5 @@
 import { useCallback, useState, useEffect } from 'react';
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, Modal, TextInput, Alert, Pressable, RefreshControl } from 'react-native';
+import { View, Text, FlatList, TouchableOpacity, StyleSheet, Modal, TextInput, Alert, Pressable, RefreshControl, KeyboardAvoidingView, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as db from '../../lib/db';
 import type { User } from '../../lib/types';
@@ -90,18 +90,23 @@ export default function Members({ isActive = true }: { isActive?: boolean }) {
       />
 
       <Modal visible={modalOpen} transparent animationType="slide" onRequestClose={() => setModalOpen(false)} accessibilityViewIsModal={true}>
-        <Pressable style={s.overlay} onPress={() => setModalOpen(false)} />
-        <View style={s.sheet}>
-          <View style={s.grab} />
-          <Text style={s.sheetTitle}>Add Member</Text>
-          <Text style={s.label}>First Name</Text>
-          <TextInput style={s.input} placeholder="e.g. Jane" value={first} onChangeText={setFirst} autoFocus />
-          <Text style={s.label}>Last Name</Text>
-          <TextInput style={s.input} placeholder="e.g. Smith" value={last} onChangeText={setLast} returnKeyType="done" onSubmitEditing={add} />
-          <TouchableOpacity style={s.sheetBtn} onPress={add}>
-            <Text style={s.sheetBtnTxt}>Add</Text>
-          </TouchableOpacity>
-        </View>
+        <KeyboardAvoidingView
+          style={s.modalRoot}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <Pressable style={s.overlay} onPress={() => setModalOpen(false)} />
+          <View style={s.sheet}>
+            <View style={s.grab} />
+            <Text style={s.sheetTitle}>Add Member</Text>
+            <Text style={s.label}>First Name</Text>
+            <TextInput style={s.input} placeholder="e.g. Jane" value={first} onChangeText={setFirst} autoFocus />
+            <Text style={s.label}>Last Name</Text>
+            <TextInput style={s.input} placeholder="e.g. Smith" value={last} onChangeText={setLast} returnKeyType="done" onSubmitEditing={add} />
+            <TouchableOpacity style={s.sheetBtn} onPress={add}>
+              <Text style={s.sheetBtnTxt}>Add</Text>
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
@@ -117,6 +122,7 @@ const s = StyleSheet.create({
   since:        { fontSize: 12, color: DS.ink500, marginTop: 2 },
   removeBtn:    { padding: SP.sm },
   empty:        { textAlign: 'center', color: DS.ink500, marginTop: 40, fontStyle: 'italic', fontSize: 14 },
+  modalRoot:    { flex: 1 },
   overlay:      { flex: 1, backgroundColor: 'rgba(11,26,42,0.35)' },
   sheet:        { backgroundColor: DS.surface, borderTopLeftRadius: 18, borderTopRightRadius: 18, padding: SP.xxl, paddingBottom: 40 },
   grab:         { width: 40, height: 5, backgroundColor: DS.line200, borderRadius: R.pill, alignSelf: 'center', marginBottom: SP.lg },

@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as db from '../../lib/db';
 import * as bgg from '../../lib/bgg';
 import { loadSettings } from '../../lib/settings';
+import { useFocusEffect } from 'expo-router';
 import type { Play, Game, User } from '../../lib/types';
 import PlayerPicker from '../../components/PlayerPicker';
 import ScreenHeader from '../../components/ScreenHeader';
@@ -63,7 +64,7 @@ export default function Plays({ isActive = true }: { isActive?: boolean }) {
     setUsers(db.listUsers());
     setWinners(db.topWinners(0));
   }, []);
-  useEffect(() => { if (isActive) load(); }, [isActive]);
+  useFocusEffect(useCallback(() => { if (isActive) load(); }, [isActive, load]));
 
   const openLog = (p?: Play) => {
     if (p) {

@@ -5,6 +5,7 @@ import * as db from '../../lib/db';
 import type { Loan } from '../../lib/types';
 import ScreenHeader from '../../components/ScreenHeader';
 import DateInput from '../../components/DateInput';
+import { useFocusEffect } from 'expo-router';
 
 const DS = {
   navy900: '#0E2A47',
@@ -53,7 +54,7 @@ export default function History({ isActive = true }: { isActive?: boolean }) {
   const [editNotes, setEditNotes] = useState('');
 
   const load = useCallback(() => setLoans(db.loanHistory()), []);
-  useEffect(() => { if (isActive) load(); }, [isActive]);
+  useFocusEffect(useCallback(() => { if (isActive) load(); }, [isActive, load]));
 
   const returnNow = (loan: Loan) => {
     Alert.alert('Mark as returned?', `Return "${loan.game_name}"?`, [

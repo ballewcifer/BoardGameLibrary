@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { View, Text, ScrollView, Image, TouchableOpacity, StyleSheet, Alert, Modal, TextInput, Pressable } from 'react-native';
+import { View, Text, ScrollView, Image, TouchableOpacity, StyleSheet, Alert, Modal, TextInput, Pressable, KeyboardAvoidingView, Platform } from 'react-native';
 import { useLocalSearchParams, router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -277,6 +277,7 @@ export default function GameDetail() {
 
       {/* Check-out sheet */}
       <Modal visible={checkoutOpen} transparent animationType="slide" onRequestClose={() => setCheckoutOpen(false)} accessibilityViewIsModal={true}>
+        <KeyboardAvoidingView style={s.modalRoot} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <Pressable style={s.overlay} onPress={() => setCheckoutOpen(false)} />
         <View style={s.sheet}>
           <View style={s.sheetGrab} />
@@ -298,6 +299,7 @@ export default function GameDetail() {
             <Text style={s.sheetBtnTxt}>Check Out</Text>
           </TouchableOpacity>
         </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* No-member notice */}
@@ -330,6 +332,7 @@ export default function GameDetail() {
 
       {/* Log play sheet */}
       <Modal visible={logPlayOpen} transparent animationType="slide" onRequestClose={() => setLogPlayOpen(false)} accessibilityViewIsModal={true}>
+        <KeyboardAvoidingView style={s.modalRoot} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <Pressable style={s.overlay} onPress={() => setLogPlayOpen(false)} />
         <View style={s.sheet}>
           <View style={s.sheetGrab} />
@@ -352,6 +355,7 @@ export default function GameDetail() {
             </TouchableOpacity>
           </ScrollView>
         </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Edit Game personal data modal */}
@@ -422,6 +426,7 @@ const s = StyleSheet.create({
   detailRow:        { fontSize: 14, color: DS.ink900, marginBottom: SP.xs, lineHeight: 20 },
   detailKey:        { fontWeight: '600', color: DS.ink500 },
   empty:            { textAlign: 'center', color: DS.ink500, marginTop: 80, fontSize: 15 },
+  modalRoot:        { flex: 1 },
   overlay:          { flex: 1, backgroundColor: 'rgba(11,26,42,0.35)' },
   sheet:            { backgroundColor: DS.surface, borderTopLeftRadius: 18, borderTopRightRadius: 18, padding: SP.lg, paddingBottom: 44, maxHeight: '85%' },
   sheetGrab:        { width: 40, height: 5, backgroundColor: DS.line200, borderRadius: R.pill, alignSelf: 'center', marginBottom: SP.md },

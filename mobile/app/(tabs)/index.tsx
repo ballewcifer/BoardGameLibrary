@@ -1,6 +1,6 @@
 import { useCallback, useState, useEffect } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, RefreshControl, Alert } from 'react-native';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as db from '../../lib/db';
 import { exportBackup, importBackup } from '../../lib/backup';
@@ -49,7 +49,7 @@ export default function Dashboard({ isActive = true }: { isActive?: boolean }) {
     setTopWins(db.topWinners(5));
   }, []);
 
-  useEffect(() => { if (isActive) load(); }, [isActive]);
+  useFocusEffect(useCallback(() => { if (isActive) load(); }, [isActive, load]));
 
   const today = new Date().toISOString().slice(0, 10);
 
