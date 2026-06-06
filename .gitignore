@@ -28,6 +28,9 @@ installer/
 Thumbs.db
 .DS_Store
 
+# Claude Code local settings (machine-specific, never commit)
+.claude/settings.local.json
+
 # Mobile
 mobile/node_modules/
 mobile/.expo/
