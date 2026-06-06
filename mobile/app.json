@@ -2,7 +2,7 @@
   "expo": {
     "name": "Board Game Library",
     "slug": "board-game-library",
-    "version": "1.19.4",
+    "version": "1.19.5",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -13,7 +13,8 @@
       "expo-font",
       "expo-secure-store",
       "expo-sharing",
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      "expo-image"
     ],
     "ios": {
       "supportsTablet": true,
