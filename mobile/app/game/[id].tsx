@@ -52,6 +52,7 @@ export default function GameDetail() {
   const [loan, setLoan]       = useState<Loan | null>(null);
   const [users, setUsers]     = useState<User[]>([]);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [noMemberOpen, setNoMemberOpen] = useState(false);
   const [logPlayOpen, setLogPlayOpen]   = useState(false);
 
   // Checkout form
@@ -211,12 +212,15 @@ export default function GameDetail() {
                 <Ionicons name="return-down-back" size={18} color={DS.ink900} />
                 <Text style={s.actionTxtOutline}>Check In</Text>
               </TouchableOpacity>
-            : users.length > 0
-              ? <TouchableOpacity style={s.actionBtnPrimary} onPress={() => setCheckoutOpen(true)} accessibilityRole="button" accessibilityLabel={`Check out ${game.name}`}>
-                  <Ionicons name="arrow-forward-circle" size={18} color="#fff" />
-                  <Text style={s.actionTxtPrimary}>Check Out</Text>
-                </TouchableOpacity>
-              : null}
+            : <TouchableOpacity
+                style={[s.actionBtnPrimary, users.length === 0 && s.actionBtnDisabled]}
+                onPress={() => (users.length > 0 ? setCheckoutOpen(true) : setNoMemberOpen(true))}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: users.length === 0 }}
+                accessibilityLabel={`Check out ${game.name}`}>
+                <Ionicons name="arrow-forward-circle" size={18} color="#fff" />
+                <Text style={s.actionTxtPrimary}>Check Out</Text>
+              </TouchableOpacity>}
           <TouchableOpacity style={s.actionBtnOutline} onPress={() => { setPlayDate(today); setLogPlayOpen(true); }} accessibilityRole="button" accessibilityLabel="Log a play for this game">
             <Ionicons name="trophy" size={18} color={DS.ink900} />
             <Text style={s.actionTxtOutline}>Log Play</Text>
@@ -292,6 +296,19 @@ export default function GameDetail() {
 
           <TouchableOpacity style={s.sheetBtn} onPress={checkOut}>
             <Text style={s.sheetBtnTxt}>Check Out</Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
+
+      {/* No-member notice */}
+      <Modal visible={noMemberOpen} transparent animationType="slide" onRequestClose={() => setNoMemberOpen(false)} accessibilityViewIsModal={true}>
+        <Pressable style={s.overlay} onPress={() => setNoMemberOpen(false)} />
+        <View style={s.sheet}>
+          <View style={s.sheetGrab} />
+          <Text style={s.sheetTitle}>Add a member first</Text>
+          <Text style={s.body}>You need at least one member before you can check out a game. Add one on the Members tab, then try again.</Text>
+          <TouchableOpacity style={s.sheetBtn} onPress={() => { setNoMemberOpen(false); router.push('/members'); }}>
+            <Text style={s.sheetBtnTxt}>Go to Members</Text>
           </TouchableOpacity>
         </View>
       </Modal>
@@ -391,6 +408,7 @@ const s = StyleSheet.create({
   bannerSub:        { fontSize: 12, fontWeight: '400' },
   actions:          { flexDirection: 'row', gap: SP.sm, flexWrap: 'wrap' },
   actionBtnPrimary: { flexDirection: 'row', alignItems: 'center', gap: SP.sm, backgroundColor: DS.blue600, borderRadius: R.md, paddingHorizontal: SP.md, paddingVertical: 11 },
+  actionBtnDisabled:{ backgroundColor: DS.line200, opacity: 0.6 },
   actionTxtPrimary: { color: '#FFFFFF', fontWeight: '600', fontSize: 14 },
   actionBtnOutline: { flexDirection: 'row', alignItems: 'center', gap: SP.sm, backgroundColor: DS.surface, borderWidth: 1, borderColor: DS.line200, borderRadius: R.md, paddingHorizontal: SP.md, paddingVertical: 11 },
   actionTxtOutline: { color: DS.ink900, fontWeight: '600', fontSize: 14 },
