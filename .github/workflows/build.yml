@@ -220,11 +220,16 @@ jobs:
           # Injected into the JS bundle as process.env.EXPO_PUBLIC_BGG_TOKEN
           EXPO_PUBLIC_BGG_TOKEN: ${{ secrets.BGG_APP_TOKEN }}
         run: |
-          eas build \
-            --platform android \
-            --profile preview \
-            --non-interactive \
-            --output "${{ github.workspace }}/artifacts/BoardGameLibraryMobile-v${{ steps.ver.outputs.VERSION }}.apk"
+          # Cloud build on EAS. `--json` implies `--non-interactive` and makes eas
+          # WAIT for the build to finish, then print the completed build object(s)
+          # to stdout (human-readable progress goes to stderr). `--output` is only
+          # valid for `--local` builds, so for a cloud build we read the artifact
+          # URL out of the JSON and curl the APK down ourselves.
+          eas build --platform android --profile preview --json --non-interactive \
+            > "$RUNNER_TEMP/eas-build.json"
+          APK_URL=$(node -e "const d=require('$RUNNER_TEMP/eas-build.json'); const b=Array.isArray(d)?d[0]:d; const u=b&&b.artifacts&&b.artifacts.applicationArchiveUrl; if(!u){console.error('Could not find artifacts.applicationArchiveUrl in EAS output'); process.exit(1);} console.log(u);")
+          echo "Downloading APK from EAS: $APK_URL"
+          curl -L --fail -o "${{ github.workspace }}/artifacts/BoardGameLibraryMobile-v${{ steps.ver.outputs.VERSION }}.apk" "$APK_URL"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
