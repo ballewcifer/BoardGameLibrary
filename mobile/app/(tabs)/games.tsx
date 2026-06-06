@@ -60,8 +60,7 @@ export default function Games({ isActive = true }: { isActive?: boolean }) {
   const [openLoans, setOpenLoans]   = useState<Record<number, Loan>>({});
   const [playCounts, setPlayCounts] = useState<Record<number, number>>({});
   const [search, setSearch]         = useState('');
-  const [statusFilter, setStatus]   = useState<'all' | 'available' | 'out'>('all');
-  const [favOnly, setFavOnly]       = useState(false);
+  const [filter, setFilter]         = useState<'all' | 'available' | 'out' | 'favs'>('all');
   const [refreshing, setRefreshing] = useState(false);
 
   // Sync
@@ -117,14 +116,10 @@ export default function Games({ isActive = true }: { isActive?: boolean }) {
 
   // ── Sync ──────────────────────────────────────────────────────────────────
 
-  const onSync = async () => {
+  const runSync = async () => {
     const settings = await loadSettings();
     if (!settings.bgg_username) {
-      // No username — open Settings so they can enter one immediately
-      setMenuOpen(false);
-      const s = await loadSettings();
-      setBggUsername(s.bgg_username); setBggPassword(s.bgg_password);
-      setSettingsOpen(true);
+      Alert.alert('BGG username required', 'Enter your BoardGameGeek username to sync.');
       return;
     }
     setSyncing(true);
@@ -250,25 +245,26 @@ export default function Games({ isActive = true }: { isActive?: boolean }) {
     }
   };
 
-  const openSettings = async () => {
+  const openSync = async () => {
     setMenuOpen(false);
     const s = await loadSettings();
     setBggUsername(s.bgg_username); setBggPassword(s.bgg_password);
     setSettingsOpen(true);
   };
 
-  const saveAndClose = async () => {
-    // Preserve the existing token (from build-time env var) — don't expose or overwrite it
+  const syncNow = async () => {
+    // Save the entered credentials (preserve the build-time token), then sync
     const existing = await loadSettings();
     await saveSettings({ bgg_username: bggUsername.trim(), bgg_token: existing.bgg_token, bgg_password: bggPassword });
     setSettingsOpen(false);
+    runSync();
   };
 
   const filtered = games.filter(g => {
-    if (favOnly && !g.is_favorite) return false;
-    if (statusFilter === 'available' && openLoans[g.bgg_id]) return false;
-    if (statusFilter === 'out' && !openLoans[g.bgg_id]) return false;
-    return true;
+    if (filter === 'favs')      return !!g.is_favorite;
+    if (filter === 'available') return !openLoans[g.bgg_id];
+    if (filter === 'out')       return !!openLoans[g.bgg_id];
+    return true; // 'all'
   });
 
   // Normalise protocol-relative URLs stored before the https fix
@@ -313,17 +309,17 @@ export default function Games({ isActive = true }: { isActive?: boolean }) {
         ) : null}
       </View>
 
-      {/* Quick filters */}
+      {/* Quick filters — single mutually-exclusive group */}
       <View style={s.filterRow}>
         {(['all', 'available', 'out'] as const).map(f => (
-          <TouchableOpacity key={f} style={[s.filterChip, statusFilter === f && s.filterChipActive]} onPress={() => setStatus(f)} accessibilityRole="button" accessibilityLabel={f === 'all' ? 'Show all games' : f === 'available' ? 'Show available games only' : 'Show checked out games only'} accessibilityState={{ selected: statusFilter === f }}>
-            <Text style={[s.filterChipTxt, statusFilter === f && s.filterChipTxtActive]}>
+          <TouchableOpacity key={f} style={[s.filterChip, filter === f && s.filterChipActive]} onPress={() => setFilter(f)} accessibilityRole="button" accessibilityLabel={f === 'all' ? 'Show all games' : f === 'available' ? 'Show available games only' : 'Show checked out games only'} accessibilityState={{ selected: filter === f }}>
+            <Text style={[s.filterChipTxt, filter === f && s.filterChipTxtActive]}>
               {f === 'all' ? 'All' : f === 'available' ? 'Available' : 'Out'}
             </Text>
           </TouchableOpacity>
         ))}
-        <TouchableOpacity style={[s.filterChip, favOnly && s.filterChipFav]} onPress={() => setFavOnly(v => !v)} accessibilityRole="button" accessibilityLabel="Show favorites only" accessibilityState={{ selected: favOnly }}>
-          <Text style={[s.filterChipTxt, favOnly && s.filterChipFavTxt]}>★ Favs</Text>
+        <TouchableOpacity style={[s.filterChip, filter === 'favs' && s.filterChipFav]} onPress={() => setFilter('favs')} accessibilityRole="button" accessibilityLabel="Show favorites only" accessibilityState={{ selected: filter === 'favs' }}>
+          <Text style={[s.filterChipTxt, filter === 'favs' && s.filterChipFavTxt]}>★ Favs</Text>
         </TouchableOpacity>
       </View>
 
@@ -384,24 +380,14 @@ export default function Games({ isActive = true }: { isActive?: boolean }) {
       <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)} accessibilityViewIsModal={true}>
         <Pressable style={s.overlay} onPress={() => setMenuOpen(false)} />
         <View style={s.menu}>
-          {syncing
-            ? <View style={s.menuItem}>
-                <ActivityIndicator size="small" color={DS.blue600} />
-                <Text style={s.menuTxt}>{syncMessage || 'Syncing…'}</Text>
-              </View>
-            : <TouchableOpacity style={s.menuItem} onPress={() => { setMenuOpen(false); onSync(); }} accessibilityRole="button" accessibilityLabel="Sync collection from BGG">
-                <Ionicons name="sync-outline" size={20} color={DS.blue600} />
-                <Text style={s.menuTxt}>Sync Collection</Text>
-              </TouchableOpacity>}
+          <TouchableOpacity style={s.menuItem} onPress={() => { setMenuOpen(false); openSync(); }} accessibilityRole="button" accessibilityLabel="Sync collection from BGG">
+            <Ionicons name="sync-outline" size={20} color={DS.blue600} />
+            <Text style={s.menuTxt}>Sync with BGG</Text>
+          </TouchableOpacity>
           <View style={s.menuDivider} />
           <TouchableOpacity style={s.menuItem} onPress={() => { setMenuOpen(false); openAdd(); }} accessibilityRole="button" accessibilityLabel="Add individual game">
             <Ionicons name="add-circle-outline" size={20} color={DS.blue600} />
             <Text style={s.menuTxt}>Add Game</Text>
-          </TouchableOpacity>
-          <View style={s.menuDivider} />
-          <TouchableOpacity style={s.menuItem} onPress={openSettings}>
-            <Ionicons name="settings-outline" size={20} color={DS.blue600} />
-            <Text style={s.menuTxt}>BGG Settings</Text>
           </TouchableOpacity>
         </View>
       </Modal>
@@ -496,21 +482,23 @@ export default function Games({ isActive = true }: { isActive?: boolean }) {
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* Settings modal */}
+      {/* Sync with BGG modal */}
       <Modal visible={settingsOpen} transparent animationType="slide" onRequestClose={() => setSettingsOpen(false)} accessibilityViewIsModal={true}>
+        <KeyboardAvoidingView style={s.modalRoot} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <Pressable style={s.overlay} onPress={() => setSettingsOpen(false)} />
         <View style={s.sheet}>
           <View style={s.grabHandle} />
-          <Text style={s.sheetTitle}>BGG Settings</Text>
+          <Text style={s.sheetTitle}>Sync with BGG</Text>
           <Text style={s.label}>BGG Username</Text>
           <TextInput style={s.input} value={bggUsername} onChangeText={setBggUsername} placeholder="e.g. Ballewcifer" placeholderTextColor={DS.ink500} autoCapitalize="none" autoCorrect={false} />
           <Text style={s.label}>BGG Password</Text>
-          <Text style={s.settingsHint}>Needed for private collections. Leave blank if your collection is public.</Text>
+          <Text style={s.settingsHint}>Needed only for private collections. Leave blank if your collection is public.</Text>
           <TextInput style={s.input} value={bggPassword} onChangeText={setBggPassword} placeholder="Optional" placeholderTextColor={DS.ink500} secureTextEntry autoCapitalize="none" autoCorrect={false} />
-          <TouchableOpacity style={s.sheetBtn} onPress={saveAndClose}>
-            <Text style={s.sheetBtnTxt}>Save</Text>
+          <TouchableOpacity style={s.sheetBtn} onPress={syncNow} disabled={syncing}>
+            {syncing ? <ActivityIndicator color="#fff" /> : <Text style={s.sheetBtnTxt}>Sync Now</Text>}
           </TouchableOpacity>
         </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
