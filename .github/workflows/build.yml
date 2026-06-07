@@ -1,27 +1,20 @@
 name: Build Installers
 
-# Triggered by a PER-PLATFORM version tag:
-#   • desktop-vX.Y.Z  (e.g. desktop-v6.3.1) → Windows + macOS installers,
-#                       stamps version.py,  publishes a "Desktop" GitHub Release.
-#   • mobile-vX.Y.Z   (e.g. mobile-v1.19.4) → Android APK via EAS Build,
-#                       stamps app.json,    publishes a "Mobile" GitHub Release.
-#
-# Each tag builds & releases ONLY its own platform(s) and stamps ONLY its own
-# version file, so a mobile tag can never mislabel desktop (or vice-versa).
-# Coordinated release of everything = push both a desktop-v* and a mobile-v* tag.
+# Triggered by a desktop version tag:
+#   • desktop-vX.Y.Z  (e.g. desktop-v6.3.2) → Windows + macOS installers,
+#                       stamps version.py, publishes a "Desktop" GitHub Release.
 #
 # Manual runs (Actions tab → Run workflow) build the chosen platform but do NOT
 # publish a release — use them for test builds.
 #
+# The mobile app lives in its own repo: ballewcifer/BoardGameLibraryMobile
+#
 # Required GitHub Secrets:
-#   BGG_APP_TOKEN — BGG application token (shared by desktop + mobile)
-#   EXPO_TOKEN    — Expo account access token for EAS Build authentication
-#                   Create at: https://expo.dev/accounts/[you]/settings/access-tokens
+#   BGG_APP_TOKEN — BGG application token (used by the desktop build)
 on:
   push:
     tags:
       - 'desktop-v*'
-      - 'mobile-v*'
   workflow_dispatch:
     inputs:
       platform:
@@ -33,7 +26,6 @@ on:
           - all
           - windows
           - macos
-          - mobile
 
 # Opt into Node.js 24 for all actions now, ahead of the June 2026 deadline.
 env:
@@ -159,85 +151,6 @@ jobs:
           path: dist/BoardGameLibraryInstaller-*.dmg
           if-no-files-found: error
 
-  # ── Mobile: Android APK via EAS Build ────────────────────────────────────────
-  # EAS Build runs on Expo's cloud infrastructure. The EXPO_TOKEN secret
-  # authenticates the build. BGG_APP_TOKEN is injected as EXPO_PUBLIC_BGG_TOKEN
-  # so the compiled app bundle can make authenticated BGG API calls.
-  build-mobile:
-    name: Mobile app (Android APK)
-    runs-on: ubuntu-latest
-    if: >-
-      startsWith(github.ref, 'refs/tags/mobile-v') ||
-      (github.event_name == 'workflow_dispatch' && (inputs.platform == 'all' || inputs.platform == 'mobile'))
-
-    steps:
-      - name: Check out code
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: mobile/package-lock.json
-
-      - name: Install dependencies
-        working-directory: mobile
-        run: npm ci
-
-      - name: Set up Expo + EAS CLI
-        uses: expo/expo-github-action@v8
-        with:
-          eas-version: latest
-          token: ${{ secrets.EXPO_TOKEN }}
-
-      - name: Extract version from tag
-        id: ver
-        shell: bash
-        run: |
-          if [[ "${GITHUB_REF_NAME}" == mobile-v* ]]; then
-            echo "VERSION=${GITHUB_REF_NAME#mobile-v}" >> "$GITHUB_OUTPUT"
-          else
-            echo "VERSION=0.0.0" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Stamp app.json version
-        working-directory: mobile
-        run: |
-          node -e "
-            const fs = require('fs');
-            const cfg = JSON.parse(fs.readFileSync('app.json', 'utf8'));
-            cfg.expo.version = '${{ steps.ver.outputs.VERSION }}';
-            fs.writeFileSync('app.json', JSON.stringify(cfg, null, 2));
-          "
-
-      - name: Create artifacts directory
-        run: mkdir -p "${{ github.workspace }}/artifacts"
-
-      - name: Build Android APK (EAS cloud)
-        working-directory: mobile
-        env:
-          # Injected into the JS bundle as process.env.EXPO_PUBLIC_BGG_TOKEN
-          EXPO_PUBLIC_BGG_TOKEN: ${{ secrets.BGG_APP_TOKEN }}
-        run: |
-          # Cloud build on EAS. `--json` implies `--non-interactive` and makes eas
-          # WAIT for the build to finish, then print the completed build object(s)
-          # to stdout (human-readable progress goes to stderr). `--output` is only
-          # valid for `--local` builds, so for a cloud build we read the artifact
-          # URL out of the JSON and curl the APK down ourselves.
-          eas build --platform android --profile preview --json --non-interactive \
-            > "$RUNNER_TEMP/eas-build.json"
-          APK_URL=$(node -e "const d=require('$RUNNER_TEMP/eas-build.json'); const b=Array.isArray(d)?d[0]:d; const u=b&&b.artifacts&&b.artifacts.applicationArchiveUrl; if(!u){console.error('Could not find artifacts.applicationArchiveUrl in EAS output'); process.exit(1);} console.log(u);")
-          echo "Downloading APK from EAS: $APK_URL"
-          curl -L --fail -o "${{ github.workspace }}/artifacts/BoardGameLibraryMobile-v${{ steps.ver.outputs.VERSION }}.apk" "$APK_URL"
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: mobile-apk
-          path: artifacts/BoardGameLibraryMobile-v${{ steps.ver.outputs.VERSION }}.apk
-          if-no-files-found: error
-
   # ── Desktop GitHub Release: Windows + macOS installers ────────────────────────
   release-desktop:
     name: Create Desktop Release
@@ -299,56 +212,4 @@ jobs:
             - Check-in / check-out member tracking
             - Play log with date, players, and winner
             - Favorites, 3D-insert badges, and complexity filters
-            - Offline — all data stored locally
-
-  # ── Mobile GitHub Release: Android APK ────────────────────────────────────────
-  release-mobile:
-    name: Create Mobile Release
-    needs: [build-mobile]
-    runs-on: ubuntu-22.04
-    timeout-minutes: 15
-    # Only on a mobile-v* tag, and only if the mobile build succeeded.
-    if: |
-      startsWith(github.ref, 'refs/tags/mobile-v') &&
-      always() &&
-      needs.build-mobile.result == 'success'
-
-    permissions:
-      contents: write
-
-    steps:
-      - name: Extract version from tag
-        id: ver
-        run: echo "VERSION=${GITHUB_REF_NAME#mobile-v}" >> "$GITHUB_OUTPUT"
-
-      - name: Download mobile APK
-        uses: actions/download-artifact@v4
-        with:
-          name: mobile-apk
-          path: artifacts/
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          name: Board Game Library Mobile v${{ steps.ver.outputs.VERSION }}
-          draft: false
-          prerelease: false
-          # Desktop is the flagship line; mobile releases don't claim "Latest".
-          make_latest: 'false'
-          files: artifacts/*
-          body: |
-            ## Board Game Library — Mobile v${{ steps.ver.outputs.VERSION }}
-
-            ### Download
-            | Platform | File |
-            |----------|------|
-            | Android | `BoardGameLibraryMobile-v${{ steps.ver.outputs.VERSION }}.apk` |
-
-            Android APK can be sideloaded (enable "Install from unknown sources" in Settings).
-
-            ### What's included
-            - Full game library synced from BoardGameGeek
-            - Check-in / check-out member tracking
-            - Play log with date, players, and winner
-            - Favorites and complexity filters
             - Offline — all data stored locally
