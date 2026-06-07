@@ -10,6 +10,35 @@ function closeModal(id) {
   if (el) el.hidden = true;
 }
 
+// ── Winner dropdown (populated from the listed players) ─────────────────────
+// Fills a <select> with the players currently typed in `playersStr` (comma-
+// separated) plus "All", preserving the current/custom selection.
+function syncWinnerOptions(playersStr, selectEl, currentVal) {
+  if (!selectEl) return;
+  const names = (playersStr || '').split(',').map(s => s.trim()).filter(Boolean);
+  const opts = ['', ...names, 'All'];
+  if (currentVal && currentVal !== 'All' && !names.includes(currentVal)) {
+    opts.splice(1, 0, currentVal);   // keep a pre-existing custom winner
+  }
+  selectEl.innerHTML = '';
+  opts.forEach(v => {
+    const o = document.createElement('option');
+    o.value = v;
+    o.textContent = v === '' ? '— none —' : (v === 'All' ? 'All (everyone won)' : v);
+    if (v === (currentVal || '')) o.selected = true;
+    selectEl.appendChild(o);
+  });
+}
+
+// Live-bind a players text input to a winner <select>.
+function bindWinner(playersInputId, winnerSelectId) {
+  const pin = document.getElementById(playersInputId);
+  const sel = document.getElementById(winnerSelectId);
+  if (!pin || !sel) return;
+  pin.addEventListener('input', () => syncWinnerOptions(pin.value, sel, sel.value));
+  syncWinnerOptions(pin.value, sel, sel.value);
+}
+
 // Close modal when clicking backdrop
 document.addEventListener('click', e => {
   if (e.target.classList.contains('modal-backdrop')) {

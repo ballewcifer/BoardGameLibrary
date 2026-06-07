@@ -116,9 +116,9 @@
         <input type="date" name="played_at" class="form-control"
                value="{{ now.strftime('%Y-%m-%d') }}" required>
         <label class="form-label mt-sm">Players (comma-separated)</label>
-        <input type="text" name="player_names" class="form-control">
+        <input type="text" name="player_names" id="lp-players" class="form-control">
         <label class="form-label mt-sm">Winner</label>
-        <input type="text" name="winner" class="form-control" placeholder="Name, All, or None">
+        <select name="winner" id="lp-winner" class="form-control"></select>
         <label class="form-label mt-sm">Duration (minutes)</label>
         <input type="number" name="duration_minutes" class="form-control" min="1">
         <label class="form-label mt-sm">Scores</label>
@@ -150,7 +150,7 @@
         <label class="form-label mt-sm">Players</label>
         <input type="text" name="player_names" id="ep-players" class="form-control">
         <label class="form-label mt-sm">Winner</label>
-        <input type="text" name="winner" id="ep-winner" class="form-control">
+        <select name="winner" id="ep-winner" class="form-control"></select>
         <label class="form-label mt-sm">Duration (min)</label>
         <input type="number" name="duration_minutes" id="ep-duration" class="form-control" min="1">
         <label class="form-label mt-sm">Scores</label>
@@ -184,12 +184,20 @@ function openEditPlay(play, games) {
 
   document.getElementById('ep-date').value     = play.played_at ? play.played_at.slice(0,10) : '';
   document.getElementById('ep-players').value  = play.player_names || '';
-  document.getElementById('ep-winner').value   = play.winner || '';
+  syncWinnerOptions(play.player_names || '', document.getElementById('ep-winner'), play.winner || '');
   document.getElementById('ep-duration').value = play.duration_minutes || '';
   document.getElementById('ep-scores').value   = play.scores || '';
   document.getElementById('ep-notes').value    = play.notes || '';
   openModal('modal-edit-play');
 }
+
+// Winner dropdowns reflect the players typed for each play
+document.addEventListener('DOMContentLoaded', () => {
+  bindWinner('lp-players', 'lp-winner');
+  const ep = document.getElementById('ep-players');
+  const ew = document.getElementById('ep-winner');
+  if (ep && ew) ep.addEventListener('input', () => syncWinnerOptions(ep.value, ew, ew.value));
+});
 
 function toggleLeaderboard() {
   const p = document.getElementById('leaderboard-panel');

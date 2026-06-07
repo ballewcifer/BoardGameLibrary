@@ -11,6 +11,7 @@
       <option value="all"       {% if status=='all'       %}selected{% endif %}>All</option>
       <option value="available" {% if status=='available' %}selected{% endif %}>Available</option>
       <option value="out"       {% if status=='out'       %}selected{% endif %}>Checked Out</option>
+      <option value="favs"      {% if status=='favs'      %}selected{% endif %}>★ Favorites</option>
     </select>
 
     {% if all_tags %}
@@ -22,7 +23,6 @@
     </select>
     {% endif %}
 
-    <label class="filter-check"><input type="checkbox" name="fav" value="1" {% if fav_only %}checked{% endif %}> ★ Only</label>
     <label class="filter-check"><input type="checkbox" name="exp" value="1" {% if show_exp %}checked{% endif %}> Expansions</label>
 
     <button type="submit" class="btn btn-primary btn-sm">Filter</button>

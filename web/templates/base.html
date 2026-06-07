@@ -19,9 +19,7 @@
     {% if sync_status.running %}
       <span class="sync-badge spinning">⟳ Syncing…</span>
     {% else %}
-      <form method="post" action="/sync" style="display:inline">
-        <button class="btn-icon" title="Sync from BGG" aria-label="Sync collection from BGG">⟳</button>
-      </form>
+      <button class="btn-icon" title="Sync with BGG" aria-label="Sync collection from BGG" onclick="openModal('modal-sync')">⟳</button>
     {% endif %}
   </div>
 </header>
@@ -65,6 +63,27 @@
     <span class="nav-label">Plays</span>
   </a>
 </nav>
+
+<!-- ── Sync with BGG modal ──────────────────────────────────────────────── -->
+<div id="modal-sync" class="modal-backdrop" hidden>
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Sync with BGG</h3>
+      <button class="modal-close" onclick="closeModal('modal-sync')">✕</button>
+    </div>
+    <form method="post" action="/sync">
+      <div class="modal-body">
+        <label class="form-label">BGG Username</label>
+        <input type="text" name="bgg_username" class="form-control" value="{{ bgg_username }}" placeholder="e.g. Ballewcifer" autocomplete="off">
+        <p class="muted" style="font-size:.8rem;margin-top:6px">Pulls your public collection from BoardGameGeek.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-sync')">Cancel</button>
+        <button type="submit" class="btn btn-primary">Sync Now</button>
+      </div>
+    </form>
+  </div>
+</div>
 
 <script src="/static/app.js"></script>
 <script>

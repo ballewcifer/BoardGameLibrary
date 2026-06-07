@@ -869,11 +869,8 @@ class App(tk.Tk):
         self.status_filter_var = tk.StringVar(value="Any")
         fgroup("STATUS", lambda p: ttk.Combobox(
             p, textvariable=self.status_filter_var, width=12, state="readonly",
-            values=["Any", "Available", "Checked out"],
+            values=["Any", "Available", "Checked out", "Favorites"],
         )).bind("<<ComboboxSelected>>", lambda *_: self.refresh_games())
-
-        self.favorites_var = tk.BooleanVar(value=False)
-        fcheck("Favorites", self.favorites_var)
 
         self.tag_filter_var = tk.StringVar(value="Any")
         self.tag_filter_cb = fgroup("TAG", lambda p: ttk.Combobox(
@@ -936,8 +933,6 @@ class App(tk.Tk):
         if self.status_filter_var.get() != "Any":
             v = self.status_filter_var.get()
             active.append(("Status", v, lambda _v=v: self.status_filter_var.set("Any")))
-        if self.favorites_var.get():
-            active.append(("Favorites", "only", lambda: self.favorites_var.set(False)))
         if self.tag_filter_var.get() != "Any":
             v = self.tag_filter_var.get()
             active.append(("Tag", v, lambda _v=v: self.tag_filter_var.set("Any")))
@@ -1336,7 +1331,6 @@ class App(tk.Tk):
         self.time_var.set("Any")
         self.weight_var.set("Any")
         self.status_filter_var.set("Any")
-        self.favorites_var.set(False)
         self.tag_filter_var.set("Any")
         self.search_var.set("")
 
@@ -1442,14 +1436,12 @@ class App(tk.Tk):
                 elif weight_val == "Heavy (3–5)" and not (w > 3.0):
                     continue
 
-            # --- availability filter ---
+            # --- availability / favorites filter ---
             if status_val == "Available" and g["bgg_id"] in open_loans:
                 continue
             if status_val == "Checked out" and g["bgg_id"] not in open_loans:
                 continue
-
-            # --- favorites filter ---
-            if self.favorites_var.get() and not g["is_favorite"]:
+            if status_val == "Favorites" and not g["is_favorite"]:
                 continue
 
             # --- tag filter ---
@@ -1522,7 +1514,6 @@ class App(tk.Tk):
                                       self.status_filter_var.get(),
                                       self.tag_filter_var.get()])
             or self.exact_players_var.get()
-            or self.favorites_var.get()
             or bool(self.search_var.get())
         )
 
@@ -2786,19 +2777,10 @@ class App(tk.Tk):
         password = _kr_get_password()
         tok      = bgg.BGG_APP_TOKEN or self.settings.get("bgg_token", "").strip()
 
-        # Both credentials saved — sync immediately, no dialog needed
-        if username and password:
-            self.status(f"Syncing with BGG for {username}…")
-            threading.Thread(
-                target=self._import_from_username_bg,
-                args=(username, tok, password),
-                daemon=True,
-            ).start()
-            return
-
-        # Missing credentials — show the one-time setup dialog
+        # Always show the Sync dialog (pre-filled) so credentials can be entered
+        # or updated right in the sync flow — parity with the mobile app.
         dialog = tk.Toplevel(self)
-        dialog.title("BGG Sync — First-time Setup")
+        dialog.title("Sync with BGG")
         dialog.resizable(False, False)
         dialog.transient(self)
         dialog.configure(bg=C_BG)
@@ -2807,8 +2789,8 @@ class App(tk.Tk):
 
         tk.Label(
             dialog,
-            text="Enter your BGG credentials once.\n"
-                 "They will be saved securely and you won't be asked again.",
+            text="Sync your BoardGameGeek collection.\n"
+                 "Credentials are saved securely for next time.",
             bg=C_BG, fg=C_INK_900, font=("Segoe UI", 9),
             padx=16, justify="left",
         ).pack(anchor="w", pady=(14, 6))

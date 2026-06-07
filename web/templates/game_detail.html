@@ -149,9 +149,9 @@
         <label class="form-label">Date Played</label>
         <input type="date" name="played_at" class="form-control" value="{{ today }}" required>
         <label class="form-label mt-sm">Players (comma-separated)</label>
-        <input type="text" name="player_names" class="form-control" placeholder="Alice, Bob, Carol">
+        <input type="text" name="player_names" id="dlp-players" class="form-control" placeholder="Alice, Bob, Carol">
         <label class="form-label mt-sm">Winner</label>
-        <input type="text" name="winner" class="form-control" placeholder="Alice">
+        <select name="winner" id="dlp-winner" class="form-control"></select>
         <label class="form-label mt-sm">Duration (minutes)</label>
         <input type="number" name="duration_minutes" class="form-control" min="1">
         <label class="form-label mt-sm">Scores</label>
@@ -166,5 +166,9 @@
     </form>
   </div>
 </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => bindWinner('dlp-players', 'dlp-winner'));
+</script>
 
 {% endblock %}

@@ -98,8 +98,7 @@ def dashboard():
 def games():
     q          = request.args.get("q", "").strip()
     tag_filter = request.args.get("tag", "")
-    status     = request.args.get("status", "all")   # all | available | out
-    fav_only   = request.args.get("fav", "") == "1"
+    status     = request.args.get("status", "all")   # all | available | out | favs
     show_exp   = request.args.get("exp", "") == "1"
 
     with db.connect() as c:
@@ -117,8 +116,6 @@ def games():
 
         if not show_exp and g["is_expansion"]:
             continue
-        if fav_only and not g["is_favorite"]:
-            continue
         if tag_filter:
             tags = [t.strip() for t in (g["tags"] or "").split(",") if t.strip()]
             if tag_filter not in tags:
@@ -126,6 +123,8 @@ def games():
         if status == "available" and g["bgg_id"] in open_loans:
             continue
         if status == "out" and g["bgg_id"] not in open_loans:
+            continue
+        if status == "favs" and not g["is_favorite"]:
             continue
 
         games_list.append(gd)
@@ -135,7 +134,6 @@ def games():
                            q=q,
                            tag_filter=tag_filter,
                            status=status,
-                           fav_only=fav_only,
                            show_exp=show_exp,
                            all_tags=all_tags)
 
@@ -538,9 +536,18 @@ def _run_sync():
 
 @app.route("/sync", methods=["POST"])
 def sync():
+    # Credentials are entered/updated from the Sync dialog (parity with mobile)
+    new_username = request.form.get("bgg_username", "").strip()
+    if new_username:
+        s = _config.load()
+        s["bgg_username"] = new_username
+        _config.save(s)
     with _sync_lock:
         if _sync_status["running"]:
             flash("Sync already in progress.", "info")
+            return redirect(url_for("dashboard"))
+        if not _config.load().get("bgg_username", "").strip():
+            flash("Enter your BGG username to sync.", "error")
             return redirect(url_for("dashboard"))
         _sync_status["running"] = True
         _sync_status["message"] = "Starting sync…"
@@ -564,6 +571,7 @@ def inject_globals():
     return {
         "now": datetime.now(),
         "sync_status": _sync_status,
+        "bgg_username": _config.load().get("bgg_username", ""),
     }
 
 
