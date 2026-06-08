@@ -745,28 +745,30 @@ class App(tk.Tk):
         self.config(menu=menubar)
 
     def _build_header(self) -> None:
-        """Navy-900 app bar: rounded white logo chip + title (design system §appbar)."""
-        hdr = tk.Frame(self, bg=C_NAVY_900)
-        hdr.pack(side="top", fill="x")
+        """Compact navy app bar: logo + title on the SAME row as the section tabs,
+        so the title no longer needs its own band (frees vertical space)."""
+        self._appbar = tk.Frame(self, bg=C_NAVY_900)
+        self._appbar.pack(side="top", fill="x")
 
-        inner = tk.Frame(hdr, bg=C_NAVY_900)
-        inner.pack(side="left", padx=self.SP["xl"], pady=self.SP["md"])
+        brand = tk.Frame(self._appbar, bg=C_NAVY_900)
+        brand.pack(side="left", padx=(self.SP["lg"], self.SP["md"]), pady=self.SP["xs"])
 
-        # Logo chip — white square with the die glyph (closest Tk analogue to the
-        # rounded logo tile in the prototype)
-        logo = tk.Label(
-            inner, text="\U0001f3b2",
+        # Logo chip — small white square with the die glyph
+        tk.Label(
+            brand, text="\U0001f3b2",
             bg=C_SURFACE, fg=C_NAVY_900,
-            font=("Segoe UI", 20, "bold"),
-            width=2, padx=6, pady=4,
-        )
-        logo.pack(side="left", padx=(0, self.SP["md"]))
+            font=("Segoe UI", 13, "bold"), padx=5, pady=1,
+        ).pack(side="left", padx=(0, self.SP["sm"]))
 
         tk.Label(
-            inner, text="Board Game Library",
+            brand, text="Board Game Library",
             bg=C_NAVY_900, fg=C_SURFACE,
-            font=self.FONTS["title"],   # now 19pt bold
+            font=("Segoe UI", 14, "bold"),
         ).pack(side="left")
+
+        # Section tabs are drawn here, on the same row as the brand.
+        self._tabbar = tk.Frame(self._appbar, bg=C_NAVY_900)
+        self._tabbar.pack(side="left", padx=(self.SP["lg"], 0))
 
         # Hairline under the app bar (line_200 over the navy/grey seam)
         tk.Frame(self, bg=C_LINE_200, height=1).pack(side="top", fill="x")
@@ -976,7 +978,10 @@ class App(tk.Tk):
                       command=_make_dismiss(clear_fn)).pack(side="left")
 
     def _build_tabs(self) -> None:
-        self.nb = ttk.Notebook(self)
+        # Hide the Notebook's native tab strip; we draw our own tab buttons up in
+        # the app bar so the title and tabs share one row.
+        ttk.Style().layout("Tabless.TNotebook.Tab", [])
+        self.nb = ttk.Notebook(self, style="Tabless.TNotebook")
         self.nb.pack(side="top", fill="both", expand=True)
 
         self.games_tab = ttk.Frame(self.nb)
@@ -985,17 +990,45 @@ class App(tk.Tk):
         self.plays_tab = ttk.Frame(self.nb)
         self.dashboard_tab = ttk.Frame(self.nb)
 
-        self.nb.add(self.games_tab, text="Games")
-        self.nb.add(self.members_tab, text="Members")
-        self.nb.add(self.history_tab, text="History")
-        self.nb.add(self.plays_tab, text="Plays")
-        self.nb.add(self.dashboard_tab, text="Dashboard")
+        _tabs = [
+            (self.games_tab,     "Games"),
+            (self.members_tab,   "Members"),
+            (self.history_tab,   "History"),
+            (self.plays_tab,     "Plays"),
+            (self.dashboard_tab, "Dashboard"),
+        ]
+        for frame, name in _tabs:
+            self.nb.add(frame, text=name)
+
+        # Custom tab buttons rendered in the app bar (self._tabbar)
+        self._tab_buttons = []
+        for idx, (_frame, name) in enumerate(_tabs):
+            btn = tk.Label(self._tabbar, text=name, bg=C_NAVY_900, fg="#9DB4CC",
+                           font=("Segoe UI", 11, "bold"),
+                           padx=14, pady=self.SP["sm"], cursor="hand2")
+            btn.pack(side="left")
+            btn.bind("<Button-1>", lambda _e, i=idx: self.nb.select(i))
+            self._tab_buttons.append(btn)
+        self.nb.bind("<<NotebookTabChanged>>", lambda _e: self._update_tab_highlight())
 
         self._build_games_tab()
         self._build_members_tab()
         self._build_history_tab()
         self._build_plays_tab()
         self._build_dashboard_tab()
+        self._update_tab_highlight()
+
+    def _update_tab_highlight(self) -> None:
+        """Highlight the active custom tab button (white on lighter navy)."""
+        try:
+            current = self.nb.index("current")
+        except Exception:
+            current = 0
+        for i, btn in enumerate(getattr(self, "_tab_buttons", [])):
+            if i == current:
+                btn.configure(bg=C_NAVY_700, fg=C_SURFACE)
+            else:
+                btn.configure(bg=C_NAVY_900, fg="#9DB4CC")
 
     def _build_status_bar(self) -> None:
         """Navy-900 status strip pinned to the bottom edge."""
