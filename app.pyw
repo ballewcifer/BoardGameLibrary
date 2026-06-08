@@ -416,6 +416,13 @@ class App(tk.Tk):
         if _stale_pwd := self.settings.pop("bgg_password", None):
             _kr_set_password(_stale_pwd)
             config.save(self.settings)
+        # Backfill: an existing single-collection library becomes one named collection
+        with db.connect() as c:
+            db.ensure_collection_migration(
+                c,
+                default_username=self.settings.get("bgg_username", ""),
+                default_name=self.settings.get("bgg_username", "") or "My Collection",
+            )
         self._image_cache:    dict[str, ImageTk.PhotoImage] = {}
         self._gradient_cache: dict[int, ImageTk.PhotoImage] = {}  # palette_idx → gradient
         self._placeholder_img: Optional[ImageTk.PhotoImage] = None
@@ -425,6 +432,13 @@ class App(tk.Tk):
         self._sort_rev: bool = False
         self._table_games: list = []
         self._lazy_generation: int = 0   # incremented each refresh to cancel stale loaders
+        # ── multi-collection state ──
+        self._active_collection: Optional[int] = None   # None = "All"
+        self._compare_mode: str = "off"                 # off | shared | only | diff
+        self._compare_other: Optional[int] = None
+        self._collections: list = []                    # cached collection rows
+        self._gc_map: dict = {}                          # {game_id: {collection_id,...}}
+        self._collection_sig = None                     # rebuild guard for the tab bar
 
         self.configure(bg=C_BG)          # grey canvas so white cards separate visually
         self._apply_style()
@@ -1157,6 +1171,10 @@ class App(tk.Tk):
         # Search bar, view toggle, and filter bar — live inside the Games tab
         self._build_toolbar(parent=self.games_tab)
 
+        # Collection tabs + comparison — only populated when ≥2 collections exist.
+        self._collection_bar = ttk.Frame(self.games_tab, style="Filter.TFrame")
+        self._collection_bar.pack(side="top", fill="x")
+
         wrapper = ttk.Frame(self.games_tab)
         wrapper.pack(fill="both", expand=True)
 
@@ -1324,6 +1342,166 @@ class App(tk.Tk):
         for r in range(rows_used):
             self.games_inner.grid_rowconfigure(r, weight=1)
 
+    # ── multi-collection: tab bar + comparison ──────────────────────────────
+
+    _COMPARE_LABELS = [
+        ("off",    "Compare: Off"),
+        ("shared", "Shared by all"),
+        ("only",   "Only in this one"),
+        ("diff",   "In this, not in…"),
+    ]
+
+    def _collection_pass(self, bgg_id: int) -> bool:
+        """Whether a game passes the active collection tab + comparison filter."""
+        cols = self._collections
+        if len(cols) < 2:
+            return True
+        member = self._gc_map.get(bgg_id, set())
+        active = self._active_collection
+        mode = self._compare_mode
+        if mode == "shared":
+            return {col["id"] for col in cols} <= member
+        if mode == "only":
+            return active is not None and member == {active}
+        if mode == "diff":
+            if active is None or self._compare_other is None:
+                return True
+            return active in member and self._compare_other not in member
+        # mode == "off"
+        if active is None:
+            return True
+        return active in member
+
+    def _refresh_collection_bar(self) -> None:
+        cols = self._collections
+        ids = {col["id"] for col in cols}
+        if self._active_collection not in ids:
+            self._active_collection = None
+        if self._compare_other not in ids:
+            self._compare_other = None
+
+        sig = tuple((col["id"], col["name"], col["game_count"]) for col in cols)
+        multi = len(cols) >= 2
+
+        if sig != self._collection_sig:
+            self._collection_sig = sig
+            for w in self._collection_bar.winfo_children():
+                w.destroy()
+            self._tab_widgets = {}
+            self._other_cb = None
+            if not multi:
+                self._collection_bar.configure(padding=0)
+                self._active_collection = None
+                self._compare_mode = "off"
+                self._compare_other = None
+                return
+            self._collection_bar.configure(
+                padding=(self.SP["lg"], self.SP["sm"], self.SP["lg"], self.SP["sm"]))
+            ttk.Label(self._collection_bar, text="Library:",
+                      style="Filter.TLabel").pack(side="left", padx=(0, self.SP["sm"]))
+            self._make_collection_tab("All", None)
+            for col in cols:
+                self._make_collection_tab(f"{col['name']} ({col['game_count']})", col["id"])
+            # Comparison controls (right-aligned)
+            self._other_cb = ttk.Combobox(self._collection_bar, state="readonly",
+                                          width=16, values=[])
+            self._other_cb.bind("<<ComboboxSelected>>", self._on_other_change)
+            self._compare_cb = ttk.Combobox(
+                self._collection_bar, state="readonly", width=18,
+                values=[lbl for _m, lbl in self._COMPARE_LABELS])
+            self._compare_cb.bind("<<ComboboxSelected>>", self._on_compare_change)
+            self._compare_cb.pack(side="right")
+            ttk.Label(self._collection_bar, text="Compare:",
+                      style="Filter.TLabel").pack(side="right", padx=(self.SP["md"], self.SP["xs"]))
+
+        if not multi:
+            return
+        self._update_collection_highlight()
+        self._compare_cb.set(dict(self._COMPARE_LABELS).get(self._compare_mode, "Compare: Off"))
+        self._sync_other_combobox()
+
+    def _make_collection_tab(self, text: str, col_id: Optional[int]) -> None:
+        lbl = tk.Label(self._collection_bar, text=text, padx=10, pady=3,
+                       cursor="hand2", font=("Segoe UI", 9, "bold"))
+        lbl.pack(side="left", padx=(0, self.SP["xs"]))
+        lbl.bind("<Button-1>", lambda *_e, cid=col_id: self._on_select_collection(cid))
+        if col_id is not None:
+            lbl.bind("<Button-3>", lambda e, cid=col_id: self._collection_menu(e, cid))
+        self._tab_widgets[col_id] = lbl
+
+    def _update_collection_highlight(self) -> None:
+        for cid, lbl in getattr(self, "_tab_widgets", {}).items():
+            if cid == self._active_collection:
+                lbl.configure(bg=C_BLUE_600, fg=C_SURFACE)
+            else:
+                lbl.configure(bg=C_LINE_100, fg=C_INK_900)
+
+    def _on_select_collection(self, col_id: Optional[int]) -> None:
+        self._active_collection = col_id
+        if col_id is None and self._compare_mode in ("only", "diff"):
+            self._compare_mode = "off"   # those modes need a specific library
+        self.refresh_games()
+
+    def _on_compare_change(self, *_e) -> None:
+        lbl = self._compare_cb.get()
+        self._compare_mode = next((m for m, l in self._COMPARE_LABELS if l == lbl), "off")
+        if self._compare_mode in ("only", "diff") and self._active_collection is None:
+            if self._collections:
+                self._active_collection = self._collections[0]["id"]
+        self.refresh_games()
+
+    def _on_other_change(self, *_e) -> None:
+        name = self._other_cb.get()
+        self._compare_other = next(
+            (col["id"] for col in self._collections if col["name"] == name), None)
+        self.refresh_games()
+
+    def _sync_other_combobox(self) -> None:
+        if not self._other_cb:
+            return
+        if self._compare_mode == "diff":
+            others = [col for col in self._collections if col["id"] != self._active_collection]
+            self._other_cb.configure(values=[col["name"] for col in others])
+            cur = next((col["name"] for col in others if col["id"] == self._compare_other), "")
+            if not cur and others:
+                self._compare_other = others[0]["id"]
+                cur = others[0]["name"]
+            self._other_cb.set(cur)
+            self._other_cb.pack(side="right", padx=(0, self.SP["sm"]))
+        else:
+            self._other_cb.pack_forget()
+
+    def _collection_menu(self, event, col_id: int) -> None:
+        menu = tk.Menu(self, tearoff=0)
+        menu.add_command(label="Rename…", command=lambda: self._rename_collection(col_id))
+        menu.add_command(label="Remove collection", command=lambda: self._delete_collection(col_id))
+        menu.tk_popup(event.x_root, event.y_root)
+
+    def _rename_collection(self, col_id: int) -> None:
+        cur = next((col["name"] for col in self._collections if col["id"] == col_id), "")
+        new = simpledialog.askstring("Rename collection", "Collection name:",
+                                     initialvalue=cur, parent=self)
+        if new and new.strip():
+            with db.connect() as c:
+                db.rename_collection(c, col_id, new.strip())
+            self._collection_sig = None
+            self.refresh_games()
+
+    def _delete_collection(self, col_id: int) -> None:
+        name = next((col["name"] for col in self._collections if col["id"] == col_id), "")
+        if not messagebox.askyesno(
+            "Remove collection",
+            f"Remove the collection “{name}”?\n\n"
+            "The games themselves stay in your library; only this collection grouping "
+            "is removed."):
+            return
+        with db.connect() as c:
+            db.delete_collection(c, col_id)
+        if self._active_collection == col_id:
+            self._active_collection = None
+        self._collection_sig = None
+        self.refresh_games()
+
     def _reset_filters(self) -> None:
         self.players_var.set("Any")
         self.exact_players_var.set(False)
@@ -1332,6 +1510,9 @@ class App(tk.Tk):
         self.weight_var.set("Any")
         self.status_filter_var.set("Any")
         self.tag_filter_var.set("Any")
+        self._active_collection = None
+        self._compare_mode = "off"
+        self._compare_other = None
         self.search_var.set("")
 
     def _apply_filters(self, games: list, open_loans: dict) -> list:
@@ -1451,6 +1632,10 @@ class App(tk.Tk):
                 if tag_val not in game_tags:
                     continue
 
+            # --- collection tab / comparison filter ---
+            if not self._collection_pass(g["bgg_id"]):
+                continue
+
             out.append(g)
         return out
 
@@ -1470,6 +1655,8 @@ class App(tk.Tk):
             }
             play_counts = db.play_counts(c)
             all_tags = ["Any"] + db.all_tags(c)
+            self._collections = db.list_collections(c)
+            self._gc_map = db.game_collection_map(c)
 
         # Refresh tag dropdown (preserve selection if tag still exists)
         cur_tag = self.tag_filter_var.get()
@@ -1477,6 +1664,7 @@ class App(tk.Tk):
         if cur_tag not in all_tags:
             self.tag_filter_var.set("Any")
 
+        self._refresh_collection_bar()
         games = self._apply_filters(list(games), open_loans)
         self._refresh_chips()
 
@@ -1515,6 +1703,8 @@ class App(tk.Tk):
                                       self.tag_filter_var.get()])
             or self.exact_players_var.get()
             or bool(self.search_var.get())
+            or (len(self._collections) >= 2
+                and (self._active_collection is not None or self._compare_mode != "off"))
         )
 
     def _refresh_card_view(self, games, open_loans, play_counts) -> None:
@@ -2877,7 +3067,7 @@ class App(tk.Tk):
                 all_bgl = db.list_games(c, owned_only=False)
             removed = [g for g in all_bgl if g["bgg_id"] not in bgg_ids]
 
-            self._save_games_to_db(games)
+            self._save_games_to_db(games, collection_username=username)
             self.after(0, self.refresh_games)
             self._post_status(f"Imported {len(games)} games. Downloading images…")
             if removed:
@@ -2919,7 +3109,7 @@ class App(tk.Tk):
             with db.connect() as c:
                 all_bgl = db.list_games(c, owned_only=False)
             removed = [g for g in all_bgl if g["bgg_id"] not in bgg_ids]
-            self._save_games_to_db(games)
+            self._save_games_to_db(games, collection_username=username)
             self.after(0, self.refresh_games)
             n = len(games)
             self._post_status(f"BGG auto-sync complete: {n} game{'s' if n != 1 else ''} updated.")
@@ -3048,7 +3238,7 @@ class App(tk.Tk):
                 all_bgl = db.list_games(c, owned_only=False)
             removed = [g for g in all_bgl if g["bgg_id"] not in bgg_ids]
 
-            self._save_games_to_db(list(by_id.values()))
+            self._save_games_to_db(list(by_id.values()), collection_username=username)
             self._post_status("Saved to database. Downloading thumbnails...")
             self._download_thumbnails_bg(list(by_id.values()))
             self.after(0, self.refresh_games)
@@ -3565,7 +3755,9 @@ class App(tk.Tk):
     def _post_status(self, msg: str) -> None:
         self.after(0, self.status, msg)
 
-    def _save_games_to_db(self, games: list[bgg.GameDetails]) -> None:
+    def _save_games_to_db(self, games: list[bgg.GameDetails],
+                          collection_username: Optional[str] = None,
+                          collection_name: Optional[str] = None) -> None:
         with db.connect() as c:
             for g in games:
                 row = {
@@ -3603,6 +3795,13 @@ class App(tk.Tk):
                         row["image_path"] = existing["image_path"]
                     skip = db.get_manual_fields(c, g.bgg_id)
                 db.upsert_game(c, row, skip_fields=skip)
+
+            # Link these games to their collection (one collection per synced BGG
+            # username); the collection's membership becomes exactly this set.
+            if collection_username:
+                cid = db.get_or_create_collection(
+                    c, collection_username, collection_name or collection_username)
+                db.replace_collection_games(c, cid, [g.bgg_id for g in games])
 
     def _download_thumbnails_bg(self, games: list[bgg.GameDetails]) -> None:
         IMAGES_DIR.mkdir(parents=True, exist_ok=True)

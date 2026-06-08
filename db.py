@@ -68,6 +68,25 @@ CREATE TABLE IF NOT EXISTS plays (
     scores            TEXT
 );
 
+-- Multi-collection support: each synced BGG username is a "collection", and a
+-- game can belong to several (many-to-many) so collections can be compared.
+CREATE TABLE IF NOT EXISTS collections (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    name         TEXT NOT NULL,
+    bgg_username TEXT UNIQUE,
+    created_at   TEXT,
+    last_synced  TEXT
+);
+
+CREATE TABLE IF NOT EXISTS game_collections (
+    game_id       INTEGER NOT NULL REFERENCES games(bgg_id)   ON DELETE CASCADE,
+    collection_id INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+    PRIMARY KEY (game_id, collection_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_gc_collection ON game_collections(collection_id);
+CREATE INDEX IF NOT EXISTS idx_gc_game       ON game_collections(game_id);
+
 CREATE INDEX IF NOT EXISTS idx_loans_open
     ON loans(game_id) WHERE returned_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_loans_user ON loans(user_id);
@@ -202,6 +221,101 @@ def get_game(c: sqlite3.Connection, bgg_id: int) -> Optional[sqlite3.Row]:
 def delete_game(c: sqlite3.Connection, bgg_id: int) -> None:
     """Remove a game and all its related loans/plays (CASCADE handles FK rows)."""
     c.execute("DELETE FROM games WHERE bgg_id = ?", (bgg_id,))
+
+
+# ---------- collections ----------
+
+def list_collections(c: sqlite3.Connection) -> list[sqlite3.Row]:
+    """All collections with their game counts, ordered by name."""
+    return c.execute(
+        """
+        SELECT col.*, COUNT(gc.game_id) AS game_count
+        FROM collections col
+        LEFT JOIN game_collections gc ON gc.collection_id = col.id
+        GROUP BY col.id
+        ORDER BY col.name COLLATE NOCASE
+        """
+    ).fetchall()
+
+
+def get_or_create_collection(
+    c: sqlite3.Connection, bgg_username: Optional[str], name: Optional[str] = None
+) -> int:
+    """Return the id of the collection for `bgg_username`, creating it if needed.
+
+    If `bgg_username` is falsy a new unnamed-source collection is created.
+    Passing `name` updates the display name of an existing match.
+    """
+    if bgg_username:
+        row = c.execute(
+            "SELECT id FROM collections WHERE bgg_username = ?", (bgg_username,)
+        ).fetchone()
+        if row:
+            if name:
+                c.execute("UPDATE collections SET name = ? WHERE id = ?", (name, row["id"]))
+            return row["id"]
+    cur = c.execute(
+        "INSERT INTO collections (name, bgg_username, created_at) VALUES (?, ?, ?)",
+        (name or bgg_username or "Collection", bgg_username or None, now_iso()),
+    )
+    return cur.lastrowid
+
+
+def rename_collection(c: sqlite3.Connection, collection_id: int, name: str) -> None:
+    c.execute("UPDATE collections SET name = ? WHERE id = ?", (name.strip(), collection_id))
+
+
+def delete_collection(c: sqlite3.Connection, collection_id: int) -> None:
+    """Remove a collection (its game links cascade; the games themselves stay)."""
+    c.execute("DELETE FROM collections WHERE id = ?", (collection_id,))
+
+
+def replace_collection_games(
+    c: sqlite3.Connection, collection_id: int, game_ids: list[int]
+) -> None:
+    """Make `game_ids` the exact membership of a collection (used after a sync)."""
+    c.execute("DELETE FROM game_collections WHERE collection_id = ?", (collection_id,))
+    c.executemany(
+        "INSERT OR IGNORE INTO game_collections (game_id, collection_id) VALUES (?, ?)",
+        [(gid, collection_id) for gid in game_ids],
+    )
+    c.execute(
+        "UPDATE collections SET last_synced = ? WHERE id = ?", (now_iso(), collection_id)
+    )
+
+
+def collection_game_ids(c: sqlite3.Connection, collection_id: int) -> set:
+    rows = c.execute(
+        "SELECT game_id FROM game_collections WHERE collection_id = ?", (collection_id,)
+    ).fetchall()
+    return {r["game_id"] for r in rows}
+
+
+def game_collection_map(c: sqlite3.Connection) -> dict[int, set]:
+    """Return {game_id: {collection_id, ...}} across all collections."""
+    out: dict[int, set] = {}
+    for r in c.execute("SELECT game_id, collection_id FROM game_collections"):
+        out.setdefault(r["game_id"], set()).add(r["collection_id"])
+    return out
+
+
+def ensure_collection_migration(
+    c: sqlite3.Connection, default_username: str = "", default_name: str = "My Collection"
+) -> None:
+    """One-time backfill: if no collections exist yet but owned games do, create a
+    default collection (from the configured BGG username) and link all owned games
+    to it, so existing single-collection databases keep working."""
+    if c.execute("SELECT COUNT(*) FROM collections").fetchone()[0]:
+        return
+    if not c.execute("SELECT COUNT(*) FROM games WHERE own = 1").fetchone()[0]:
+        return
+    name = default_name or default_username or "My Collection"
+    cid = get_or_create_collection(c, default_username or None, name)
+    c.execute(
+        "INSERT OR IGNORE INTO game_collections (game_id, collection_id) "
+        "SELECT bgg_id, ? FROM games WHERE own = 1",
+        (cid,),
+    )
 
 
 # ---------- users ----------
