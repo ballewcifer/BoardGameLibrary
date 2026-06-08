@@ -194,6 +194,44 @@ C_WHITE = C_SURFACE
 C_TEXT  = C_INK_900
 C_GOLD  = C_STAR_FILL
 
+# ── UI colour themes ─────────────────────────────────────────────────────────
+# Each theme overrides only the brand family (dark app-bar/tab base + accent);
+# neutrals, status, and star colours stay constant so contrast is preserved.
+THEMES: dict = {
+    "Classic Navy": {"navy900": "#0E2A47", "navy800": "#13395F", "navy700": "#1B4B79",
+                     "blue600": "#1366C9", "blue700": "#0F52A3", "blue800": "#0B3F80", "blue050": "#E7F0FB"},
+    "Ocean":        {"navy900": "#0A2A43", "navy800": "#0E3D5F", "navy700": "#12527E",
+                     "blue600": "#1488D6", "blue700": "#106BA8", "blue800": "#0C527F", "blue050": "#E4F1FB"},
+    "Teal":         {"navy900": "#0B2E33", "navy800": "#10464D", "navy700": "#155E67",
+                     "blue600": "#0E8C99", "blue700": "#0B6E78", "blue800": "#08545C", "blue050": "#E4F4F5"},
+    "Forest":       {"navy900": "#10331F", "navy800": "#16492C", "navy700": "#1C5E39",
+                     "blue600": "#1F8A4C", "blue700": "#176B3A", "blue800": "#11512C", "blue050": "#E6F4EA"},
+    "Slate":        {"navy900": "#1C2530", "navy800": "#2A3744", "navy700": "#384857",
+                     "blue600": "#3D6FA5", "blue700": "#305885", "blue800": "#244468", "blue050": "#E9EFF6"},
+    "Indigo":       {"navy900": "#1A1F4E", "navy800": "#262C6E", "navy700": "#33398E",
+                     "blue600": "#3D47C4", "blue700": "#30389B", "blue800": "#252C79", "blue050": "#E9EAF9"},
+    "Purple":       {"navy900": "#2A1240", "navy800": "#3E1B5E", "navy700": "#52247B",
+                     "blue600": "#7A33C9", "blue700": "#5F28A0", "blue800": "#491E7C", "blue050": "#F0E9FB"},
+    "Burgundy":     {"navy900": "#3A1220", "navy800": "#561B2F", "navy700": "#73243E",
+                     "blue600": "#B3264C", "blue700": "#8E1E3D", "blue800": "#6E172F", "blue050": "#FBE9EE"},
+    "Crimson":      {"navy900": "#3F0F15", "navy800": "#5E171F", "navy700": "#7D202B",
+                     "blue600": "#C62434", "blue700": "#9C1C29", "blue800": "#79151F", "blue050": "#FBE8EA"},
+    "Bronze":       {"navy900": "#3A2A0E", "navy800": "#574016", "navy700": "#74561E",
+                     "blue600": "#B5832A", "blue700": "#8E6620", "blue800": "#6E4F19", "blue050": "#F7EFDF"},
+}
+
+
+def apply_theme(name: str) -> None:
+    """Override the brand-colour globals with the named theme (default Classic Navy)."""
+    global C_NAVY_900, C_NAVY_800, C_NAVY_700
+    global C_BLUE_600, C_BLUE_700, C_BLUE_800, C_BLUE_050
+    global C_NAVY, C_BLUE, C_SKY
+    t = THEMES.get(name) or THEMES["Classic Navy"]
+    C_NAVY_900, C_NAVY_800, C_NAVY_700 = t["navy900"], t["navy800"], t["navy700"]
+    C_BLUE_600, C_BLUE_700, C_BLUE_800, C_BLUE_050 = (
+        t["blue600"], t["blue700"], t["blue800"], t["blue050"])
+    C_NAVY, C_BLUE, C_SKY = C_NAVY_900, C_BLUE_600, C_BLUE_050
+
 
 _ORDINALS = {
     "First": "1st", "Second": "2nd", "Third": "3rd", "Fourth": "4th",
@@ -440,6 +478,7 @@ class App(tk.Tk):
         self._gc_map: dict = {}                          # {game_id: {collection_id,...}}
         self._collection_sig = None                     # rebuild guard for the tab bar
 
+        apply_theme(self.settings.get("ui_theme", "Classic Navy"))
         self.configure(bg=C_BG)          # grey canvas so white cards separate visually
         self._apply_style()
         self._build_menubar()
@@ -737,6 +776,17 @@ class App(tk.Tk):
         lib_menu.add_separator()
         lib_menu.add_command(label="Add Game…", command=self.on_add_game)
 
+        # ── View ──────────────────────────────────────────────────────────────
+        view_menu = tk.Menu(menubar)
+        menubar.add_cascade(label="View", menu=view_menu)
+        theme_menu = tk.Menu(view_menu)
+        view_menu.add_cascade(label="Colour Theme", menu=theme_menu)
+        self._theme_var = tk.StringVar(value=self.settings.get("ui_theme", "Classic Navy"))
+        for _name in THEMES:
+            theme_menu.add_radiobutton(
+                label=_name, value=_name, variable=self._theme_var,
+                command=lambda n=_name: self.on_set_theme(n))
+
         # ── Help ──────────────────────────────────────────────────────────────
         help_menu = tk.Menu(menubar)
         menubar.add_cascade(label="Help", menu=help_menu)
@@ -744,31 +794,48 @@ class App(tk.Tk):
 
         self.config(menu=menubar)
 
+    def on_set_theme(self, name: str) -> None:
+        """Switch the UI colour theme live and remember the choice."""
+        self.settings["ui_theme"] = name
+        config.save(self.settings)
+        apply_theme(name)
+        if hasattr(self, "_theme_var"):
+            self._theme_var.set(name)
+        # ttk styles repaint all styled widgets; reconfigure the tk header band
+        # and repaint the cards/chips/dashboard with the new colours.
+        self._apply_style()
+        if hasattr(self, "_hdr"):
+            self._hdr.configure(bg=C_NAVY_900)
+            self._hdr_inner.configure(bg=C_NAVY_900)
+            self._hdr_logo.configure(fg=C_NAVY_900)
+            self._hdr_title.configure(bg=C_NAVY_900)
+        self._collection_sig = None      # force the collection tab bar to recolour
+        self.refresh_games()
+        self.refresh_dashboard()
+        self.status(f"Theme: {name}")
+
     def _build_header(self) -> None:
-        """Compact navy app bar: logo + title on the SAME row as the section tabs,
-        so the title no longer needs its own band (frees vertical space)."""
-        self._appbar = tk.Frame(self, bg=C_NAVY_900)
-        self._appbar.pack(side="top", fill="x")
+        """Navy-900 app bar: white logo chip + title on its own band (kept compact)."""
+        self._hdr = tk.Frame(self, bg=C_NAVY_900)
+        self._hdr.pack(side="top", fill="x")
 
-        brand = tk.Frame(self._appbar, bg=C_NAVY_900)
-        brand.pack(side="left", padx=(self.SP["lg"], self.SP["md"]), pady=self.SP["xs"])
+        self._hdr_inner = tk.Frame(self._hdr, bg=C_NAVY_900)
+        self._hdr_inner.pack(side="left", padx=self.SP["lg"], pady=self.SP["xs"])
 
-        # Logo chip — small white square with the die glyph
-        tk.Label(
-            brand, text="\U0001f3b2",
+        # Logo chip — white square with the die glyph
+        self._hdr_logo = tk.Label(
+            self._hdr_inner, text="\U0001f3b2",
             bg=C_SURFACE, fg=C_NAVY_900,
-            font=("Segoe UI", 13, "bold"), padx=5, pady=1,
-        ).pack(side="left", padx=(0, self.SP["sm"]))
+            font=("Segoe UI", 14, "bold"), padx=5, pady=1,
+        )
+        self._hdr_logo.pack(side="left", padx=(0, self.SP["sm"]))
 
-        tk.Label(
-            brand, text="Board Game Library",
+        self._hdr_title = tk.Label(
+            self._hdr_inner, text="Board Game Library",
             bg=C_NAVY_900, fg=C_SURFACE,
-            font=("Segoe UI", 14, "bold"),
-        ).pack(side="left")
-
-        # Section tabs are drawn here, on the same row as the brand.
-        self._tabbar = tk.Frame(self._appbar, bg=C_NAVY_900)
-        self._tabbar.pack(side="left", padx=(self.SP["lg"], 0))
+            font=("Segoe UI", 15, "bold"),
+        )
+        self._hdr_title.pack(side="left")
 
         # Hairline under the app bar (line_200 over the navy/grey seam)
         tk.Frame(self, bg=C_LINE_200, height=1).pack(side="top", fill="x")
@@ -978,10 +1045,7 @@ class App(tk.Tk):
                       command=_make_dismiss(clear_fn)).pack(side="left")
 
     def _build_tabs(self) -> None:
-        # Hide the Notebook's native tab strip; we draw our own tab buttons up in
-        # the app bar so the title and tabs share one row.
-        ttk.Style().layout("Tabless.TNotebook.Tab", [])
-        self.nb = ttk.Notebook(self, style="Tabless.TNotebook")
+        self.nb = ttk.Notebook(self)
         self.nb.pack(side="top", fill="both", expand=True)
 
         self.games_tab = ttk.Frame(self.nb)
@@ -990,45 +1054,17 @@ class App(tk.Tk):
         self.plays_tab = ttk.Frame(self.nb)
         self.dashboard_tab = ttk.Frame(self.nb)
 
-        _tabs = [
-            (self.games_tab,     "Games"),
-            (self.members_tab,   "Members"),
-            (self.history_tab,   "History"),
-            (self.plays_tab,     "Plays"),
-            (self.dashboard_tab, "Dashboard"),
-        ]
-        for frame, name in _tabs:
-            self.nb.add(frame, text=name)
-
-        # Custom tab buttons rendered in the app bar (self._tabbar)
-        self._tab_buttons = []
-        for idx, (_frame, name) in enumerate(_tabs):
-            btn = tk.Label(self._tabbar, text=name, bg=C_NAVY_900, fg="#9DB4CC",
-                           font=("Segoe UI", 11, "bold"),
-                           padx=14, pady=self.SP["sm"], cursor="hand2")
-            btn.pack(side="left")
-            btn.bind("<Button-1>", lambda _e, i=idx: self.nb.select(i))
-            self._tab_buttons.append(btn)
-        self.nb.bind("<<NotebookTabChanged>>", lambda _e: self._update_tab_highlight())
+        self.nb.add(self.games_tab, text="Games")
+        self.nb.add(self.members_tab, text="Members")
+        self.nb.add(self.history_tab, text="History")
+        self.nb.add(self.plays_tab, text="Plays")
+        self.nb.add(self.dashboard_tab, text="Dashboard")
 
         self._build_games_tab()
         self._build_members_tab()
         self._build_history_tab()
         self._build_plays_tab()
         self._build_dashboard_tab()
-        self._update_tab_highlight()
-
-    def _update_tab_highlight(self) -> None:
-        """Highlight the active custom tab button (white on lighter navy)."""
-        try:
-            current = self.nb.index("current")
-        except Exception:
-            current = 0
-        for i, btn in enumerate(getattr(self, "_tab_buttons", [])):
-            if i == current:
-                btn.configure(bg=C_NAVY_700, fg=C_SURFACE)
-            else:
-                btn.configure(bg=C_NAVY_900, fg="#9DB4CC")
 
     def _build_status_bar(self) -> None:
         """Navy-900 status strip pinned to the bottom edge."""
@@ -1688,7 +1724,9 @@ class App(tk.Tk):
             }
             play_counts = db.play_counts(c)
             all_tags = ["Any"] + db.all_tags(c)
-            self._collections = db.list_collections(c)
+            # Only show collections that still have games — an emptied collection
+            # drops its tab automatically.
+            self._collections = [r for r in db.list_collections(c) if r["game_count"] > 0]
             self._gc_map = db.game_collection_map(c)
 
         # Refresh tag dropdown (preserve selection if tag still exists)
@@ -2023,6 +2061,7 @@ class App(tk.Tk):
 
         fav_lbl = "Remove from Favorites" if game["is_favorite"] else "Add to Favorites"
         menu.add_command(label=fav_lbl,        command=lambda: self.on_toggle_favorite(game))
+        self._add_collection_remove_item(menu, game)
         menu.add_separator()
         menu.add_command(label="Delete Game…", command=lambda: self.on_delete_game(game))
         menu.tk_popup(event.x_root, event.y_root)
@@ -2309,6 +2348,7 @@ class App(tk.Tk):
         menu.add_command(label="Set Image…",    command=lambda: self.on_set_image(game))
         fav_lbl = "Remove from Favorites" if game["is_favorite"] else "Add to Favorites"
         menu.add_command(label=fav_lbl,         command=lambda: self.on_toggle_favorite(game))
+        self._add_collection_remove_item(menu, game)
         menu.add_separator()
         menu.add_command(label="Delete Game…",  command=lambda: self.on_delete_game(game))
         menu.tk_popup(event.x_root, event.y_root)
@@ -4032,6 +4072,35 @@ class App(tk.Tk):
         self.refresh_games()
         self.refresh_history()
         self.status(f'Deleted "{name}".')
+
+    def _add_collection_remove_item(self, menu, game) -> None:
+        """Add 'Remove from <collection>' when a specific collection tab is active
+        and this game belongs to it."""
+        cid = self._active_collection
+        if len(self._collections) < 2 or cid is None:
+            return
+        if cid not in self._gc_map.get(game["bgg_id"], set()):
+            return
+        cname = next((col["name"] for col in self._collections if col["id"] == cid), "collection")
+        menu.add_command(label=f"Remove from “{cname}”",
+                         command=lambda: self.on_remove_from_collection(game))
+
+    def on_remove_from_collection(self, game) -> None:
+        cid = self._active_collection
+        if cid is None:
+            return
+        cname = next((col["name"] for col in self._collections if col["id"] == cid), "this collection")
+        if not messagebox.askyesno(
+            "Remove from collection",
+            f'Remove "{game["name"]}" from the "{cname}" collection?\n\n'
+            "The game stays in your library and in any other collections — it's just "
+            "unlinked from this one. (A future sync of this collection may re-add it.)",
+        ):
+            return
+        with db.connect() as c:
+            db.remove_game_from_collection(c, game["bgg_id"], cid)
+        self.refresh_games()
+        self.status(f'Removed "{game["name"]}" from {cname}.')
 
     # ---------- favorite / insert toggles ----------
 

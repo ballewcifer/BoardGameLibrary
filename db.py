@@ -291,6 +291,14 @@ def collection_game_ids(c: sqlite3.Connection, collection_id: int) -> set:
     return {r["game_id"] for r in rows}
 
 
+def remove_game_from_collection(c: sqlite3.Connection, game_id: int, collection_id: int) -> None:
+    """Unlink a single game from one collection (the game itself is untouched)."""
+    c.execute(
+        "DELETE FROM game_collections WHERE game_id = ? AND collection_id = ?",
+        (game_id, collection_id),
+    )
+
+
 def game_collection_map(c: sqlite3.Connection) -> dict[int, set]:
     """Return {game_id: {collection_id, ...}} across all collections."""
     out: dict[int, set] = {}
