@@ -31,6 +31,39 @@
   <button class="btn btn-secondary btn-sm" onclick="openModal('modal-add-game')" aria-label="Add game from BGG">+ Add Game</button>
 </div>
 
+{% if multi %}
+<div class="collection-bar">
+  <span class="collection-label">Library:</span>
+  <a class="collection-tab {% if active_collection is none %}active{% endif %}"
+     href="{{ url_for('games', q=q, status=status, tag=tag_filter, exp=('1' if show_exp else none)) }}">All</a>
+  {% for col in collections %}
+  <a class="collection-tab {% if active_collection == col.id %}active{% endif %}"
+     href="{{ url_for('games', q=q, status=status, tag=tag_filter, exp=('1' if show_exp else none), collection=col.id) }}">{{ col.name }} ({{ col.game_count }})</a>
+  {% endfor %}
+
+  <form method="get" action="/games" class="compare-form">
+    <input type="hidden" name="q" value="{{ q }}">
+    <input type="hidden" name="status" value="{{ status }}">
+    {% if tag_filter %}<input type="hidden" name="tag" value="{{ tag_filter }}">{% endif %}
+    {% if show_exp %}<input type="hidden" name="exp" value="1">{% endif %}
+    {% if active_collection is not none %}<input type="hidden" name="collection" value="{{ active_collection }}">{% endif %}
+    <select name="compare" class="filter-select" onchange="this.form.submit()" aria-label="Compare collections">
+      <option value="off"    {% if compare=='off'    %}selected{% endif %}>Compare: Off</option>
+      <option value="shared" {% if compare=='shared' %}selected{% endif %}>Shared by all</option>
+      <option value="only"   {% if compare=='only'   %}selected{% endif %}>Only in this one</option>
+      <option value="diff"   {% if compare=='diff'   %}selected{% endif %}>In this, not in…</option>
+    </select>
+    {% if compare == 'diff' %}
+    <select name="compare_other" class="filter-select" onchange="this.form.submit()" aria-label="Compare against">
+      {% for col in collections if col.id != active_collection %}
+      <option value="{{ col.id }}" {% if compare_other == col.id %}selected{% endif %}>{{ col.name }}</option>
+      {% endfor %}
+    </select>
+    {% endif %}
+  </form>
+</div>
+{% endif %}
+
 <p class="result-count muted">{{ games|length }} game{{ 's' if games|length != 1 else '' }}</p>
 
 <!-- Game cards grid -->

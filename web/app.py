@@ -29,6 +29,10 @@ app.secret_key = "bgl-flask-secret-2025"
 
 # ── Ensure the database is ready ──────────────────────────────────────────────
 db.init_db()
+# Backfill an existing single-collection library into one named collection
+with db.connect() as _c:
+    _u = _config.load().get("bgg_username", "")
+    db.ensure_collection_migration(_c, default_username=_u, default_name=_u or "My Collection")
 
 # ── Background sync state ─────────────────────────────────────────────────────
 _sync_lock   = threading.Lock()
@@ -100,6 +104,9 @@ def games():
     tag_filter = request.args.get("tag", "")
     status     = request.args.get("status", "all")   # all | available | out | favs
     show_exp   = request.args.get("exp", "") == "1"
+    collection = request.args.get("collection", "all")
+    compare    = request.args.get("compare", "off")          # off | shared | only | diff
+    compare_other_raw = request.args.get("compare_other", "")
 
     with db.connect() as c:
         rows      = db.list_games(c, search=q)
@@ -107,6 +114,25 @@ def games():
                       for r in db.currently_checked_out(c)}
         play_cts   = db.play_counts(c)
         all_tags   = db.all_tags(c)
+        collections = [_row_to_dict(r) for r in db.list_collections(c) if r["game_count"] > 0]
+        gc_map     = db.game_collection_map(c)
+
+    coll_ids = {col["id"] for col in collections}
+    multi = len(collections) >= 2
+
+    def _to_cid(v):
+        try:
+            cid = int(v)
+        except (TypeError, ValueError):
+            return None
+        return cid if cid in coll_ids else None
+
+    active_cid = None if collection in ("", "all") else _to_cid(collection)
+    other_cid  = _to_cid(compare_other_raw)
+    if not multi:
+        active_cid, compare, other_cid = None, "off", None
+    elif compare in ("only", "diff") and active_cid is None and collections:
+        active_cid = collections[0]["id"]   # these modes need a specific library
 
     games_list = []
     for g in rows:
@@ -127,6 +153,22 @@ def games():
         if status == "favs" and not g["is_favorite"]:
             continue
 
+        # collection tab / comparison filter
+        if multi:
+            member = gc_map.get(g["bgg_id"], set())
+            if compare == "shared":
+                if not coll_ids <= member:
+                    continue
+            elif compare == "only":
+                if active_cid is None or member != {active_cid}:
+                    continue
+            elif compare == "diff":
+                if active_cid is not None and other_cid is not None \
+                        and not (active_cid in member and other_cid not in member):
+                    continue
+            elif active_cid is not None and active_cid not in member:
+                continue
+
         games_list.append(gd)
 
     return render_template("games.html",
@@ -135,7 +177,12 @@ def games():
                            tag_filter=tag_filter,
                            status=status,
                            show_exp=show_exp,
-                           all_tags=all_tags)
+                           all_tags=all_tags,
+                           collections=collections,
+                           multi=multi,
+                           active_collection=active_cid,
+                           compare=compare,
+                           compare_other=other_cid)
 
 
 @app.route("/games/<int:bgg_id>")
@@ -525,6 +572,11 @@ def _run_sync():
                         row["image_path"] = existing["image_path"]
                     skip = db.get_manual_fields(c, g.bgg_id)
                 db.upsert_game(c, row, skip_fields=skip)
+
+            # Link the synced games to this user's collection (multi-collection)
+            if username:
+                cid = db.get_or_create_collection(c, username, username)
+                db.replace_collection_games(c, cid, [g.bgg_id for g in collection])
 
         _sync_status["message"] = f"Sync complete — {len(collection)} games."
     except Exception as e:

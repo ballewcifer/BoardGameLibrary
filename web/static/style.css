@@ -20,6 +20,13 @@
   --top-h:  52px;
 }
 
+/* ── Multi-collection bar ─────────────────────────────────────────────────── */
+.collection-bar   { display:flex; align-items:center; flex-wrap:wrap; gap:6px; padding:8px 16px; background:var(--card); border-bottom:1px solid var(--border); }
+.collection-label { font-size:.72rem; color:var(--muted); font-weight:700; text-transform:uppercase; letter-spacing:.4px; margin-right:4px; }
+.collection-tab   { padding:4px 12px; border-radius:999px; font-size:.85rem; font-weight:600; color:var(--text); background:#eef1f5; text-decoration:none; border:1px solid var(--border); }
+.collection-tab.active { background:var(--navy); color:#fff; border-color:var(--navy); }
+.compare-form     { margin-left:auto; display:flex; gap:6px; align-items:center; }
+
 html { font-size: 15px; }
 
 body {
