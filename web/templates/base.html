@@ -9,6 +9,28 @@
   <title>{% block title %}Board Game Library{% endblock %}</title>
   <link rel="manifest" href="/static/manifest.json">
   <link rel="stylesheet" href="/static/style.css">
+  <script>
+    // 10 UI colour themes (parity with desktop) — [--navy, --navy-d]
+    window.BGL_THEMES = {
+      "Classic Navy": ["#1a237e", "#0d1457"],
+      "Ocean":        ["#0e527e", "#0a3a5a"],
+      "Teal":         ["#0b6e78", "#08545c"],
+      "Forest":       ["#1b5e3a", "#114028"],
+      "Slate":        ["#37475a", "#283443"],
+      "Indigo":       ["#2a338e", "#1d2566"],
+      "Purple":       ["#5f28a0", "#45197a"],
+      "Burgundy":     ["#8e1e3d", "#6b162e"],
+      "Crimson":      ["#b3202e", "#8a1822"],
+      "Bronze":       ["#8a6420", "#664a18"]
+    };
+    (function () {   // apply saved theme before paint to avoid a flash
+      var t = window.BGL_THEMES[localStorage.getItem('bgl_theme') || 'Classic Navy']
+              || window.BGL_THEMES['Classic Navy'];
+      var r = document.documentElement;
+      r.style.setProperty('--navy', t[0]);
+      r.style.setProperty('--navy-d', t[1]);
+    })();
+  </script>
 </head>
 <body>
 
@@ -16,6 +38,7 @@
 <header class="topbar">
   <span class="topbar-title">🎲 Board Game Library</span>
   <div class="topbar-actions">
+    <button class="btn-icon" title="Colour theme" aria-label="Change colour theme" onclick="openModal('modal-theme')">🎨</button>
     {% if sync_status.running %}
       <span class="sync-badge spinning">⟳ Syncing…</span>
     {% else %}
@@ -82,6 +105,19 @@
         <button type="submit" class="btn btn-primary">Sync Now</button>
       </div>
     </form>
+  </div>
+</div>
+
+<!-- ── Colour theme modal ───────────────────────────────────────────────── -->
+<div id="modal-theme" class="modal-backdrop" hidden>
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Colour Theme</h3>
+      <button class="modal-close" onclick="closeModal('modal-theme')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="theme-swatches" class="theme-swatches"></div>
+    </div>
   </div>
 </div>
 

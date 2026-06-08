@@ -161,3 +161,32 @@ document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => el.remove(), 4000);
   });
 });
+
+// ── Colour theme picker ─────────────────────────────────────────────────────
+function applyTheme(name) {
+  const t = (window.BGL_THEMES || {})[name];
+  if (!t) return;
+  const r = document.documentElement;
+  r.style.setProperty('--navy', t[0]);
+  r.style.setProperty('--navy-d', t[1]);
+  try { localStorage.setItem('bgl_theme', name); } catch (e) {}
+  document.querySelectorAll('.theme-swatch').forEach(el => {
+    el.classList.toggle('active', el.dataset.theme === name);
+  });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const box = document.getElementById('theme-swatches');
+  if (!box || !window.BGL_THEMES) return;
+  const current = localStorage.getItem('bgl_theme') || 'Classic Navy';
+  Object.keys(window.BGL_THEMES).forEach(name => {
+    const color = window.BGL_THEMES[name][0];
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'theme-swatch' + (name === current ? ' active' : '');
+    b.dataset.theme = name;
+    b.innerHTML = `<span class="theme-dot" style="background:${color}"></span>${name}`;
+    b.onclick = () => { applyTheme(name); closeModal('modal-theme'); };
+    box.appendChild(b);
+  });
+});
