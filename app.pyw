@@ -224,6 +224,12 @@ THEMES: dict = {
                      "blue600": "#C62434", "blue700": "#9C1C29", "blue800": "#79151F", "blue050": "#FBE8EA"},
     "Bronze":       {"navy900": "#3A2A0E", "navy800": "#574016", "navy700": "#74561E",
                      "blue600": "#B5832A", "blue700": "#8E6620", "blue800": "#6E4F19", "blue050": "#F7EFDF"},
+    # Accessible: maximum contrast (black bar + vivid blue accent)
+    "High Contrast":     {"navy900": "#000000", "navy800": "#1A1A1A", "navy700": "#333333",
+                          "blue600": "#0B57D0", "blue700": "#0842A0", "blue800": "#063078", "blue050": "#E8F0FE"},
+    # Accessible: Okabe-Ito blue — distinguishable for common colour blindness
+    "Colour-blind Safe": {"navy900": "#00344A", "navy800": "#004C6B", "navy700": "#00638C",
+                          "blue600": "#0072B2", "blue700": "#005B8F", "blue800": "#00466E", "blue050": "#E1F0F8"},
 }
 
 
