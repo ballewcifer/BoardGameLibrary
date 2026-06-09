@@ -842,12 +842,19 @@ class App(tk.Tk):
         self._hdr_inner = tk.Frame(self._hdr, bg=C_NAVY_900)
         self._hdr_inner.pack(side="left", padx=self.SP["lg"], pady=self.SP["xs"])
 
-        # Logo chip — white square with the die glyph
-        self._hdr_logo = tk.Label(
-            self._hdr_inner, text="\U0001f3b2",
-            bg=C_SURFACE, fg=C_NAVY_900,
-            font=("Segoe UI", 14, "bold"), padx=5, pady=1,
-        )
+        # Logo chip — the actual program icon in a white square (falls back to a
+        # die glyph if the icon can't be loaded).
+        try:
+            _logo_im = Image.open(_resource_path("icon.ico")).convert("RGBA").resize((26, 26), Image.LANCZOS)
+            self._hdr_logo_img = ImageTk.PhotoImage(_logo_im)
+            self._hdr_logo = tk.Label(self._hdr_inner, image=self._hdr_logo_img,
+                                      bg=C_SURFACE, padx=4, pady=3)
+        except Exception:
+            self._hdr_logo = tk.Label(
+                self._hdr_inner, text="\U0001f3b2",
+                bg=C_SURFACE, fg=C_NAVY_900,
+                font=("Segoe UI", 14, "bold"), padx=5, pady=1,
+            )
         self._hdr_logo.pack(side="left", padx=(0, self.SP["sm"]))
 
         self._hdr_title = tk.Label(
@@ -1074,11 +1081,12 @@ class App(tk.Tk):
         self.plays_tab = ttk.Frame(self.nb)
         self.dashboard_tab = ttk.Frame(self.nb)
 
+        # Tab order matches the mobile app: Dashboard, Games, Members, Plays, History
+        self.nb.add(self.dashboard_tab, text="Dashboard")
         self.nb.add(self.games_tab, text="Games")
         self.nb.add(self.members_tab, text="Members")
-        self.nb.add(self.history_tab, text="History")
         self.nb.add(self.plays_tab, text="Plays")
-        self.nb.add(self.dashboard_tab, text="Dashboard")
+        self.nb.add(self.history_tab, text="History")
 
         self._build_games_tab()
         self._build_members_tab()
