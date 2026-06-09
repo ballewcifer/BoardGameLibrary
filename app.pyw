@@ -134,6 +134,12 @@ def _kr_set_password(pwd: str) -> None:
 from paths import DATA_DIR, DB_PATH, CONFIG_PATH, IMAGES_DIR
 from version import __version__ as APP_VERSION
 
+
+def _resource_path(name: str) -> str:
+    """Path to a bundled resource (works in dev and in a PyInstaller bundle)."""
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, name)
+
 THUMB_SIZE = (240, 240)
 PLACEHOLDER_BG = "#EAEEF2"  # C_LINE_100 — defined before color tokens
 APP_CREATED   = "May 5, 2026"
@@ -446,6 +452,14 @@ class App(tk.Tk):
         self.title("Board Game Library")
         self.geometry("1280x720")
         self.minsize(980, 560)
+
+        # Window / title-bar icon to match the program icon (Windows). Set on the
+        # root with default=… so every Toplevel dialog inherits it too.
+        try:
+            if sys.platform == "win32":
+                self.iconbitmap(default=_resource_path("icon.ico"))
+        except Exception:
+            pass
 
         db.init_db()
         IMAGES_DIR.mkdir(parents=True, exist_ok=True)
@@ -3134,17 +3148,19 @@ class App(tk.Tk):
                 self._post_status("Import: nothing found.")
                 return
 
-            # Detect games in BGL that are no longer in BGG collection
+            # Detect games that left THIS collection's BGG list (not other collections')
             bgg_ids = {g.bgg_id for g in games}
             with db.connect() as c:
                 all_bgl = db.list_games(c, owned_only=False)
-            removed = [g for g in all_bgl if g["bgg_id"] not in bgg_ids]
+                _cid = db.collection_id_for_username(c, username)
+                _old = db.collection_game_ids(c, _cid) if _cid else set()
+            removed = [g for g in all_bgl if g["bgg_id"] in _old and g["bgg_id"] not in bgg_ids]
 
             self._save_games_to_db(games, collection_username=username)
             self.after(0, self.refresh_games)
             self._post_status(f"Imported {len(games)} games. Downloading images…")
             if removed:
-                self.after(0, lambda r=removed: self._prompt_bgg_removals(r))
+                self.after(0, lambda r=removed, cid=_cid: self._prompt_bgg_removals(r, cid))
             self._download_thumbnails_bg(games)
         except PermissionError as exc:
             self.after(0, lambda err=str(exc): messagebox.showerror(
@@ -3177,23 +3193,28 @@ class App(tk.Tk):
             if not games:
                 self._post_status("BGG auto-sync: no games found.")
                 return
-            # Detect games in BGL that are no longer in the BGG collection
+            # Detect games that left THIS collection's BGG list (not other collections')
             bgg_ids = {g.bgg_id for g in games}
             with db.connect() as c:
                 all_bgl = db.list_games(c, owned_only=False)
-            removed = [g for g in all_bgl if g["bgg_id"] not in bgg_ids]
+                _cid = db.collection_id_for_username(c, username)
+                _old = db.collection_game_ids(c, _cid) if _cid else set()
+            removed = [g for g in all_bgl if g["bgg_id"] in _old and g["bgg_id"] not in bgg_ids]
             self._save_games_to_db(games, collection_username=username)
             self.after(0, self.refresh_games)
             n = len(games)
             self._post_status(f"BGG auto-sync complete: {n} game{'s' if n != 1 else ''} updated.")
             if removed:
-                self.after(0, lambda r=removed: self._prompt_bgg_removals(r))
+                self.after(0, lambda r=removed, cid=_cid: self._prompt_bgg_removals(r, cid))
             self._download_thumbnails_bg(games)
         except Exception as exc:
             self._post_status(f"BGG auto-sync failed: {exc}")
 
-    def _prompt_bgg_removals(self, removed: list) -> None:
-        """Main-thread dialog: offer to remove games no longer in the BGG collection."""
+    def _prompt_bgg_removals(self, removed: list, collection_id=None) -> None:
+        """Main-thread dialog: offer to remove games no longer in the BGG collection.
+
+        With multiple collections, removal unlinks the game from the synced
+        collection and only deletes it entirely if it's in no other collection."""
         if not removed:
             return
 
@@ -3243,7 +3264,15 @@ class App(tk.Tk):
             if to_del:
                 with db.connect() as c:
                     for g in to_del:
-                        db.delete_game(c, g["bgg_id"])
+                        if collection_id is not None:
+                            db.remove_game_from_collection(c, g["bgg_id"], collection_id)
+                            remaining = c.execute(
+                                "SELECT COUNT(*) FROM game_collections WHERE game_id = ?",
+                                (g["bgg_id"],)).fetchone()[0]
+                            if remaining == 0:
+                                db.delete_game(c, g["bgg_id"])
+                        else:
+                            db.delete_game(c, g["bgg_id"])
                 self.refresh_games()
                 n = len(to_del)
                 self.status(f"Removed {n} game{'s' if n != 1 else ''} from the library.")
@@ -3305,11 +3334,13 @@ class App(tk.Tk):
                     d.my_rating = entry.my_rating
                     d.my_comment = entry.my_comment
 
-            # Detect games in BGL that are no longer in the BGG collection
+            # Detect games that left THIS collection's BGG list (not other collections')
             bgg_ids = set(by_id.keys())
             with db.connect() as c:
                 all_bgl = db.list_games(c, owned_only=False)
-            removed = [g for g in all_bgl if g["bgg_id"] not in bgg_ids]
+                _cid = db.collection_id_for_username(c, username)
+                _old = db.collection_game_ids(c, _cid) if _cid else set()
+            removed = [g for g in all_bgl if g["bgg_id"] in _old and g["bgg_id"] not in bgg_ids]
 
             self._save_games_to_db(list(by_id.values()), collection_username=username)
             self._post_status("Saved to database. Downloading thumbnails...")
@@ -3317,7 +3348,7 @@ class App(tk.Tk):
             self.after(0, self.refresh_games)
             self._post_status(f"Sync complete: {len(by_id)} games.")
             if removed:
-                self.after(0, lambda r=removed: self._prompt_bgg_removals(r))
+                self.after(0, lambda r=removed, cid=_cid: self._prompt_bgg_removals(r, cid))
         except Exception as e:
             traceback.print_exc()
             self.after(0, lambda err=e: messagebox.showerror("Sync failed", str(err)))

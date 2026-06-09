@@ -261,6 +261,15 @@ def get_or_create_collection(
     return cur.lastrowid
 
 
+def collection_id_for_username(c: sqlite3.Connection, bgg_username: str) -> Optional[int]:
+    """Return the existing collection id for a BGG username, or None (no create)."""
+    if not bgg_username:
+        return None
+    row = c.execute(
+        "SELECT id FROM collections WHERE bgg_username = ?", (bgg_username,)).fetchone()
+    return row["id"] if row else None
+
+
 def rename_collection(c: sqlite3.Connection, collection_id: int, name: str) -> None:
     c.execute("UPDATE collections SET name = ? WHERE id = ?", (name.strip(), collection_id))
 

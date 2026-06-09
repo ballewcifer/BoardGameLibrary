@@ -14,6 +14,8 @@ a = Analysis(
         # Bundle certifi's cacert.pem so HTTPS works on every machine,
         # not just the one the app was compiled on.
         *collect_data_files('certifi'),
+        # Window/title-bar icon, loaded at runtime via iconbitmap().
+        ('icon.ico', '.'),
     ],
     hiddenimports=[
         'PIL._tkinter_finder',
