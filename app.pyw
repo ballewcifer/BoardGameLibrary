@@ -1403,6 +1403,8 @@ class App(tk.Tk):
         self.refresh_games()
 
     def _on_scroll(self, event: tk.Event) -> None:
+        if event.widget.winfo_toplevel() is not self:
+            return  # don't scroll the main window while a dialog is open
         delta = int(-event.delta / 120)
         tab = self.nb.index(self.nb.select())
         if tab == 0:
@@ -3886,6 +3888,12 @@ class App(tk.Tk):
             self.refresh_games()
             verb = "Added" if is_new else "Updated"
             self.status(f"{verb} \"{name}\".")
+            if is_new and game_row.get("image_url"):
+                threading.Thread(
+                    target=self._fetch_and_cache_images_bg,
+                    args=([bgg_id],),
+                    daemon=True,
+                ).start()
 
         btn_row = ttk.Frame(dlg, padding=(12, 4, 12, 12))
         btn_row.grid(row=15, column=0, columnspan=2, sticky="e")
