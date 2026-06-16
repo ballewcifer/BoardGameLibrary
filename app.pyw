@@ -141,6 +141,12 @@ def _resource_path(name: str) -> str:
     return os.path.join(base, name)
 
 THUMB_SIZE = (240, 240)
+# Card size presets: card_w, cover_h, title font pt, sub-text font pt, wrap px
+_CARD_SIZES = {
+    "sm": {"card_w": 180, "cover_h":  90, "title": 12, "sub": 10, "wrap": 145},
+    "md": {"card_w": 260, "cover_h": 200, "title": 16, "sub": 13, "wrap": 210},
+    "lg": {"card_w": 340, "cover_h": 260, "title": 18, "sub": 14, "wrap": 285},
+}
 PLACEHOLDER_BG = "#EAEEF2"  # C_LINE_100 — defined before color tokens
 APP_CREATED   = "May 5, 2026"
 APP_AUTHOR    = "Ballewcifer"
@@ -486,6 +492,7 @@ class App(tk.Tk):
         self._placeholder_img: Optional[ImageTk.PhotoImage] = None
         self._search_after_id: Optional[str] = None
         self._view_mode: str = self.settings.get("view_mode", "cards")
+        self._card_size: str = self.settings.get("card_size", "md")
         self._sort_col: Optional[str] = None
         self._sort_rev: bool = False
         self._table_games: list = []
@@ -931,6 +938,35 @@ class App(tk.Tk):
         self._btn_cards = _view_btn("⊞  Cards", "cards")
         tk.Frame(seg_frame, bg=C_LINE_200, width=1).pack(side="left", fill="y")
         self._btn_table = _view_btn("≡  Table", "table")
+
+        # Card SIZE segmented control — only visible in card view
+        self._size_field = ttk.Frame(bar, style="Filter.TFrame")
+        if self._view_mode == "cards":
+            self._size_field.pack(side="right", padx=(0, SP["md"]))
+        ttk.Label(self._size_field, text="SIZE", style="Filter.TLabel").pack(anchor="w")
+        sz_frame = tk.Frame(self._size_field, bg=C_SURFACE,
+                            highlightbackground=C_LINE_200, highlightthickness=1, bd=0)
+        sz_frame.pack(anchor="e")
+
+        def _size_btn(text, size):
+            active = self._card_size == size
+            btn = tk.Button(
+                sz_frame, text=text,
+                bg=C_BLUE_050 if active else C_SURFACE,
+                fg=C_BLUE_800 if active else C_INK_600,
+                activebackground=C_BLUE_050, activeforeground=C_BLUE_800,
+                relief="flat", bd=0, font=self.FONTS["control"],
+                padx=SP["sm"] + 2, pady=SP["xs"] + 1, cursor="hand2",
+                command=lambda s=size: self._set_card_size(s),
+            )
+            btn.pack(side="left")
+            return btn
+
+        self._btn_sz_sm = _size_btn("S", "sm")
+        tk.Frame(sz_frame, bg=C_LINE_200, width=1).pack(side="left", fill="y")
+        self._btn_sz_md = _size_btn("M", "md")
+        tk.Frame(sz_frame, bg=C_LINE_200, width=1).pack(side="left", fill="y")
+        self._btn_sz_lg = _size_btn("L", "lg")
 
         # ── filter bar: labelled groups, bottom-aligned ────────────────────────
         fbar = ttk.Frame(parent, style="Filter.TFrame",
@@ -1389,17 +1425,35 @@ class App(tk.Tk):
         self._view_mode = mode
         self.settings["view_mode"] = mode
         config.save(self.settings)
-        # Update button colours (segmented control)
         for btn, m in ((self._btn_cards, "cards"), (self._btn_table, "table")):
             active = (m == mode)
             btn.configure(bg=C_BLUE_050 if active else C_SURFACE,
                           fg=C_BLUE_800 if active else C_INK_600)
         if mode == "table":
+            self._size_field.pack_forget()
             self._card_frame.pack_forget()
             self._table_frame.pack(fill="both", expand=True)
         else:
+            self._size_field.pack(side="right", padx=(0, self.SP["md"]))
             self._table_frame.pack_forget()
             self._card_frame.pack(fill="both", expand=True)
+        self.refresh_games()
+
+    def _set_card_size(self, size: str) -> None:
+        if size == self._card_size:
+            return
+        self._card_size = size
+        self.settings["card_size"] = size
+        config.save(self.settings)
+        sz_btns = [
+            (self._btn_sz_sm, "sm"),
+            (self._btn_sz_md, "md"),
+            (self._btn_sz_lg, "lg"),
+        ]
+        for btn, s in sz_btns:
+            active = s == size
+            btn.configure(bg=C_BLUE_050 if active else C_SURFACE,
+                          fg=C_BLUE_800 if active else C_INK_600)
         self.refresh_games()
 
     def _on_scroll(self, event: tk.Event) -> None:
@@ -1431,7 +1485,7 @@ class App(tk.Tk):
     def _layout_cards(self, container_width: int) -> None:
         if not self._cards:
             return
-        card_w = 260
+        card_w = _CARD_SIZES[self._card_size]["card_w"]
         gap = 16
         cols = max(1, (container_width - gap) // (card_w + gap))
         rows_used = 0
@@ -2137,12 +2191,19 @@ class App(tk.Tk):
 
         overdue = bool(out_to and due and due < datetime.now().strftime("%Y-%m-%d"))
 
+        # ── size config ───────────────────────────────────────────────────────
+        _sz   = _CARD_SIZES[self._card_size]
+        _IH   = _sz["cover_h"]
+        _ts   = _sz["title"]                           # title font pt
+        _ss   = _sz["sub"]                             # sub-text font pt
+        _wrap = _sz["wrap"]
+        _cf   = ("Segoe UI", max(11, _ts - 4), "bold") # cover name overlay font
+
         # ── card shell ────────────────────────────────────────────────────────
         card = tk.Frame(self.games_inner, bg=C_SURFACE,
                         highlightbackground=C_LINE_200, highlightthickness=1, bd=0)
 
         # ── cover: gradient placeholder + game-name overlay + star chip ───────
-        _IH = 200
         img_canvas = tk.Canvas(card, height=_IH, highlightthickness=0, bd=0)
         img_canvas.pack(fill="x")
 
@@ -2158,7 +2219,7 @@ class App(tk.Tk):
         _title_id = img_canvas.create_text(
             130, _IH // 2,
             text="\n".join(cover_lines),
-            fill="white", font=("Segoe UI", 20, "bold"),
+            fill="white", font=_cf,
             anchor="center", justify="center",
         )
         img_canvas._cover_title_id = _title_id  # lazy-loader hides this
@@ -2220,11 +2281,11 @@ class App(tk.Tk):
 
         # Title (prototype: 16px bold) + year (prototype: 13px ink-600)
         tk.Label(body, text=_shorten(game["name"]),
-                 bg=C_SURFACE, fg=C_INK_900, font=self.FONTS["card_title"],
-                 wraplength=210, justify="left", anchor="w").pack(anchor="w")
+                 bg=C_SURFACE, fg=C_INK_900, font=("Segoe UI", _ts, "bold"),
+                 wraplength=_wrap, justify="left", anchor="w").pack(anchor="w")
         if game["year"]:
             tk.Label(body, text=str(game["year"]), bg=C_SURFACE, fg=C_INK_600,
-                     font=self.FONTS["card_year"]).pack(anchor="w")
+                     font=("Segoe UI", _ss)).pack(anchor="w")
 
         # Specs row (prototype: 13.5px ink-600)
         info = (
@@ -2232,13 +2293,13 @@ class App(tk.Tk):
             f"⏱ {fmt_time(game['min_playtime'], game['max_playtime'], game['playing_time'])}"
         )
         tk.Label(body, text=info, bg=C_SURFACE, fg=C_INK_600,
-                 font=self.FONTS["card_specs"]).pack(anchor="w", pady=(SP["xs"], 0))
+                 font=("Segoe UI", _ss)).pack(anchor="w", pady=(SP["xs"], 0))
 
         # Best-at (prototype: 13px bold, star colour)
         if game["best_players"]:
             tk.Label(body, text=f"★ Best at {game['best_players']}",
                      bg=C_SURFACE, fg=C_STAR_TEXT,
-                     font=self.FONTS["card_bestat"]).pack(anchor="w")
+                     font=("Segoe UI", _ss, "bold")).pack(anchor="w")
 
         # Meta badges: insert / plays
         if has_insert or n_plays:
