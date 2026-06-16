@@ -691,14 +691,17 @@ class App(tk.Tk):
             background=[("active", "#a01e18")])
 
         # ── Notebook tabs (navy-800 strip) ─────────────────────────────────────
-        s.configure("TNotebook", background=C_NAVY_800, borderwidth=0)
+        s.configure("TNotebook", background=C_NAVY_800, borderwidth=0,
+                    tabmargins=[2, 5, 2, 0])
         s.configure("TNotebook.Tab",
             background=C_NAVY_800, foreground="#C7D6E6",
             font=self.FONTS["control"],
-            padding=[self.SP["lg"], self.SP["sm"] - 1])
+            padding=[self.SP["lg"], self.SP["sm"] + 1],
+            focuscolor="")
         s.map("TNotebook.Tab",
             background=[("selected", C_BG), ("active", "#1E4A73")],
-            foreground=[("selected", C_NAVY_900), ("active", C_SURFACE)])
+            foreground=[("selected", C_NAVY_900), ("active", C_SURFACE)],
+            expand=[("selected", [1, 2, 1, 0])])
 
         # ── Entry / Combobox ───────────────────────────────────────────────────
         s.configure("TEntry",
@@ -1094,6 +1097,8 @@ class App(tk.Tk):
         self._build_plays_tab()
         self._build_dashboard_tab()
 
+        self.bind_all("<MouseWheel>", self._on_scroll)
+
     def _build_status_bar(self) -> None:
         """Navy-900 status strip pinned to the bottom edge."""
         self.status_var = tk.StringVar(value="Ready.")
@@ -1123,10 +1128,6 @@ class App(tk.Tk):
             canvas.itemconfigure(_win, width=e.width)
         canvas.bind("<Configure>", _on_resize)
         inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        # Only scroll the dashboard canvas when the cursor is actually over it
-        canvas.bind("<Enter>", lambda e: canvas.bind_all(
-            "<MouseWheel>", lambda ev: canvas.yview_scroll(-1 * (ev.delta // 120), "units")))
-        canvas.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
 
         self._dashboard_canvas = canvas
         self._dashboard_inner  = inner
@@ -1295,7 +1296,6 @@ class App(tk.Tk):
         self.games_window_id = self.games_canvas.create_window((0, 0), window=self.games_inner, anchor="nw")
         self.games_inner.bind("<Configure>", lambda e: self.games_canvas.configure(scrollregion=self.games_canvas.bbox("all")))
         self.games_canvas.bind("<Configure>", self._reflow_games)
-        self.games_canvas.bind_all("<MouseWheel>", self._on_mousewheel, add="+")
 
         # ── table view ────────────────────────────────────────────────────────
         self._table_frame = ttk.Frame(wrapper)
@@ -1400,22 +1400,22 @@ class App(tk.Tk):
             self._card_frame.pack(fill="both", expand=True)
         self.refresh_games()
 
-    def _on_mousewheel(self, event: tk.Event) -> None:
-        # Only scroll the card canvas when the Games tab is active and in card view
-        if self.nb.index(self.nb.select()) != 0:
-            return
-        if self._view_mode == "cards":
-            self.games_canvas.yview_scroll(int(-event.delta / 120), "units")
-
-    def _bind_canvas_scroll(self, widget: tk.Widget) -> None:
-        """Recursively forward MouseWheel on every card widget to the games canvas.
-
-        bind_all is not always reliable on Windows when widgets are nested inside
-        a canvas window — explicit bindings ensure the scroll always works.
-        """
-        widget.bind("<MouseWheel>", self._on_mousewheel, add="+")
-        for child in widget.winfo_children():
-            self._bind_canvas_scroll(child)
+    def _on_scroll(self, event: tk.Event) -> None:
+        delta = int(-event.delta / 120)
+        tab = self.nb.index(self.nb.select())
+        if tab == 0:
+            self._dashboard_canvas.yview_scroll(delta, "units")
+        elif tab == 1:
+            if self._view_mode == "cards":
+                self.games_canvas.yview_scroll(delta, "units")
+            else:
+                self.games_tree.yview_scroll(delta, "units")
+        elif tab == 2:
+            self.members_tree.yview_scroll(delta, "units")
+        elif tab == 3:
+            self.plays_tree.yview_scroll(delta, "units")
+        elif tab == 4:
+            self.history_tree.yview_scroll(delta, "units")
 
     def _reflow_games(self, event: tk.Event) -> None:
         self.games_canvas.itemconfigure(self.games_window_id, width=event.width)
@@ -2290,8 +2290,6 @@ class App(tk.Tk):
             self._show_card_context_menu(event, g)
         for w in (card, img_canvas, body, sec):
             w.bind("<Button-3>", _card_right_click)
-
-        self._bind_canvas_scroll(card)
 
         return card, (img_canvas, _img_id, game)
 

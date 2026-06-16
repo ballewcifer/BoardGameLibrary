@@ -77,11 +77,23 @@ img { max-width: 100%; display: block; }
 .nav-item {
   flex: 1; display: flex; flex-direction: column;
   align-items: center; justify-content: center;
-  color: var(--muted); font-size: .7rem; gap: 2px;
+  position: relative;
+  color: var(--muted); font-size: .7rem; gap: 3px;
   transition: color .15s;
+  text-decoration: none;
 }
 .nav-item.active { color: var(--navy); }
+.nav-item.active::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 20%; right: 20%;
+  height: 3px;
+  background: var(--navy);
+  border-radius: 0 0 3px 3px;
+}
 .nav-icon { font-size: 1.25rem; line-height: 1; }
+.nav-label { font-size: .7rem; }
+.nav-item.active .nav-label { font-weight: 600; }
 
 /* ── Flash messages ───────────────────────────────────────────────────────── */
 .flash-container { padding: 8px 16px 0; }
