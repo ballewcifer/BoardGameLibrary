@@ -1883,9 +1883,14 @@ class App(tk.Tk):
             if not path or not Path(path).exists():
                 continue  # no file on disk; placeholder is fine
 
-            # If already cached (from a previous render) just reuse it
-            if path in self._image_cache:
-                tk_img = self._image_cache[path]
+            # Size the image to the actual canvas so it never overflows
+            ch = getattr(canvas, "_card_height", 200)
+            cw = getattr(canvas, "_card_width",  260)
+            cache_key = (path, ch)
+
+            # If already cached at this size, just reuse it
+            if cache_key in self._image_cache:
+                tk_img = self._image_cache[cache_key]
                 self.after(0, lambda c=canvas, i=img_id, im=tk_img:
                            self._apply_lazy_image(c, i, im))
                 continue
@@ -1893,12 +1898,12 @@ class App(tk.Tk):
             # Disk I/O + PIL resize in the background
             try:
                 pil_img = Image.open(path)
-                pil_img.thumbnail(THUMB_SIZE)
+                pil_img.thumbnail((cw, ch))
             except (OSError, ValueError):
                 continue
 
-            self.after(0, lambda c=canvas, i=img_id, p=pil_img, pa=path:
-                       self._apply_lazy_image_from_pil(c, i, p, pa))
+            self.after(0, lambda c=canvas, i=img_id, p=pil_img, ck=cache_key:
+                       self._apply_lazy_image_from_pil(c, i, p, ck))
 
     def _apply_lazy_image(self, canvas: tk.Canvas, img_id: int,
                           tk_img: ImageTk.PhotoImage) -> None:
@@ -1915,13 +1920,13 @@ class App(tk.Tk):
             pass
 
     def _apply_lazy_image_from_pil(self, canvas: tk.Canvas, img_id: int,
-                                    pil_img: "Image.Image", path: str) -> None:
+                                    pil_img: "Image.Image", cache_key) -> None:
         """Main thread: convert a PIL Image → PhotoImage, cache it, show it."""
         try:
             if not canvas.winfo_exists():
                 return
             tk_img = ImageTk.PhotoImage(pil_img)
-            self._image_cache[path] = tk_img
+            self._image_cache[cache_key] = tk_img
             canvas.itemconfigure(img_id, image=tk_img)
             canvas._card_img_ref = tk_img
             # Hide the cover-title text overlay now that a real image is showing
@@ -2164,7 +2169,10 @@ class App(tk.Tk):
                         highlightbackground=C_LINE_200, highlightthickness=1, bd=0)
 
         # ── cover: gradient placeholder + game-name overlay + star chip ───────
+        # Store cover dimensions so the lazy loader can resize to fit exactly.
         img_canvas = tk.Canvas(card, height=_IH, highlightthickness=0, bd=0)
+        img_canvas._card_height = _IH
+        img_canvas._card_width  = _sz["card_w"]
         img_canvas.pack(fill="x")
 
         # Gradient placeholder image (replaced when real photo loads)
