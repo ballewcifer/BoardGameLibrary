@@ -1,113 +1,83 @@
-"""Generate icon.ico for Board Game Library.
-
-Renders a d6 (six-sided die) in the app's navy/blue/gold colour palette,
-with a drop shadow, a subtle top-left highlight, and gold pips.
-Four-times supersampling is used so edges look smooth at every size.
+"""Generate icon.ico — a blue meeple librarian (glasses + book).
 
 Run directly:
     python create_icon.py
 """
-
 from pathlib import Path
 from PIL import Image, ImageDraw
 
-# ── app colour palette ────────────────────────────────────────────────────────
-NAVY  = (26,  58,  92)
-BLUE  = (36, 113, 163)
-SKY   = (93, 173, 226)
-GOLD  = (212, 160,  23)
-WHITE = (255, 255, 255)
+BLUE      = (24,  85, 184, 255)
+GOLD      = (220, 180,  40, 255)
+WHITE     = (255, 255, 255, 255)
+BOOK_CVR  = (180, 210, 255, 255)
+CLEAR     = (  0,   0,   0,   0)
 
 ICON_SIZES = [256, 128, 64, 48, 32, 16]
 
 
 def _render(size: int) -> Image.Image:
-    """Draw one frame of the dice icon at *size* × *size* pixels."""
-    img  = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(img)
+    img = Image.new("RGBA", (size, size), CLEAR)
+    d   = ImageDraw.Draw(img)
+    sc  = size / 256.0
 
-    pad = max(2, size // 10)          # outer margin
-    r   = max(4, size // 4)           # corner radius for dice body
+    def e(x1, y1, x2, y2, **kw):
+        d.ellipse([x1*sc, y1*sc, x2*sc, y2*sc], **kw)
 
-    # ── soft drop shadow ─────────────────────────────────────────────────────
-    so = max(1, size // 16)
-    draw.rounded_rectangle(
-        [pad + so, pad + so, size - pad + so // 2, size - pad + so // 2],
-        radius=r, fill=(0, 0, 0, 90),
-    )
+    def p(pts, **kw):
+        d.polygon([(x*sc, y*sc) for x, y in pts], **kw)
 
-    # ── navy outer ring (thick border effect) ────────────────────────────────
-    draw.rounded_rectangle(
-        [pad, pad, size - pad, size - pad],
-        radius=r, fill=NAVY,
-    )
+    def line(pts, **kw):
+        d.line([(x*sc, y*sc) for x, y in pts], **kw)
 
-    # ── blue inner face ───────────────────────────────────────────────────────
-    brd = max(2, size // 16)
-    inner_r = max(3, r - brd)
-    draw.rounded_rectangle(
-        [pad + brd, pad + brd, size - pad - brd, size - pad - brd],
-        radius=inner_r, fill=BLUE,
-    )
+    # ── body ─────────────────────────────────────────────────────────────────
+    e(84, 14, 172, 102, fill=BLUE)           # head
+    e(24,  86,  96, 150, fill=BLUE)          # left arm
+    e(160,  86, 232, 150, fill=BLUE)         # right arm
+    p([                                       # torso + legs
+        ( 82,  98), (174,  98),
+        (198, 168), (166, 168), (166, 224), (134, 224),
+        (134, 168), (122, 168), (122, 224), ( 90, 224),
+        ( 90, 168), ( 58, 168),
+    ], fill=BLUE)
 
-    # ── top-left highlight (simulated shine) ─────────────────────────────────
-    if size >= 48:
-        hl      = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-        hd      = ImageDraw.Draw(hl)
-        hl_pad  = pad + brd + max(1, size // 20)
-        hl_end  = size // 2
-        hd.rounded_rectangle(
-            [hl_pad, hl_pad, hl_end, hl_end],
-            radius=max(2, r // 2),
-            fill=(*SKY, 55),       # semi-transparent sky-blue
+    # ── glasses (≥ 32 px) ────────────────────────────────────────────────────
+    if size >= 32:
+        gw = max(1, int(3 * sc))
+        bw = max(1, int(2 * sc))
+        e( 95, 53, 123, 81, outline=GOLD, width=gw)   # left lens
+        e(133, 53, 161, 81, outline=GOLD, width=gw)   # right lens
+        line([(123, 67), (133, 67)], fill=GOLD, width=bw)   # bridge
+        if size >= 48:
+            line([(95, 60), (80, 54)],   fill=GOLD, width=bw)  # left temple
+            line([(161, 60), (176, 54)], fill=GOLD, width=bw)  # right temple
+
+    # ── book (≥ 64 px) ───────────────────────────────────────────────────────
+    if size >= 64:
+        sw = max(1, int(2 * sc))
+        d.rectangle(
+            [104*sc, 116*sc, 152*sc, 158*sc],
+            fill=BOOK_CVR, outline=WHITE, width=sw,
         )
-        img  = Image.alpha_composite(img, hl)
-        draw = ImageDraw.Draw(img)
-
-    # ── gold pips: 6-face layout (2 columns × 3 rows) ────────────────────────
-    fp  = pad + brd                    # face padding (start of usable face area)
-    fw  = size - 2 * fp                # face width / height (it's square)
-    pr  = max(1, fw // 9)             # pip radius
-
-    cx_l = fp + fw * 29 // 100        # left column  (~29% across)
-    cx_r = fp + fw * 71 // 100        # right column (~71% across)
-    cy_t = fp + fw * 19 // 100        # top row      (~19% down)
-    cy_m = fp + fw * 50 // 100        # middle row   (~50% down)
-    cy_b = fp + fw * 81 // 100        # bottom row   (~81% down)
-
-    for px, py in [
-        (cx_l, cy_t), (cx_r, cy_t),
-        (cx_l, cy_m), (cx_r, cy_m),
-        (cx_l, cy_b), (cx_r, cy_b),
-    ]:
-        # Small shadow under each pip for depth
-        if pr >= 3:
-            draw.ellipse(
-                [px - pr + 1, py - pr + 1, px + pr + 1, py + pr + 1],
-                fill=(0, 0, 0, 60),
-            )
-        draw.ellipse([px - pr, py - pr, px + pr, py + pr], fill=GOLD)
+        mid = 128 * sc
+        d.line([(mid, 116*sc), (mid, 158*sc)], fill=WHITE, width=sw)
+        for ry in [0.35, 0.55, 0.75]:
+            y = (116 + 42 * ry) * sc
+            d.line([(mid + sw, y), (152*sc - sw*2, y)],
+                   fill=WHITE, width=max(1, sw - 1))
 
     return img
 
 
 def make_icon(dest: Path) -> None:
-    frames: list[Image.Image] = []
-    for size in ICON_SIZES:
-        big   = _render(size * 4)                          # 4× supersample
-        frame = big.resize((size, size), Image.LANCZOS)    # downscale cleanly
-        frames.append(frame)
-
+    frames = [_render(s) for s in ICON_SIZES]
     frames[0].save(
         dest,
         format="ICO",
         sizes=[(f.width, f.height) for f in frames],
         append_images=frames[1:],
     )
-    sizes_str = ", ".join(str(f.width) for f in frames)
-    print(f"Saved {dest}  ({sizes_str} px)")
+    print(f"Saved {dest}  ({', '.join(str(f.width) for f in frames)} px)")
 
 
 if __name__ == "__main__":
-    out = Path(__file__).parent / "icon.ico"
-    make_icon(out)
+    make_icon(Path(__file__).parent / "icon.ico")
