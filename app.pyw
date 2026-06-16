@@ -2316,7 +2316,10 @@ class App(tk.Tk):
         # Right-click context menu
         def _card_right_click(event, g=game):
             self._show_card_context_menu(event, g)
-        for w in (card, img_canvas, body, sec):
+        _rc_targets = [card, img_canvas, body]
+        if not _is_sm:
+            _rc_targets.append(sec)
+        for w in _rc_targets:
             w.bind("<Button-3>", _card_right_click)
 
         return card, (img_canvas, _img_id, game)
