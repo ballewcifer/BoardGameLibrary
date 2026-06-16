@@ -3615,10 +3615,23 @@ class App(tk.Tk):
         if d.description:
             desc_box.insert("1.0", d.description)
 
+        _current_insert = False
+        if not is_new and d and d.bgg_id and d.bgg_id > 0:
+            with db.connect() as c:
+                _gi = db.get_game(c, d.bgg_id)
+                if _gi:
+                    _current_insert = bool(_gi["has_insert"])
+        insert_var = tk.BooleanVar(value=_current_insert)
+        ttk.Label(dlg, text="3D Insert",
+                  font=("Segoe UI", 9, "bold")).grid(row=12, column=0, **lpad)
+        ttk.Checkbutton(dlg, text="Has 3D printed insert",
+                        variable=insert_var).grid(row=12, column=1, sticky="w",
+                                                   padx=(4, 12), pady=3)
+
         err_var = tk.StringVar()
         ttk.Label(dlg, textvariable=err_var, foreground=C_DR_TEXT,
                   font=("Segoe UI", 8)).grid(
-            row=12, column=0, columnspan=2, padx=12, sticky="w")
+            row=13, column=0, columnspan=2, padx=12, sticky="w")
 
         # --- lock-status row (editing an existing game only) ---
         _FIELD_DISPLAY = {
@@ -3631,7 +3644,7 @@ class App(tk.Tk):
         }
         lock_lbl_var = tk.StringVar()
         lock_frame = ttk.Frame(dlg)
-        lock_frame.grid(row=13, column=0, columnspan=2,
+        lock_frame.grid(row=14, column=0, columnspan=2,
                         padx=12, pady=(0, 2), sticky="w")
         ttk.Label(lock_frame, textvariable=lock_lbl_var,
                   foreground=C_INK_600, font=("Segoe UI", 8)).pack(side="left")
@@ -3764,6 +3777,7 @@ class App(tk.Tk):
                 db.upsert_game(c, game_row)
                 # Save tags separately (not part of upsert to avoid clobbering on sync)
                 db.set_tags(c, bgg_id, tags_var.get().strip())
+                db.set_insert(c, bgg_id, bool(insert_var.get()))
 
             dlg.destroy()
             self.refresh_games()
@@ -3771,7 +3785,7 @@ class App(tk.Tk):
             self.status(f"{verb} \"{name}\".")
 
         btn_row = ttk.Frame(dlg, padding=(12, 4, 12, 12))
-        btn_row.grid(row=14, column=0, columnspan=2, sticky="e")
+        btn_row.grid(row=15, column=0, columnspan=2, sticky="e")
         ttk.Button(btn_row, text="Cancel", command=dlg.destroy).pack(side="left", padx=(0, 6))
         ttk.Button(btn_row, text="Save Game" if is_new else "Save Changes",
                    command=save).pack(side="left")

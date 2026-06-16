@@ -95,6 +95,9 @@
       {% if g.play_count %}
         <div class="muted" style="font-size:.75rem">{{ g.play_count }} play{{ 's' if g.play_count != 1 else '' }}</div>
       {% endif %}
+      {% if g.best_players %}
+        <div class="muted" style="font-size:.75rem">★ Best at {{ g.best_players }}</div>
+      {% endif %}
     </div>
 
     <div class="game-card-footer">

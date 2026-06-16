@@ -250,6 +250,28 @@ def toggle_favorite(bgg_id):
     return redirect(request.referrer or url_for("games"))
 
 
+@app.route("/games/<int:bgg_id>/update", methods=["POST"])
+def update_game(bgg_id):
+    best_players = request.form.get("best_players", "").strip() or None
+    has_insert   = 1 if request.form.get("has_insert") else 0
+    my_rating_s  = request.form.get("my_rating", "").strip()
+    try:
+        my_rating = int(my_rating_s) if my_rating_s else None
+    except ValueError:
+        my_rating = None
+    tags       = request.form.get("tags", "").strip()
+    my_comment = request.form.get("my_comment", "").strip() or None
+    with db.connect() as c:
+        c.execute(
+            "UPDATE games SET best_players=?, my_rating=?, my_comment=? WHERE bgg_id=?",
+            (best_players, my_rating, my_comment, bgg_id),
+        )
+        db.set_tags(c, bgg_id, tags)
+        db.set_insert(c, bgg_id, bool(has_insert))
+    flash("Game updated.", "success")
+    return redirect(url_for("game_detail", bgg_id=bgg_id))
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Members
 # ═══════════════════════════════════════════════════════════════════════════════

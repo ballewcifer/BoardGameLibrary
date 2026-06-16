@@ -23,6 +23,8 @@
     </div>
     {% if game.avg_rating %}<div class="muted">BGG ★ {{ "%.1f"|format(game.avg_rating) }}</div>{% endif %}
     {% if game.designers %}<div class="muted">By {{ game.designers }}</div>{% endif %}
+    {% if game.best_players %}<div class="muted">★ Best at {{ game.best_players }} players</div>{% endif %}
+    {% if game.has_insert %}<div class="muted">📦 Has 3D printed insert</div>{% endif %}
   </div>
 </div>
 
@@ -49,6 +51,7 @@
     <button class="btn btn-secondary btn-sm">{{ '★ Unfavorite' if game.is_favorite else '☆ Favorite' }}</button>
   </form>
   <button class="btn btn-secondary btn-sm" onclick="openModal('modal-log-play')">+ Log Play</button>
+  <button class="btn btn-secondary btn-sm" onclick="openModal('modal-edit-game')">✏ Edit</button>
 </div>
 
 <!-- Play stats -->
@@ -162,6 +165,36 @@
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" onclick="closeModal('modal-log-play')">Cancel</button>
         <button type="submit" class="btn btn-primary">Log Play</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ── Edit Game modal ───────────────────────────────────────────────────── -->
+<div id="modal-edit-game" class="modal-backdrop" hidden>
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Edit — {{ game.name }}</h3>
+      <button class="modal-close" onclick="closeModal('modal-edit-game')">✕</button>
+    </div>
+    <form method="post" action="/games/{{ game.bgg_id }}/update">
+      <div class="modal-body">
+        <label class="form-label">Best At (players)</label>
+        <input type="text" name="best_players" class="form-control" value="{{ game.best_players or '' }}" placeholder="e.g. 4">
+        <label class="form-label mt-sm">My Rating (1–10)</label>
+        <input type="number" name="my_rating" class="form-control" min="1" max="10" value="{{ game.my_rating or '' }}">
+        <label class="form-label mt-sm">Tags (comma-separated)</label>
+        <input type="text" name="tags" class="form-control" value="{{ game.tags or '' }}" placeholder="Party, Family, Filler">
+        <label class="form-label mt-sm">Comment</label>
+        <input type="text" name="my_comment" class="form-control" value="{{ game.my_comment or '' }}">
+        <label class="form-label mt-sm" style="display:flex;align-items:center;gap:8px">
+          <input type="checkbox" name="has_insert" value="1" {% if game.has_insert %}checked{% endif %}>
+          Has 3D printed insert
+        </label>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-edit-game')">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save Changes</button>
       </div>
     </form>
   </div>
