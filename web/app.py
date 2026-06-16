@@ -318,10 +318,12 @@ def history():
     user_id  = request.args.get("user_id", type=int)
     game_id  = request.args.get("game_id",  type=int)
     status   = request.args.get("status", "all")    # all | active | returned
+    mode     = request.args.get("mode", "checkouts")  # checkouts | plays
 
     with db.connect() as c:
         rows  = [_row_to_dict(r) for r in db.loan_history(c, game_id=game_id, user_id=user_id)]
         users = [_row_to_dict(r) for r in db.list_users(c)]
+        plays = [_row_to_dict(r) for r in db.list_plays(c)]
 
     today = datetime.now().date().isoformat()
     for r in rows:
@@ -337,7 +339,9 @@ def history():
     return render_template("history.html",
                            rows=rows,
                            users=users,
+                           plays=plays,
                            status=status,
+                           mode=mode,
                            filter_user=user_id,
                            today=today)
 

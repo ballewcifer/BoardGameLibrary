@@ -1417,7 +1417,10 @@ class App(tk.Tk):
         elif tab == 3:
             self.plays_tree.yview_scroll(delta, "units")
         elif tab == 4:
-            self.history_tree.yview_scroll(delta, "units")
+            if self.history_mode.get() == "plays":
+                self.history_plays_tree.yview_scroll(delta, "units")
+            else:
+                self.history_tree.yview_scroll(delta, "units")
 
     def _reflow_games(self, event: tk.Event) -> None:
         self.games_canvas.itemconfigure(self.games_window_id, width=event.width)
@@ -2594,19 +2597,51 @@ class App(tk.Tk):
         frame = ttk.Frame(self.history_tab, padding=SP["lg"])
         frame.pack(fill="both", expand=True)
 
-        ttk.Label(frame, text="Checkout History", style="Section.TLabel").pack(anchor="w")
+        ttk.Label(frame, text="History", style="Section.TLabel").pack(anchor="w")
         ttk.Separator(frame, orient="horizontal").pack(fill="x", pady=(SP["xs"], SP["md"]))
 
-        controls = ttk.Frame(frame)
+        # ── Mode toggle ──────────────────────────────────────────────────────
+        top_bar = ttk.Frame(frame)
+        top_bar.pack(fill="x", pady=(0, SP["sm"]))
+        self.history_mode = tk.StringVar(value="checkouts")
+        seg = tk.Frame(top_bar, bg=C_SURFACE,
+                       highlightbackground=C_LINE_200, highlightthickness=1, bd=0)
+        seg.pack(side="left")
+
+        def _hbtn(text, mode):
+            active = self.history_mode.get() == mode
+            btn = tk.Button(
+                seg, text=text,
+                bg=C_BLUE_050 if active else C_SURFACE,
+                fg=C_BLUE_800 if active else C_INK_600,
+                activebackground=C_BLUE_050, activeforeground=C_BLUE_800,
+                relief="flat", bd=0, font=self.FONTS["control"],
+                padx=SP["md"], pady=SP["xs"] + 1, cursor="hand2",
+                command=lambda m=mode: self._set_history_mode(m),
+            )
+            btn.pack(side="left")
+            return btn
+
+        self._hist_btn_checkouts = _hbtn("Checkouts", "checkouts")
+        tk.Frame(seg, bg=C_LINE_200, width=1).pack(side="left", fill="y")
+        self._hist_btn_plays = _hbtn("Plays", "plays")
+
+        # ── Checkouts pane ───────────────────────────────────────────────────
+        self._hist_checkouts_pane = ttk.Frame(frame)
+
+        controls = ttk.Frame(self._hist_checkouts_pane)
         controls.pack(fill="x")
         ttk.Label(controls, text="Filter", style="Filter.TLabel").pack(side="left", padx=(0, SP["sm"]))
         self.history_filter = tk.StringVar(value="all")
-        ttk.Radiobutton(controls, text="All", variable=self.history_filter, value="all", command=self.refresh_history).pack(side="left", padx=SP["xs"])
-        ttk.Radiobutton(controls, text="Currently out", variable=self.history_filter, value="open", command=self.refresh_history).pack(side="left", padx=SP["xs"])
-        ttk.Radiobutton(controls, text="Returned", variable=self.history_filter, value="closed", command=self.refresh_history).pack(side="left", padx=SP["xs"])
+        ttk.Radiobutton(controls, text="All", variable=self.history_filter, value="all",
+                        command=self.refresh_history).pack(side="left", padx=SP["xs"])
+        ttk.Radiobutton(controls, text="Currently out", variable=self.history_filter, value="open",
+                        command=self.refresh_history).pack(side="left", padx=SP["xs"])
+        ttk.Radiobutton(controls, text="Returned", variable=self.history_filter, value="closed",
+                        command=self.refresh_history).pack(side="left", padx=SP["xs"])
 
         cols = ("game", "member", "out", "due", "returned", "notes")
-        self.history_tree = ttk.Treeview(frame, columns=cols, show="headings")
+        self.history_tree = ttk.Treeview(self._hist_checkouts_pane, columns=cols, show="headings")
         self.history_tree.heading("game",     text="Game")
         self.history_tree.heading("member",   text="Member")
         self.history_tree.heading("out",      text="Checked Out")
@@ -2622,11 +2657,41 @@ class App(tk.Tk):
         self.history_tree.tag_configure("overdue", foreground=C_DR_TEXT,
                                         font=self.FONTS["body_strong"])
         self.history_tree.pack(fill="both", expand=True, pady=(SP["md"], 0))
-        self.history_tree.bind("<Double-1>",  self._on_history_double_click)
-        self.history_tree.bind("<Button-3>",  self._on_history_right_click)
-
-        ttk.Label(frame, text="Double-click or right-click a row to edit check-out / check-in details.",
+        self.history_tree.bind("<Double-1>", self._on_history_double_click)
+        self.history_tree.bind("<Button-3>", self._on_history_right_click)
+        ttk.Label(self._hist_checkouts_pane,
+                  text="Double-click or right-click a row to edit check-out / check-in details.",
                   style="Muted.TLabel").pack(anchor="w", pady=(SP["xs"], 0))
+
+        self._hist_checkouts_pane.pack(fill="both", expand=True)
+
+        # ── Plays pane (read-only; log/edit on the Plays tab) ────────────────
+        self._hist_plays_pane = ttk.Frame(frame)
+
+        pcols = ("game", "date", "players", "winner", "duration")
+        self.history_plays_tree = ttk.Treeview(
+            self._hist_plays_pane, columns=pcols, show="headings")
+        self.history_plays_tree.heading("game",     text="Game")
+        self.history_plays_tree.heading("date",     text="Date")
+        self.history_plays_tree.heading("players",  text="Players")
+        self.history_plays_tree.heading("winner",   text="Winner")
+        self.history_plays_tree.heading("duration", text="Duration")
+        self.history_plays_tree.column("game",     width=220)
+        self.history_plays_tree.column("date",     width=100, anchor="center")
+        self.history_plays_tree.column("players",  width=200)
+        self.history_plays_tree.column("winner",   width=140, anchor="center")
+        self.history_plays_tree.column("duration", width=90,  anchor="center")
+        p_tree_row = ttk.Frame(self._hist_plays_pane)
+        p_tree_row.pack(fill="both", expand=True, pady=(SP["sm"], 0))
+        p_vsb = ttk.Scrollbar(p_tree_row, orient="vertical",
+                               command=self.history_plays_tree.yview)
+        self.history_plays_tree.configure(yscrollcommand=p_vsb.set)
+        self.history_plays_tree.pack(side="left", fill="both", expand=True)
+        p_vsb.pack(side="left", fill="y")
+        ttk.Label(self._hist_plays_pane,
+                  text="Use the Plays tab to log or edit plays.",
+                  style="Muted.TLabel").pack(anchor="w", pady=(SP["xs"], 0))
+        # not packed — shown when mode == "plays"
 
     def refresh_history(self) -> None:
         self.history_tree.delete(*self.history_tree.get_children())
@@ -2660,6 +2725,44 @@ class App(tk.Tk):
                     r["notes"] or "",
                 ),
                 tags=("overdue",) if overdue else (),
+            )
+
+    def _set_history_mode(self, mode: str) -> None:
+        self.history_mode.set(mode)
+        is_plays = mode == "plays"
+        for btn, m in [
+            (self._hist_btn_checkouts, "checkouts"),
+            (self._hist_btn_plays,     "plays"),
+        ]:
+            active = m == mode
+            btn.configure(
+                bg=C_BLUE_050 if active else C_SURFACE,
+                fg=C_BLUE_800 if active else C_INK_600,
+            )
+        if is_plays:
+            self._hist_checkouts_pane.pack_forget()
+            self._hist_plays_pane.pack(fill="both", expand=True)
+            self._refresh_history_plays()
+        else:
+            self._hist_plays_pane.pack_forget()
+            self._hist_checkouts_pane.pack(fill="both", expand=True)
+            self.refresh_history()
+
+    def _refresh_history_plays(self) -> None:
+        self.history_plays_tree.delete(*self.history_plays_tree.get_children())
+        with db.connect() as c:
+            rows = db.list_plays(c)
+        for r in rows:
+            duration = f"{r['duration_minutes']} min" if r["duration_minutes"] else "—"
+            self.history_plays_tree.insert(
+                "", "end",
+                values=(
+                    r["game_name"],
+                    fmt_date(r["played_at"]),
+                    r["player_names"] or "",
+                    r["winner"] or "—",
+                    duration,
+                ),
             )
 
     def _on_history_double_click(self, event: tk.Event) -> None:

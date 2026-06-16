@@ -3,12 +3,23 @@
 {% block content %}
 
 <div class="page-header">
-  <h1 class="page-title">Checkout History</h1>
+  <h1 class="page-title">History</h1>
 </div>
 
-<!-- Filters -->
+<!-- Mode toggle -->
+<div class="filter-bar" style="margin-bottom:0.5rem">
+  <div class="seg-control">
+    <a href="/history?mode=checkouts" class="seg-btn {% if mode=='checkouts' %}active{% endif %}">Checkouts</a>
+    <a href="/history?mode=plays"     class="seg-btn {% if mode=='plays'     %}active{% endif %}">Plays</a>
+  </div>
+</div>
+
+{% if mode == 'checkouts' %}
+
+<!-- Checkout filters -->
 <div class="filter-bar">
   <form method="get" action="/history" class="filter-form">
+    <input type="hidden" name="mode" value="checkouts">
     <select name="status" class="filter-select">
       <option value="all"      {% if status=='all'      %}selected{% endif %}>All</option>
       <option value="active"   {% if status=='active'   %}selected{% endif %}>Still Out</option>
@@ -74,6 +85,43 @@
   <p class="muted mt">No records found.</p>
 {% endif %}
 
+{% else %}
+
+<!-- Plays list -->
+<p class="result-count muted">{{ plays|length }} play{{ 's' if plays|length != 1 else '' }}</p>
+
+{% if plays %}
+<div class="card mt" style="overflow-x:auto">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Game</th>
+        <th class="center">Date</th>
+        <th>Players</th>
+        <th class="center">Winner</th>
+        <th class="center">Duration</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in plays %}
+      <tr>
+        <td>{{ p.game_name }}</td>
+        <td class="center nowrap">{{ p.played_at[:10] if p.played_at else '—' }}</td>
+        <td>{{ p.player_names or '' }}</td>
+        <td class="center">{{ p.winner or '—' }}</td>
+        <td class="center nowrap">{{ (p.duration_minutes|string + ' min') if p.duration_minutes else '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="muted" style="margin-top:.5rem;font-size:.85rem">Use the <a href="/plays">Plays</a> page to log or edit plays.</p>
+{% else %}
+  <p class="muted mt">No plays logged yet.</p>
+{% endif %}
+
+{% endif %}
+
 <!-- ── Edit Loan modal ───────────────────────────────────────────────────── -->
 <div id="modal-edit-loan" class="modal-backdrop" hidden>
   <div class="modal">
@@ -117,7 +165,6 @@ function openEditLoan(loan) {
   document.getElementById('edit-loan-title').textContent =
     loan.game_name + ' — ' + loan.first_name + ' ' + loan.last_name;
   document.getElementById('edit-loan-form').action = '/history/' + loan.id + '/edit';
-  // Convert ISO string to datetime-local format (YYYY-MM-DDTHH:MM)
   function toLocal(s) { return s ? s.slice(0, 16) : ''; }
   document.getElementById('edit-checked-out').value = toLocal(loan.checked_out_at);
   document.getElementById('edit-returned').value    = toLocal(loan.returned_at || '');
