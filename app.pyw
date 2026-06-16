@@ -143,7 +143,7 @@ def _resource_path(name: str) -> str:
 THUMB_SIZE = (240, 240)
 # Card size presets: card_w, cover_h, title font pt, sub-text font pt, wrap px
 _CARD_SIZES = {
-    "sm": {"card_w": 180, "cover_h":  90, "title": 12, "sub": 10, "wrap": 145},
+    "sm": {"card_w": 180, "cover_h": 120, "title": 12, "sub": 10, "wrap": 155},
     "md": {"card_w": 260, "cover_h": 200, "title": 16, "sub": 13, "wrap": 210},
     "lg": {"card_w": 340, "cover_h": 260, "title": 18, "sub": 14, "wrap": 285},
 }
@@ -913,60 +913,31 @@ class App(tk.Tk):
         ttk.Button(search_row, text="Clear", style="Quiet.TButton",
                    command=lambda: self.search_var.set("")).pack(side="left", padx=(SP["xs"], 0))
 
-        # Segmented Grid/Table control — pressed segment = blue-050 tint
-        seg_field = ttk.Frame(bar, style="Filter.TFrame")
-        seg_field.pack(side="right")
-        ttk.Label(seg_field, text="VIEW", style="Filter.TLabel").pack(anchor="w")
-        seg_frame = tk.Frame(seg_field, bg=C_SURFACE,
-                             highlightbackground=C_LINE_200, highlightthickness=1, bd=0)
-        seg_frame.pack(anchor="e")
+        # VIEW dropdown
+        view_field = ttk.Frame(bar, style="Filter.TFrame")
+        view_field.pack(side="right")
+        ttk.Label(view_field, text="VIEW", style="Filter.TLabel").pack(anchor="w")
+        self._view_var = tk.StringVar(value="Cards" if self._view_mode == "cards" else "Table")
+        view_cb = ttk.Combobox(view_field, textvariable=self._view_var,
+                               values=["Cards", "Table"], state="readonly", width=7)
+        view_cb.pack()
+        view_cb.bind("<<ComboboxSelected>>",
+                     lambda e: self._set_view(
+                         "cards" if self._view_var.get() == "Cards" else "table"))
 
-        def _view_btn(text, mode):
-            active = self._view_mode == mode
-            btn = tk.Button(
-                seg_frame, text=text,
-                bg=C_BLUE_050 if active else C_SURFACE,
-                fg=C_BLUE_800 if active else C_INK_600,
-                activebackground=C_BLUE_050, activeforeground=C_BLUE_800,
-                relief="flat", bd=0, font=self.FONTS["control"],
-                padx=SP["md"], pady=SP["xs"] + 1, cursor="hand2",
-                command=lambda m=mode: self._set_view(m),
-            )
-            btn.pack(side="left")
-            return btn
-
-        self._btn_cards = _view_btn("⊞  Cards", "cards")
-        tk.Frame(seg_frame, bg=C_LINE_200, width=1).pack(side="left", fill="y")
-        self._btn_table = _view_btn("≡  Table", "table")
-
-        # Card SIZE segmented control — only visible in card view
+        # SIZE dropdown — only visible in card view
         self._size_field = ttk.Frame(bar, style="Filter.TFrame")
         if self._view_mode == "cards":
             self._size_field.pack(side="right", padx=(0, SP["md"]))
         ttk.Label(self._size_field, text="SIZE", style="Filter.TLabel").pack(anchor="w")
-        sz_frame = tk.Frame(self._size_field, bg=C_SURFACE,
-                            highlightbackground=C_LINE_200, highlightthickness=1, bd=0)
-        sz_frame.pack(anchor="e")
-
-        def _size_btn(text, size):
-            active = self._card_size == size
-            btn = tk.Button(
-                sz_frame, text=text,
-                bg=C_BLUE_050 if active else C_SURFACE,
-                fg=C_BLUE_800 if active else C_INK_600,
-                activebackground=C_BLUE_050, activeforeground=C_BLUE_800,
-                relief="flat", bd=0, font=self.FONTS["control"],
-                padx=SP["sm"] + 2, pady=SP["xs"] + 1, cursor="hand2",
-                command=lambda s=size: self._set_card_size(s),
-            )
-            btn.pack(side="left")
-            return btn
-
-        self._btn_sz_sm = _size_btn("S", "sm")
-        tk.Frame(sz_frame, bg=C_LINE_200, width=1).pack(side="left", fill="y")
-        self._btn_sz_md = _size_btn("M", "md")
-        tk.Frame(sz_frame, bg=C_LINE_200, width=1).pack(side="left", fill="y")
-        self._btn_sz_lg = _size_btn("L", "lg")
+        _sz_labels = {"sm": "Small", "md": "Medium", "lg": "Large"}
+        _sz_keys   = {"Small": "sm", "Medium": "md", "Large": "lg"}
+        self._size_var = tk.StringVar(value=_sz_labels[self._card_size])
+        size_cb = ttk.Combobox(self._size_field, textvariable=self._size_var,
+                               values=["Small", "Medium", "Large"], state="readonly", width=7)
+        size_cb.pack()
+        size_cb.bind("<<ComboboxSelected>>",
+                     lambda e: self._set_card_size(_sz_keys[self._size_var.get()]))
 
         # ── filter bar: labelled groups, bottom-aligned ────────────────────────
         fbar = ttk.Frame(parent, style="Filter.TFrame",
@@ -1425,10 +1396,7 @@ class App(tk.Tk):
         self._view_mode = mode
         self.settings["view_mode"] = mode
         config.save(self.settings)
-        for btn, m in ((self._btn_cards, "cards"), (self._btn_table, "table")):
-            active = (m == mode)
-            btn.configure(bg=C_BLUE_050 if active else C_SURFACE,
-                          fg=C_BLUE_800 if active else C_INK_600)
+        self._view_var.set("Cards" if mode == "cards" else "Table")
         if mode == "table":
             self._size_field.pack_forget()
             self._card_frame.pack_forget()
@@ -1445,15 +1413,7 @@ class App(tk.Tk):
         self._card_size = size
         self.settings["card_size"] = size
         config.save(self.settings)
-        sz_btns = [
-            (self._btn_sz_sm, "sm"),
-            (self._btn_sz_md, "md"),
-            (self._btn_sz_lg, "lg"),
-        ]
-        for btn, s in sz_btns:
-            active = s == size
-            btn.configure(bg=C_BLUE_050 if active else C_SURFACE,
-                          fg=C_BLUE_800 if active else C_INK_600)
+        self._size_var.set({"sm": "Small", "md": "Medium", "lg": "Large"}[size])
         self.refresh_games()
 
     def _on_scroll(self, event: tk.Event) -> None:
@@ -2263,7 +2223,9 @@ class App(tk.Tk):
                                    font=self.FONTS["label"])
 
         # ── card body ──────────────────────────────────────────────────────────
-        body = tk.Frame(card, bg=C_SURFACE, padx=SP["lg"], pady=SP["md"])
+        _is_sm = self._card_size == "sm"
+        body = tk.Frame(card, bg=C_SURFACE,
+                        padx=SP["sm"] if _is_sm else SP["lg"], pady=SP["sm"])
         body.pack(fill="both", expand=True)
 
         # Status badge (prototype: 12.5px bold, 4px/10px padding)
@@ -2330,24 +2292,22 @@ class App(tk.Tk):
                        command=lambda g=game: self.on_check_out(g)
                        ).pack(fill="x", pady=(0, SP["xs"]))
 
-        # Secondary 2-column grid:
-        # Overdue → "Details" + "Remind"   (prototype pattern)
-        # Checked out / Available → "Details" + "Log Play"
-        sec = tk.Frame(body, bg=C_SURFACE)
-        sec.pack(fill="x")
-        sec.columnconfigure(0, weight=1)
-        sec.columnconfigure(1, weight=1)
-        ttk.Button(sec, text="Details", style="Ghost.TButton",
-                   command=lambda g=game: self.show_details(g)
-                   ).grid(row=0, column=0, sticky="ew", padx=(0, 2))
-        if overdue:
-            ttk.Button(sec, text="Remind", style="Ghost.TButton",
-                       command=lambda g=game: self._remind_borrower(g)
-                       ).grid(row=0, column=1, sticky="ew", padx=(2, 0))
-        else:
-            ttk.Button(sec, text="Log Play", style="Ghost.TButton",
-                       command=lambda g=game: self.on_log_play(g)
-                       ).grid(row=0, column=1, sticky="ew", padx=(2, 0))
+        if not _is_sm:
+            sec = tk.Frame(body, bg=C_SURFACE)
+            sec.pack(fill="x")
+            sec.columnconfigure(0, weight=1)
+            sec.columnconfigure(1, weight=1)
+            ttk.Button(sec, text="Details", style="Ghost.TButton",
+                       command=lambda g=game: self.show_details(g)
+                       ).grid(row=0, column=0, sticky="ew", padx=(0, 2))
+            if overdue:
+                ttk.Button(sec, text="Remind", style="Ghost.TButton",
+                           command=lambda g=game: self._remind_borrower(g)
+                           ).grid(row=0, column=1, sticky="ew", padx=(2, 0))
+            else:
+                ttk.Button(sec, text="Log Play", style="Ghost.TButton",
+                           command=lambda g=game: self.on_log_play(g)
+                           ).grid(row=0, column=1, sticky="ew", padx=(2, 0))
 
         # Hover: lift card border
         card.bind("<Enter>", lambda e: card.configure(highlightbackground=C_INK_500))
