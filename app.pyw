@@ -692,16 +692,18 @@ class App(tk.Tk):
 
         # ── Notebook tabs (navy-800 strip) ─────────────────────────────────────
         s.configure("TNotebook", background=C_NAVY_800, borderwidth=0,
-                    tabmargins=[2, 5, 2, 0])
+                    tabmargins=[2, 6, 2, 0])
         s.configure("TNotebook.Tab",
-            background=C_NAVY_800, foreground="#C7D6E6",
-            font=self.FONTS["control"],
-            padding=[self.SP["lg"], self.SP["sm"] + 1],
+            background=C_NAVY_800, foreground="#8EA8BE",
+            font=("Segoe UI", 9),
+            padding=[self.SP["sm"], self.SP["xs"]],
             focuscolor="")
         s.map("TNotebook.Tab",
             background=[("selected", C_BG), ("active", "#1E4A73")],
             foreground=[("selected", C_NAVY_900), ("active", C_SURFACE)],
-            expand=[("selected", [1, 2, 1, 0])])
+            font=[("selected", self.FONTS["control"])],
+            padding=[("selected", [self.SP["xl"], self.SP["sm"] + 1])],
+            expand=[("selected", [1, 3, 1, 0])])
 
         # ── Entry / Combobox ───────────────────────────────────────────────────
         s.configure("TEntry",
