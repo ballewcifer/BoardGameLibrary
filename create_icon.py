@@ -1,55 +1,89 @@
-"""Generate icon.ico — a blue meeple with gold glasses.
+"""Generate icon.ico — a sky-blue meeple with gold glasses and dark navy outline.
 
 Run directly:
     python create_icon.py
 """
 from pathlib import Path
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
 
-BLUE  = (24,  85, 184, 255)
-GOLD  = (220, 180,  40, 255)
-CLEAR = (  0,   0,   0,   0)
+LIGHT_BLUE = (91,  184, 232)
+DARK       = (22,   38,  68)
+GOLD       = (220, 180,  40)
+CLEAR      = (0,     0,   0, 0)
 
 ICON_SIZES = [256, 128, 64, 48, 32, 16]
 
 
 def _render(size: int) -> Image.Image:
-    img = Image.new("RGBA", (size, size), CLEAR)
-    d   = ImageDraw.Draw(img)
-    sc  = size / 256.0
+    SCALE = 4
+    R = size * SCALE
+    k = R / 256
 
-    def e(x1, y1, x2, y2, **kw):
-        d.ellipse([x1*sc, y1*sc, x2*sc, y2*sc], **kw)
+    # ── draw meeple shapes in light blue (overlapping → no gaps) ────────────
+    layer = Image.new("RGBA", (R, R), CLEAR)
+    d     = ImageDraw.Draw(layer)
+    LB    = (*LIGHT_BLUE, 255)
 
-    def p(pts, **kw):
-        d.polygon([(x*sc, y*sc) for x, y in pts], **kw)
+    def e(x1, y1, x2, y2):
+        d.ellipse([x1*k, y1*k, x2*k, y2*k], fill=LB)
 
-    def line(pts, **kw):
-        d.line([(x*sc, y*sc) for x, y in pts], **kw)
+    def p(pts):
+        d.polygon([(x*k, y*k) for x, y in pts], fill=LB)
 
-    # ── meeple body ──────────────────────────────────────────────────────────
-    e(84, 14, 172, 102, fill=BLUE)           # head
-    e(24,  86,  96, 150, fill=BLUE)          # left arm
-    e(160,  86, 232, 150, fill=BLUE)         # right arm
-    p([                                       # torso + legs
-        ( 82,  98), (174,  98),
-        (198, 168), (166, 168), (166, 224), (134, 224),
-        (134, 168), (122, 168), (122, 224), ( 90, 224),
-        ( 90, 168), ( 58, 168),
-    ], fill=BLUE)
+    # Head
+    e(84,  6, 172, 94)
+    # Neck bridge — fills the concave gap between head bottom and arm tops
+    e(100, 80, 156, 108)
+    # Arms — moderate ovals at shoulder level
+    e( 28, 90, 100, 148)   # left  arm
+    e(156, 90, 228, 148)   # right arm
+    # Torso: widens to arm level, narrows to waist, flares for hip, V between legs
+    p([
+        ( 94,  92), (162,  92),
+        (176, 148),
+        (170, 166), (158, 180),
+        (164, 198), (170, 212),
+        (170, 252), (142, 252),
+        (128, 194), (114, 252), ( 86, 252),
+        ( 86, 212), ( 92, 198),
+        ( 98, 180), ( 86, 166), ( 80, 148),
+    ])
+
+    # ── dark-navy outline via alpha dilation ─────────────────────────────────
+    ow = max(2, size // 14)
+    alpha   = layer.split()[3]
+    dilated = alpha
+    for _ in range(ow * SCALE):
+        dilated = dilated.filter(ImageFilter.MaxFilter(3))
+    navy = Image.new("RGBA", (R, R), CLEAR)
+    navy.paste(Image.new("RGBA", (R, R), (*DARK, 255)), mask=dilated)
+
+    out = Image.alpha_composite(navy, layer)
+    out = out.resize((size, size), Image.LANCZOS)
 
     # ── gold glasses (≥ 32 px) ───────────────────────────────────────────────
     if size >= 32:
-        gw = max(1, int(3 * sc))
-        bw = max(1, int(2 * sc))
-        e( 95, 53, 123, 81, outline=GOLD, width=gw)        # left lens
-        e(133, 53, 161, 81, outline=GOLD, width=gw)        # right lens
-        line([(123, 67), (133, 67)], fill=GOLD, width=bw)  # bridge
-        if size >= 48:
-            line([(95,  60), ( 80, 54)], fill=GOLD, width=bw)  # left temple
-            line([(161, 60), (176, 54)], fill=GOLD, width=bw)  # right temple
+        d2  = ImageDraw.Draw(out)
+        gsc = size / 256
+        gw  = max(1, round(2.5 * gsc))
+        bw  = max(1, round(2   * gsc))
 
-    return img
+        def ge(x1, y1, x2, y2):
+            d2.ellipse([x1*gsc, y1*gsc, x2*gsc, y2*gsc],
+                       outline=(*GOLD, 255), width=gw)
+
+        def gl(pts):
+            d2.line([(x*gsc, y*gsc) for x, y in pts],
+                    fill=(*GOLD, 255), width=bw)
+
+        ge( 90, 36, 118, 64)         # left  lens
+        ge(138, 36, 166, 64)         # right lens
+        gl([(118, 50), (138, 50)])   # bridge
+        if size >= 48:
+            gl([( 90, 44), ( 74, 36)])   # left  temple
+            gl([(166, 44), (182, 36)])   # right temple
+
+    return out
 
 
 def make_icon(dest: Path) -> None:
