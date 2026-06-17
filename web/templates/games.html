@@ -28,6 +28,7 @@
     <button type="submit" class="btn btn-primary btn-sm">Filter</button>
   </form>
 
+  <button class="btn btn-secondary btn-sm" onclick="openModal('modal-random')" aria-label="Pick a random game">🎲 Surprise Me</button>
   <button class="btn btn-secondary btn-sm" onclick="openModal('modal-add-game')" aria-label="Add game from BGG">+ Add Game</button>
 </div>
 
@@ -61,6 +62,9 @@
     </select>
     {% endif %}
   </form>
+
+  <button class="btn btn-outline btn-sm" onclick="openModal('modal-clear-collections')"
+          aria-label="Clear collections">Clear…</button>
 </div>
 {% endif %}
 
@@ -139,5 +143,121 @@
     </div>
   </div>
 </div>
+
+<!-- ── Random game (Surprise Me) modal ───────────────────────────────────── -->
+<div id="modal-random" class="modal-backdrop" hidden>
+  <div class="modal">
+    <div class="modal-header">
+      <h3>🎲 Pick a Random Game</h3>
+      <button class="modal-close" onclick="closeModal('modal-random')">✕</button>
+    </div>
+    <div class="modal-body">
+      <label class="form-label">Players</label>
+      <select id="rnd-players" class="form-control">
+        <option value="Any">Any</option>
+        <option>1</option><option>2</option><option>3</option><option>4</option>
+        <option>5</option><option>6</option><option>7</option><option value="8+">8+</option>
+      </select>
+
+      <label class="form-label mt-sm">Max play time</label>
+      <select id="rnd-time" class="form-control">
+        <option value="Any">Any</option>
+        <option value="30">≤ 30 min</option>
+        <option value="60">≤ 60 min</option>
+        <option value="90">≤ 90 min</option>
+        <option value="120">≤ 120 min</option>
+      </select>
+
+      <label class="form-label mt-sm">Complexity</label>
+      <select id="rnd-complexity" class="form-control">
+        <option value="Any">Any</option>
+        <option value="light">Light (1–2)</option>
+        <option value="medium">Medium (2–3)</option>
+        <option value="heavy">Heavy (3–5)</option>
+      </select>
+
+      <label class="filter-check mt-sm">
+        <input type="checkbox" id="rnd-available" checked> Only available (not checked out)
+      </label>
+
+      <div id="rnd-result" class="card mt" style="display:none; padding:12px"></div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-random')">Close</button>
+        <button type="button" class="btn btn-primary" onclick="pickRandomGame()">🎲 Pick</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% if multi %}
+<!-- ── Clear collections modal ───────────────────────────────────────────── -->
+<div id="modal-clear-collections" class="modal-backdrop" hidden>
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Clear Collections</h3>
+      <button class="modal-close" onclick="closeModal('modal-clear-collections')">✕</button>
+    </div>
+    <form method="post" action="/collections/clear"
+          onsubmit="return confirm('Clear the selected collections? Games kept only by them will be permanently deleted, along with their play and loan history.');">
+      <div class="modal-body">
+        <p class="muted" style="font-size:.85rem;margin-top:0">
+          A game is deleted only if no kept collection still has it. Members are kept.
+        </p>
+        {% for col in collections %}
+        <label class="filter-check" style="display:block;margin:6px 0">
+          <input type="checkbox" name="collection_ids" value="{{ col.id }}">
+          {{ col.name }} · {{ col.game_count }} game{{ 's' if col.game_count != 1 else '' }}
+        </label>
+        {% endfor %}
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-clear-collections')">Cancel</button>
+        <button type="submit" class="btn btn-danger">Clear Selected</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+<script>
+function pickRandomGame() {
+  const params = new URLSearchParams({
+    players:    document.getElementById('rnd-players').value,
+    max_time:   document.getElementById('rnd-time').value,
+    complexity: document.getElementById('rnd-complexity').value,
+    available:  document.getElementById('rnd-available').checked ? '1' : '0',
+    collection: {{ (active_collection if active_collection is not none else 'all') | tojson }},
+  });
+  const box = document.getElementById('rnd-result');
+  box.style.display = 'block';
+  box.innerHTML = '<span class="muted">Picking…</span>';
+  fetch('/api/random_game?' + params.toString())
+    .then(r => r.json())
+    .then(d => {
+      if (!d.game) {
+        box.innerHTML = '<strong>No games match.</strong><br><span class="muted">Try loosening the criteria.</span>';
+        return;
+      }
+      const g = d.game;
+      const meta = [
+        g.year,
+        (g.min_players && g.max_players) ? (g.min_players + '–' + g.max_players + ' players') : null,
+        (g.playing_time || g.max_playtime) ? ((g.playing_time || g.max_playtime) + ' min') : null,
+        g.weight ? ('Complexity ' + Number(g.weight).toFixed(1) + '/5') : null,
+        g.checked_out ? '⬤ checked out' : null,
+      ].filter(Boolean).join(' · ');
+      box.innerHTML =
+        '<div style="font-weight:700;font-size:1.05rem">' + escapeHtml(g.name) + '</div>' +
+        '<div class="muted" style="font-size:.85rem;margin:4px 0 8px">' + escapeHtml(meta) + '</div>' +
+        '<a class="btn btn-primary btn-sm" href="/games/' + g.bgg_id + '">Open</a>';
+    })
+    .catch(() => { box.innerHTML = '<span class="text-danger">Could not pick a game.</span>'; });
+}
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => (
+    {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+</script>
 
 {% endblock %}

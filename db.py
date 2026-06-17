@@ -279,6 +279,39 @@ def delete_collection(c: sqlite3.Connection, collection_id: int) -> None:
     c.execute("DELETE FROM collections WHERE id = ?", (collection_id,))
 
 
+def clear_collections(c: sqlite3.Connection, collection_ids: list[int]) -> list[int]:
+    """Delete the given collections and any games left orphaned by the removal.
+
+    A game shared with a collection that is *not* being cleared is kept; a game
+    that ends up in no collection at all is deleted (its loans/plays cascade).
+    Returns the bgg_ids of the deleted games so callers can drop cached images.
+    """
+    ids = [int(i) for i in collection_ids]
+    if not ids:
+        return []
+    qmarks = ",".join("?" * len(ids))
+    affected = [
+        r["game_id"] for r in c.execute(
+            f"SELECT DISTINCT game_id FROM game_collections "
+            f"WHERE collection_id IN ({qmarks})", ids,
+        )
+    ]
+    # Removing the collections cascades their game_collections links.
+    c.execute(f"DELETE FROM collections WHERE id IN ({qmarks})", ids)
+
+    orphaned = [
+        gid for gid in affected
+        if not c.execute(
+            "SELECT 1 FROM game_collections WHERE game_id = ? LIMIT 1", (gid,)
+        ).fetchone()
+    ]
+    if orphaned:
+        om = ",".join("?" * len(orphaned))
+        # loans/plays cascade via ON DELETE CASCADE (foreign_keys is ON).
+        c.execute(f"DELETE FROM games WHERE bgg_id IN ({om})", orphaned)
+    return orphaned
+
+
 def replace_collection_games(
     c: sqlite3.Connection, collection_id: int, game_ids: list[int]
 ) -> None:

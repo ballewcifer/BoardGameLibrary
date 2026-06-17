@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import random
 import re
 import shutil
 import sys
@@ -813,6 +814,7 @@ class App(tk.Tk):
         lib_menu.add_command(label="Sync from BGG…", command=self.on_import_from_bgg)
         lib_menu.add_separator()
         lib_menu.add_command(label="Add Game…", command=self.on_add_game)
+        lib_menu.add_command(label="Pick a Random Game…", command=self.on_random_game)
 
         # ── View ──────────────────────────────────────────────────────────────
         view_menu = tk.Menu(menubar)
@@ -3030,6 +3032,16 @@ class App(tk.Tk):
         win.grab_set()
 
     def on_clear_collection(self) -> None:
+        # With 2+ collections, let the user choose which to clear instead of
+        # wiping everything.
+        with db.connect() as c:
+            collections = db.list_collections(c)
+        if len(collections) >= 2:
+            self._clear_collection_picker(collections)
+            return
+        self._clear_entire_library()
+
+    def _clear_entire_library(self) -> None:
         if not messagebox.askyesno(
             "Clear collection",
             "This will permanently delete ALL games, play logs, and loan history.\n\n"
@@ -3049,6 +3061,7 @@ class App(tk.Tk):
             c.execute("DELETE FROM plays")
             c.execute("DELETE FROM loans")
             c.execute("DELETE FROM games")
+            c.execute("DELETE FROM collections")
         # Remove all cached images
         try:
             if IMAGES_DIR.exists():
@@ -3059,8 +3072,88 @@ class App(tk.Tk):
         self._image_cache.clear()
         self._gradient_cache.clear()
         self._placeholder_img = None
+        self._active_collection = None
+        self._collection_sig = None
         self.refresh_all()
         self.status("Collection cleared.")
+
+    def _clear_collection_picker(self, collections: list) -> None:
+        """Dialog to choose which collection(s) to clear (2+ collections)."""
+        win = tk.Toplevel(self)
+        win.title("Clear Collections")
+        win.transient(self)
+        win.resizable(False, False)
+        win.configure(bg=C_BG)
+
+        frame = ttk.Frame(win, padding=16)
+        frame.pack(fill="both", expand=True)
+
+        ttk.Label(frame, text="Clear collections",
+                  font=("Segoe UI", 12, "bold")).pack(anchor="w")
+        ttk.Label(
+            frame,
+            text=("Pick the collections to clear. A game is deleted only if it is\n"
+                  "not kept by another collection. Play and loan history for\n"
+                  "deleted games is removed too. Members are kept."),
+            foreground=C_INK_600, font=("Segoe UI", 8), justify="left",
+        ).pack(anchor="w", pady=(2, 10))
+
+        vars_by_id: dict[int, tk.BooleanVar] = {}
+        for col in collections:
+            v = tk.BooleanVar(value=False)
+            vars_by_id[col["id"]] = v
+            ttk.Checkbutton(
+                frame,
+                text=f'{col["name"]}  ·  {col["game_count"]} game'
+                     f'{"s" if col["game_count"] != 1 else ""}',
+                variable=v, style="Filter.TCheckbutton",
+            ).pack(anchor="w", pady=1)
+
+        def do_clear() -> None:
+            sel = [cid for cid, v in vars_by_id.items() if v.get()]
+            if not sel:
+                messagebox.showinfo("Clear Collections",
+                                    "Select at least one collection to clear.",
+                                    parent=win)
+                return
+            names = [c["name"] for c in collections if c["id"] in sel]
+            if not messagebox.askyesno(
+                "Clear collections",
+                f"Permanently clear {len(sel)} collection"
+                f"{'s' if len(sel) != 1 else ''}?\n\n• " + "\n• ".join(names)
+                + "\n\nGames kept only by these collections will be deleted, "
+                  "along with their play and loan history.\nThis cannot be undone.",
+                icon="warning", parent=win,
+            ):
+                return
+            with db.connect() as c:
+                deleted = db.clear_collections(c, sel)
+            # Drop cached image files for deleted games
+            for gid in deleted:
+                for p in IMAGES_DIR.glob(f"{gid}.*"):
+                    try:
+                        p.unlink()
+                    except OSError:
+                        pass
+            self._image_cache.clear()
+            self._gradient_cache.clear()
+            self._placeholder_img = None
+            self._active_collection = None
+            self._collection_sig = None
+            win.destroy()
+            self.refresh_all()
+            self.status(
+                f"Cleared {len(sel)} collection{'s' if len(sel) != 1 else ''}; "
+                f"deleted {len(deleted)} game{'s' if len(deleted) != 1 else ''}."
+            )
+
+        btn_row = ttk.Frame(frame)
+        btn_row.pack(anchor="e", pady=(16, 0))
+        ttk.Button(btn_row, text="Cancel", style="Ghost.TButton",
+                   command=win.destroy).pack(side="left", padx=(0, 6))
+        ttk.Button(btn_row, text="Clear Selected", style="Danger.TButton",
+                   command=do_clear).pack(side="left")
+        win.grab_set()
 
     # ---------- about ----------
 
@@ -3547,6 +3640,148 @@ class App(tk.Tk):
             kwargs={"force": True},
             daemon=True,
         ).start()
+
+    def on_random_game(self) -> None:
+        """Pick a random game from the library, filtered by simple criteria."""
+        win = tk.Toplevel(self)
+        win.title("Pick a Random Game")
+        win.transient(self)
+        win.resizable(False, False)
+        win.configure(bg=C_BG)
+
+        frame = ttk.Frame(win, padding=16)
+        frame.pack(fill="both", expand=True)
+
+        ttk.Label(frame, text="🎲  Pick a Random Game",
+                  font=("Segoe UI", 13, "bold")).grid(row=0, column=0, columnspan=2,
+                                                       sticky="w", pady=(0, 10))
+
+        # ── criteria ──────────────────────────────────────────────────────────
+        players_var    = tk.StringVar(value="Any")
+        time_var       = tk.StringVar(value="Any")
+        complexity_var = tk.StringVar(value="Any")
+        available_var  = tk.BooleanVar(value=True)
+
+        def crit_row(r, label, var, values):
+            ttk.Label(frame, text=label).grid(row=r, column=0, sticky="w", pady=3, padx=(0, 10))
+            cb = ttk.Combobox(frame, textvariable=var, values=values,
+                              state="readonly", width=16)
+            cb.grid(row=r, column=1, sticky="w", pady=3)
+
+        crit_row(1, "Players:", players_var,
+                 ["Any", "1", "2", "3", "4", "5", "6", "7", "8+"])
+        crit_row(2, "Max play time:", time_var,
+                 ["Any", "≤ 30 min", "≤ 60 min", "≤ 90 min", "≤ 120 min"])
+        crit_row(3, "Complexity:", complexity_var,
+                 ["Any", "Light (1–2)", "Medium (2–3)", "Heavy (3–5)"])
+        ttk.Checkbutton(frame, text="Only games that are available (not checked out)",
+                        variable=available_var,
+                        style="Filter.TCheckbutton").grid(row=4, column=0, columnspan=2,
+                                                          sticky="w", pady=(6, 0))
+
+        ttk.Separator(frame, orient="horizontal").grid(
+            row=5, column=0, columnspan=2, sticky="ew", pady=12)
+
+        # ── result area ───────────────────────────────────────────────────────
+        result_name = tk.StringVar(value="Set your criteria, then press Pick.")
+        result_meta = tk.StringVar(value="")
+        name_lbl = ttk.Label(frame, textvariable=result_name,
+                             font=("Segoe UI", 12, "bold"), wraplength=320, justify="left")
+        name_lbl.grid(row=6, column=0, columnspan=2, sticky="w")
+        meta_lbl = ttk.Label(frame, textvariable=result_meta, foreground=C_INK_600,
+                             font=("Segoe UI", 9), wraplength=320, justify="left")
+        meta_lbl.grid(row=7, column=0, columnspan=2, sticky="w", pady=(2, 0))
+
+        picked: list = [None]   # holds the current game row
+
+        def _max_time_limit() -> Optional[int]:
+            t = time_var.get()
+            return {"≤ 30 min": 30, "≤ 60 min": 60,
+                    "≤ 90 min": 90, "≤ 120 min": 120}.get(t)
+
+        def _matches(g, open_ids) -> bool:
+            if available_var.get() and g["bgg_id"] in open_ids:
+                return False
+            pv = players_var.get()
+            if pv != "Any":
+                mn, mx = g["min_players"], g["max_players"]
+                if pv == "8+":
+                    if not mx or mx < 8:
+                        return False
+                else:
+                    n = int(pv)
+                    lo = mn if mn else 1
+                    hi = mx if mx else mn
+                    if not hi or not (lo <= n <= hi):
+                        return False
+            lim = _max_time_limit()
+            if lim is not None:
+                pt = g["playing_time"] or g["max_playtime"] or g["min_playtime"]
+                if pt is None or pt > lim:
+                    return False
+            cv = complexity_var.get()
+            if cv != "Any":
+                w = g["weight"]
+                if w is None:
+                    return False
+                if cv == "Light (1–2)" and not (1.0 <= w <= 2.0):
+                    return False
+                if cv == "Medium (2–3)" and not (2.0 < w <= 3.0):
+                    return False
+                if cv == "Heavy (3–5)" and not (w > 3.0):
+                    return False
+            return True
+
+        def pick() -> None:
+            with db.connect() as c:
+                games = db.list_games(c)
+                open_ids = {
+                    r["game_id"] for r in c.execute(
+                        "SELECT game_id FROM loans WHERE returned_at IS NULL")
+                }
+            pool = [g for g in games
+                    if self._collection_pass(g["bgg_id"]) and _matches(g, open_ids)]
+            if not pool:
+                picked[0] = None
+                result_name.set("No games match those criteria.")
+                result_meta.set("Try loosening the filters above.")
+                open_btn.state(["disabled"])
+                return
+            g = random.choice(pool)
+            picked[0] = g
+            result_name.set(g["name"])
+            bits = []
+            if g["year"]:
+                bits.append(str(g["year"]))
+            if g["min_players"] and g["max_players"]:
+                bits.append(f'{g["min_players"]}–{g["max_players"]} players')
+            pt = g["playing_time"] or g["max_playtime"]
+            if pt:
+                bits.append(f"{pt} min")
+            if g["weight"]:
+                bits.append(f'Complexity {g["weight"]:.1f}/5')
+            if g["bgg_id"] in open_ids:
+                bits.append("⬤ checked out")
+            result_meta.set(" · ".join(bits))
+            open_btn.state(["!disabled"])
+
+        def open_details() -> None:
+            if picked[0] is not None:
+                win.destroy()
+                self.show_details(picked[0])
+
+        # ── buttons ───────────────────────────────────────────────────────────
+        btn_row = ttk.Frame(frame)
+        btn_row.grid(row=8, column=0, columnspan=2, sticky="e", pady=(16, 0))
+        ttk.Button(btn_row, text="Close", style="Ghost.TButton",
+                   command=win.destroy).pack(side="left", padx=(0, 6))
+        open_btn = ttk.Button(btn_row, text="Open Details", style="Ghost.TButton",
+                              command=open_details)
+        open_btn.pack(side="left", padx=(0, 6))
+        open_btn.state(["disabled"])
+        ttk.Button(btn_row, text="🎲  Pick", command=pick).pack(side="left")
+
+        win.grab_set()
 
     def on_add_game(self) -> None:
         """Search BGG by title, pick a result, then confirm/edit before saving."""

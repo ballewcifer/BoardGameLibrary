@@ -7,6 +7,7 @@ Then open  http://localhost:5000  on any device on the same Wi-Fi.
 from __future__ import annotations
 
 import os
+import random
 import sys
 import threading
 from datetime import datetime
@@ -18,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import db
 import bgg as _bgg
 import config as _config
+from paths import IMAGES_DIR
 
 from flask import (
     Flask, render_template, request, redirect, url_for,
@@ -183,6 +185,93 @@ def games():
                            active_collection=active_cid,
                            compare=compare,
                            compare_other=other_cid)
+
+
+@app.route("/api/random_game")
+def api_random_game():
+    """Return a random game matching the given criteria, or {game: null}."""
+    players    = request.args.get("players", "Any")
+    max_time   = request.args.get("max_time", "Any")     # 30|60|90|120|Any
+    complexity = request.args.get("complexity", "Any")   # light|medium|heavy|Any
+    available  = request.args.get("available", "1") == "1"
+    collection = request.args.get("collection", "all")
+
+    with db.connect() as c:
+        rows        = db.list_games(c)
+        open_loans  = {r["game_id"] for r in db.currently_checked_out(c)}
+        collections = [r for r in db.list_collections(c) if r["game_count"] > 0]
+        gc_map      = db.game_collection_map(c)
+
+    coll_ids = {col["id"] for col in collections}
+    multi    = len(collections) >= 2
+    try:
+        active_cid = int(collection) if collection not in ("", "all") else None
+    except ValueError:
+        active_cid = None
+    if active_cid not in coll_ids:
+        active_cid = None
+
+    def matches(g) -> bool:
+        if available and g["bgg_id"] in open_loans:
+            return False
+        if multi and active_cid is not None \
+                and active_cid not in gc_map.get(g["bgg_id"], set()):
+            return False
+        if players != "Any":
+            mn, mx = g["min_players"], g["max_players"]
+            if players == "8+":
+                if not mx or mx < 8:
+                    return False
+            else:
+                n = int(players)
+                lo = mn if mn else 1
+                hi = mx if mx else mn
+                if not hi or not (lo <= n <= hi):
+                    return False
+        if max_time != "Any":
+            lim = int(max_time)
+            pt = g["playing_time"] or g["max_playtime"] or g["min_playtime"]
+            if pt is None or pt > lim:
+                return False
+        if complexity != "Any":
+            w = g["weight"]
+            if w is None:
+                return False
+            if complexity == "light"  and not (1.0 <= w <= 2.0):
+                return False
+            if complexity == "medium" and not (2.0 < w <= 3.0):
+                return False
+            if complexity == "heavy"  and not (w > 3.0):
+                return False
+        return True
+
+    pool = [g for g in rows if matches(g)]
+    if not pool:
+        return jsonify({"game": None})
+    g  = random.choice(pool)
+    gd = _row_to_dict(g)
+    gd["checked_out"] = g["bgg_id"] in open_loans
+    return jsonify({"game": gd})
+
+
+@app.route("/collections/clear", methods=["POST"])
+def clear_collections():
+    """Clear the selected collections; games kept only by them are deleted."""
+    ids = [int(i) for i in request.form.getlist("collection_ids") if i.isdigit()]
+    if not ids:
+        flash("No collections selected.", "error")
+        return redirect(url_for("games"))
+    with db.connect() as c:
+        deleted = db.clear_collections(c, ids)
+    for gid in deleted:
+        for p in IMAGES_DIR.glob(f"{gid}.*"):
+            try:
+                p.unlink()
+            except OSError:
+                pass
+    flash(f"Cleared {len(ids)} collection{'s' if len(ids) != 1 else ''}; "
+          f"deleted {len(deleted)} game{'s' if len(deleted) != 1 else ''}.", "success")
+    return redirect(url_for("games"))
 
 
 @app.route("/games/<int:bgg_id>")
