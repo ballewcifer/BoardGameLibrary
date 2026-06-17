@@ -11,6 +11,7 @@ fetchable without authentication.
 from __future__ import annotations
 
 import csv
+import html as _html
 import re
 import ssl
 import time
@@ -20,6 +21,18 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable, Optional
+
+def _unescape(s: Optional[str]) -> Optional[str]:
+    """Decode HTML entities, twice — BGG double-encodes them in its XML
+    (e.g. "Aeon&amp;#039;s End" → ElementTree → "Aeon&#039;s End" → "Aeon's End").
+    The second pass is a no-op once the text is clean."""
+    if not s:
+        return s
+    out = _html.unescape(s)
+    if "&" in out:
+        out = _html.unescape(out)
+    return out
+
 
 BASE = "https://boardgamegeek.com/xmlapi2"
 USER_AGENT = "BoardGameLibrary/0.1 (personal-use)"
@@ -225,12 +238,12 @@ def fetch_collection(
 
         entries.append(CollectionEntry(
             bgg_id=bgg_id,
-            name=(name_el.text or "").strip() if name_el is not None else f"#{bgg_id}",
+            name=_unescape((name_el.text or "").strip()) if name_el is not None else f"#{bgg_id}",
             year=_i(year_el.text) if year_el is not None and year_el.text else None,
             image_url=_maybe_protocol(image_el.text) if image_el is not None else None,
             thumbnail_url=_maybe_protocol(thumb_el.text) if thumb_el is not None else None,
             my_rating=_f(my_rating) if my_rating not in ("N/A", None) else None,
-            my_comment=(comment_el.text or "").strip() if comment_el is not None and comment_el.text else None,
+            my_comment=_unescape((comment_el.text or "").strip()) if comment_el is not None and comment_el.text else None,
             own=own,
             min_players=min_players,
             max_players=max_players,
@@ -315,7 +328,7 @@ def _parse_thing(item: ET.Element) -> GameDetails:
     name = ""
     for n in item.findall("name"):
         if n.get("type") == "primary":
-            name = n.get("value", "")
+            name = _unescape(n.get("value", "")) or ""
             break
     year_el = item.find("yearpublished")
     image_el = item.find("image")
@@ -343,7 +356,7 @@ def _parse_thing(item: ET.Element) -> GameDetails:
     publishers: list[str] = []
     for link in item.findall("link"):
         ltype = link.get("type", "")
-        value = link.get("value", "")
+        value = _unescape(link.get("value", "")) or ""
         if ltype == "boardgamecategory":
             categories.append(value)
         elif ltype == "boardgamemechanic":
@@ -369,7 +382,7 @@ def _parse_thing(item: ET.Element) -> GameDetails:
         min_age=_i(minage.get("value")) if minage is not None else None,
         weight=weight,
         avg_rating=avg,
-        description=(desc_el.text or "").strip() if desc_el is not None and desc_el.text else None,
+        description=_unescape((desc_el.text or "").strip()) if desc_el is not None and desc_el.text else None,
         categories=categories,
         mechanics=mechanics,
         designers=designers,
@@ -458,7 +471,7 @@ def search_games(
         name = ""
         for n in item.findall("name"):
             if n.get("type") == "primary":
-                name = n.get("value", "").strip()
+                name = _unescape(n.get("value", "").strip()) or ""
                 break
         if not name:
             continue
@@ -509,20 +522,20 @@ def fetch_plays(
                 bgg_id = int(bgg_id_str)
             except ValueError:
                 continue
-            game_name = item_el.get("name", "")
+            game_name = _unescape(item_el.get("name", "")) or ""
             played_at = play.get("date", "")
             quantity  = int(play.get("quantity", "1") or "1")
             comments_el = play.find("comments")
-            notes = (comments_el.text or "").strip() if comments_el is not None else ""
+            notes = _unescape((comments_el.text or "").strip()) if comments_el is not None else ""
             players_el = play.find("players")
             player_names = ""
             if players_el is not None:
                 names = [
-                    p.get("name", "").strip()
+                    _unescape(p.get("name", "").strip())
                     for p in players_el.findall("player")
                     if p.get("name", "").strip()
                 ]
-                player_names = ", ".join(names)
+                player_names = ", ".join(n for n in names if n)
             for _ in range(max(quantity, 1)):
                 plays.append({
                     "bgg_id":       bgg_id,
@@ -876,7 +889,7 @@ def fetch_game_details_from_page(bgg_id: int, *, fallback_name: str = "") -> Opt
         item = preload.get("item", preload)
 
         # ── basic fields ──────────────────────────────────────────────────────
-        g_name = item.get("name") or fallback_name or f"#{bgg_id}"
+        g_name = _unescape(item.get("name")) or fallback_name or f"#{bgg_id}"
         g_year = item.get("yearpublished")
         g_min_players  = item.get("minplayers")
         g_max_players  = item.get("maxplayers")
@@ -888,7 +901,7 @@ def fetch_game_details_from_page(bgg_id: int, *, fallback_name: str = "") -> Opt
         # Description: strip HTML tags and unescape HTML entities
         raw_desc = item.get("description") or ""
         raw_desc = re.sub(r"<[^>]+>", "", raw_desc).strip()
-        g_description = _html.unescape(raw_desc) or None
+        g_description = _unescape(raw_desc) or None
 
         # Expansion flag
         is_expansion = item.get("type", "boardgame") == "boardgameexpansion"
