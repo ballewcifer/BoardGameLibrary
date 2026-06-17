@@ -1,7 +1,8 @@
 """Generate icon.icns for the macOS build of Board Game Library.
 
-Uses the same dice renderer as create_icon.py, then calls macOS's
-built-in `iconutil` to assemble the .icns file from a set of PNGs.
+Uses the same librarian-meeple source artwork as create_icon.py (rounded
+corners), then calls macOS's built-in `iconutil` to assemble the .icns file
+from a set of PNGs.
 
 Run on a Mac (or in the GitHub Actions macOS runner):
     python create_icon_mac.py
@@ -13,8 +14,8 @@ import sys
 import tempfile
 from pathlib import Path
 
-# Re-use the renderer from the Windows icon script.
-from create_icon import _render
+# Re-use the rounded-image helper from the Windows icon script.
+from create_icon import SOURCE, _rounded
 
 from PIL import Image
 
@@ -43,14 +44,14 @@ def make_icns(dest: Path) -> None:
     if not shutil.which("iconutil"):
         raise RuntimeError("iconutil not found — is Xcode Command Line Tools installed?")
 
+    rounded = _rounded(Image.open(dest.parent / SOURCE))
+
     with tempfile.TemporaryDirectory(suffix=".iconset") as tmp:
         iconset = Path(tmp)
 
         for logical, scale in ICONSET_SPECS:
             pixel_size = logical * scale
-            # 4× supersampling for smooth edges
-            big   = _render(pixel_size * 4)
-            frame = big.resize((pixel_size, pixel_size), Image.LANCZOS)
+            frame = rounded.resize((pixel_size, pixel_size), Image.LANCZOS)
 
             if scale == 1:
                 fname = f"icon_{logical}x{logical}.png"
