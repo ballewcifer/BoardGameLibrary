@@ -945,22 +945,6 @@ class App(tk.Tk):
         size_cb.bind("<<ComboboxSelected>>",
                      lambda e: self._set_card_size(_sz_keys[self._size_var.get()]))
 
-        # SELECTED bulk-actions — only visible in table view (multi-select).
-        self._bulk_field = ttk.Frame(bar, style="Filter.TFrame")
-        if self._view_mode == "table":
-            self._bulk_field.pack(side="right", padx=(0, SP["md"]))
-        ttk.Label(self._bulk_field, text="SELECTED", style="Filter.TLabel").pack(anchor="w")
-        _bulk_row = ttk.Frame(self._bulk_field, style="Filter.TFrame")
-        _bulk_row.pack(anchor="w")
-        ttk.Button(_bulk_row, text="★ Favorite", style="Ghost.TButton",
-                   command=self._bulk_favorite).pack(side="left", padx=(0, 2))
-        ttk.Button(_bulk_row, text="☆ Unfavorite", style="Ghost.TButton",
-                   command=self._bulk_unfavorite).pack(side="left", padx=2)
-        ttk.Button(_bulk_row, text="Tag…", style="Ghost.TButton",
-                   command=self._bulk_tag).pack(side="left", padx=2)
-        ttk.Button(_bulk_row, text="Delete", style="Danger.TButton",
-                   command=self._bulk_delete).pack(side="left", padx=2)
-
         # ── filter bar: labelled groups, bottom-aligned ────────────────────────
         fbar = ttk.Frame(parent, style="Filter.TFrame",
                          padding=(SP["lg"], SP["xs"], SP["lg"], SP["sm"]))
@@ -1342,20 +1326,20 @@ class App(tk.Tk):
 
     def _build_table_widget(self, parent: ttk.Frame) -> None:
         cols = ("fav", "insert", "name", "year", "players", "time", "weight", "rating", "best", "status", "plays")
-        self.games_tree = ttk.Treeview(parent, columns=cols, show="headings", selectmode="extended")
+        self.games_tree = ttk.Treeview(parent, columns=cols, show="headings", selectmode="browse")
 
         col_defs = [
             ("fav",     "★",           34,  "center"),
             ("insert",  "📦",          34,  "center"),
             ("name",    "Name",        260, "w"     ),
-            ("year",    "Year",         54, "center"),
-            ("players", "Players",      72, "center"),
-            ("time",    "Time",         84, "center"),
-            ("weight",  "Complexity",   84, "center"),
-            ("rating",  "BGG ★",        62, "center"),
-            ("best",    "Best At",      72, "center"),
-            ("status",  "Status",      140, "center"),
-            ("plays",   "Plays",        50, "center"),
+            ("year",    "Year",         56, "center"),
+            ("players", "Players",      88, "center"),
+            ("time",    "Time",         92, "center"),
+            ("weight",  "Complexity",  104, "center"),
+            ("rating",  "BGG ★",        66, "center"),
+            ("best",    "Best At",      80, "center"),
+            ("status",  "Status",      120, "center"),
+            ("plays",   "Plays",        64, "center"),
         ]
         # Fixed-width columns stay put; the "name" column has stretch=True so
         # Tkinter hands all spare horizontal space to it — the table stays
@@ -1380,8 +1364,7 @@ class App(tk.Tk):
         self.games_tree.tag_configure("out",       background=C_WN_BG)
         self.games_tree.tag_configure("favorite",  foreground=C_GOLD)
         self.games_tree.tag_configure("expansion", background="#f3e5f5")
-        # Bulk actions live in the top toolbar (built in _build_toolbar);
-        # see self._bulk_field, shown only in table view.
+        # Per-game actions live on the row right-click menu (no bulk toolbar).
 
     def _set_view(self, mode: str) -> None:
         if mode == self._view_mode:
@@ -1392,11 +1375,9 @@ class App(tk.Tk):
         self._view_var.set("Cards" if mode == "cards" else "Table")
         if mode == "table":
             self._size_field.pack_forget()
-            self._bulk_field.pack(side="right", padx=(0, self.SP["md"]))
             self._card_frame.pack_forget()
             self._table_frame.pack(fill="both", expand=True)
         else:
-            self._bulk_field.pack_forget()
             self._size_field.pack(side="right", padx=(0, self.SP["md"]))
             self._table_frame.pack_forget()
             self._card_frame.pack(fill="both", expand=True)
@@ -2556,8 +2537,8 @@ class App(tk.Tk):
         name = f"{user['first_name']} {user['last_name']}"
         win = tk.Toplevel(self)
         win.title(f"Checkout History — {name}")
-        win.geometry("640x420")
-        win.minsize(500, 300)
+        win.geometry("760x440")
+        win.minsize(680, 320)
         win.transient(self)
         win.configure(bg=C_BG)
 
@@ -2580,15 +2561,16 @@ class App(tk.Tk):
         tree.heading("out",      text="Checked out")
         tree.heading("returned", text="Returned")
         tree.heading("notes",    text="Notes")
-        tree.column("game",     width=240)
-        tree.column("out",      width=140, anchor="center")
-        tree.column("returned", width=140, anchor="center")
-        tree.column("notes",    width=150)
+        # Game stretches to fill; the rest are fixed-width to fit their content.
+        tree.column("game",     width=220, minwidth=140, anchor="w",      stretch=True)
+        tree.column("out",      width=150, minwidth=150, anchor="center", stretch=False)
+        tree.column("returned", width=150, minwidth=150, anchor="center", stretch=False)
+        tree.column("notes",    width=170, minwidth=120, anchor="w",      stretch=False)
 
         vsb = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
         tree.configure(yscrollcommand=vsb.set)
         tree.pack(side="left", fill="both", expand=True)
-        vsb.pack(side="left", fill="y")
+        vsb.pack(side="right", fill="y")
 
         # Colour open loans amber
         tree.tag_configure("open", background=C_WN_BG)
@@ -2890,12 +2872,10 @@ class App(tk.Tk):
         _out_f.grid(row=2, column=1, sticky="w")
         _date_entry(_out_f, out_date_var, width=12).pack(side="left")
         ttk.Entry(_out_f, textvariable=out_time_var, width=9).pack(side="left", padx=(4, 0))
-        # Build out_var dynamically for save()
-        out_var = out_date_var  # placeholder; save() reads both parts directly
-        ttk.Button(frame, text="Now",
+        ttk.Button(_out_f, text="Now", style="Quiet.TButton",
                    command=lambda: [out_date_var.set(db.now_iso()[:10]),
                                     out_time_var.set(db.now_iso()[11:19])]
-                   ).grid(row=2, column=2, padx=(4, 0), sticky="w")
+                   ).pack(side="left", padx=(6, 0))
 
         ttk.Label(frame, text="Returned (blank = still out):").grid(row=3, column=0, **lpad)
         _ret_date_str = (loan["returned_at"] or "")[:10]
@@ -2906,13 +2886,10 @@ class App(tk.Tk):
         _ret_f.grid(row=3, column=1, sticky="w")
         _date_entry(_ret_f, ret_date_var, width=12).pack(side="left")
         ttk.Entry(_ret_f, textvariable=ret_time_var, width=9).pack(side="left", padx=(4, 0))
-        ret_var = ret_date_var  # placeholder
-        _ret_btns = ttk.Frame(frame)
-        _ret_btns.grid(row=3, column=2, padx=(4, 0), sticky="w")
-        ttk.Button(_ret_btns, text="Now",
+        ttk.Button(_ret_f, text="Now", style="Quiet.TButton",
                    command=lambda: [ret_date_var.set(db.now_iso()[:10]),
-                                    ret_time_var.set(db.now_iso()[11:19])]).pack(side="left", padx=(0, 2))
-        ttk.Button(_ret_btns, text="Clear",
+                                    ret_time_var.set(db.now_iso()[11:19])]).pack(side="left", padx=(6, 0))
+        ttk.Button(_ret_f, text="Clear", style="Quiet.TButton",
                    command=lambda: [ret_date_var.set(""), ret_time_var.set("")]).pack(side="left")
 
         ttk.Label(frame, text="Due date:").grid(row=4, column=0, **lpad)
@@ -2921,11 +2898,11 @@ class App(tk.Tk):
 
         ttk.Label(frame, text="Notes:").grid(row=5, column=0, **lpad)
         notes_var = tk.StringVar(value=loan["notes"] or "")
-        ttk.Entry(frame, textvariable=notes_var, width=32).grid(row=5, column=1, sticky="w")
+        ttk.Entry(frame, textvariable=notes_var, width=32).grid(row=5, column=1, sticky="ew")
 
         err_var = tk.StringVar()
         ttk.Label(frame, textvariable=err_var, foreground=C_DR_TEXT,
-                  font=("Segoe UI", 8)).grid(row=6, column=0, columnspan=3, sticky="w")
+                  font=("Segoe UI", 8)).grid(row=6, column=0, columnspan=2, sticky="w")
 
         def save() -> None:
             _od = out_date_var.get().strip()
@@ -2952,8 +2929,9 @@ class App(tk.Tk):
             self.status("Loan record updated.")
 
         btn_row = ttk.Frame(frame)
-        btn_row.grid(row=7, column=0, columnspan=3, sticky="e", pady=(14, 0))
-        ttk.Button(btn_row, text="Cancel", command=win.destroy).pack(side="left", padx=(0, 6))
+        btn_row.grid(row=7, column=0, columnspan=2, sticky="e", pady=(14, 0))
+        ttk.Button(btn_row, text="Cancel", style="Ghost.TButton",
+                   command=win.destroy).pack(side="left", padx=(0, 6))
         ttk.Button(btn_row, text="Save",   command=save).pack(side="left")
 
         win.grab_set()
@@ -4177,91 +4155,6 @@ class App(tk.Tk):
         if failed:
             msg += f" {failed} failed — last error: {last_error}"
         self._post_status(msg)
-
-    # ---------- bulk operations ----------
-
-    def _bulk_selected_ids(self) -> list[int]:
-        return [int(iid) for iid in self.games_tree.selection()]
-
-    def _bulk_favorite(self) -> None:
-        ids = self._bulk_selected_ids()
-        if not ids:
-            return
-        with db.connect() as c:
-            for bgg_id in ids:
-                db.set_favorite(c, bgg_id, True)
-        self.refresh_games()
-        self.status(f"Marked {len(ids)} game{'s' if len(ids) != 1 else ''} as favorite.")
-
-    def _bulk_unfavorite(self) -> None:
-        ids = self._bulk_selected_ids()
-        if not ids:
-            return
-        with db.connect() as c:
-            for bgg_id in ids:
-                db.set_favorite(c, bgg_id, False)
-        self.refresh_games()
-        self.status(f"Removed favorite from {len(ids)} game{'s' if len(ids) != 1 else ''}.")
-
-    def _bulk_tag(self) -> None:
-        ids = self._bulk_selected_ids()
-        if not ids:
-            return
-        win = tk.Toplevel(self)
-        win.title("Tag Selected Games")
-        win.transient(self)
-        win.resizable(False, False)
-        ttk.Label(win, text=f"Tag to add to {len(ids)} game(s):",
-                  padding=(14, 12, 14, 4)).pack(anchor="w")
-        with db.connect() as c:
-            existing_tags = db.all_tags(c)
-        tag_var = tk.StringVar()
-        _AutocompleteEntry(win, existing_tags, textvariable=tag_var,
-                           width=28).pack(padx=14, pady=(0, 8))
-
-        def apply_tags():
-            new_tag = tag_var.get().strip()
-            if not new_tag:
-                win.destroy()
-                return
-            with db.connect() as c:
-                for bgg_id in ids:
-                    row = db.get_game(c, bgg_id)
-                    if not row:
-                        continue
-                    existing = [t.strip() for t in (row["tags"] or "").split(",") if t.strip()]
-                    if new_tag not in existing:
-                        existing.append(new_tag)
-                    db.set_tags(c, bgg_id, ", ".join(existing))
-            win.destroy()
-            self.refresh_games()
-            self.status(f"Tagged {len(ids)} game{'s' if len(ids) != 1 else ''} with '{new_tag}'.")
-
-        btn_row = ttk.Frame(win, padding=(14, 0, 14, 12))
-        btn_row.pack(anchor="e")
-        ttk.Button(btn_row, text="Cancel", command=win.destroy).pack(side="left", padx=(0, 6))
-        ttk.Button(btn_row, text="Apply Tag", command=apply_tags).pack(side="left")
-        win.grab_set()
-
-    def _bulk_delete(self) -> None:
-        ids = self._bulk_selected_ids()
-        if not ids:
-            return
-        if not messagebox.askyesno(
-            "Delete Games",
-            f"Remove {len(ids)} game{'s' if len(ids) != 1 else ''} from the library?\n\n"
-            "This deletes their check-out history and play logs.\n"
-            "⚠  Games still in your BGG collection will return on next sync.",
-            icon="warning",
-        ):
-            return
-        with db.connect() as c:
-            for bgg_id in ids:
-                db.delete_game(c, bgg_id)
-        self.refresh_games()
-        self.refresh_history()
-        self.refresh_dashboard()
-        self.status(f"Deleted {len(ids)} game{'s' if len(ids) != 1 else ''}.")
 
     # ---------- check in / out ----------
 
