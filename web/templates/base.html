@@ -8,6 +8,8 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>{% block title %}Board Game Library{% endblock %}</title>
   <link rel="manifest" href="/static/manifest.json">
+  <link rel="icon" type="image/png" href="/static/favicon.png">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
   <link rel="stylesheet" href="/static/style.css">
   <script>
     // 10 UI colour themes (parity with desktop) — [--navy, --navy-d]
@@ -38,7 +40,7 @@
 
 <!-- Top bar -->
 <header class="topbar">
-  <span class="topbar-title">🎲 Board Game Library</span>
+  <span class="topbar-title"><img src="/static/favicon.png" class="topbar-logo" alt=""> Board Game Library</span>
   <div class="topbar-actions">
     <button class="btn-icon" title="Colour theme" aria-label="Change colour theme" onclick="openModal('modal-theme')">🎨</button>
     {% if sync_status.running %}

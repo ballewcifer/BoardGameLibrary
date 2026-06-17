@@ -470,6 +470,11 @@ class App(tk.Tk):
         try:
             if sys.platform == "win32":
                 self.iconbitmap(default=_resource_path("icon.ico"))
+            # Also set a PhotoImage icon (used by the taskbar / alt-tab on some
+            # platforms and as a fallback when iconbitmap is ignored).
+            _ico = Image.open(_resource_path("icon.ico")).convert("RGBA")
+            self._win_icon_img = ImageTk.PhotoImage(_ico.resize((64, 64), Image.LANCZOS))
+            self.iconphoto(True, self._win_icon_img)
         except Exception:
             pass
 
@@ -787,6 +792,7 @@ class App(tk.Tk):
         file_menu.add_command(label="Import collection CSV…", command=self.on_import_csv)
         file_menu.add_separator()
         file_menu.add_command(label="Download Images",        command=self.on_download_images)
+        file_menu.add_command(label="Upgrade Image Quality…", command=self.on_upgrade_images)
         file_menu.add_separator()
         file_menu.add_command(label="Export Library…",        command=self.on_export_data)
         file_menu.add_command(label="Import Library…",        command=self.on_import_data)
@@ -839,7 +845,7 @@ class App(tk.Tk):
         if hasattr(self, "_hdr"):
             self._hdr.configure(bg=C_NAVY_900)
             self._hdr_inner.configure(bg=C_NAVY_900)
-            self._hdr_logo.configure(fg=C_NAVY_900)
+            self._hdr_logo.configure(bg=C_NAVY_900)
             self._hdr_title.configure(bg=C_NAVY_900)
         self._collection_sig = None      # force the collection tab bar to recolour
         self.refresh_games()
@@ -857,15 +863,15 @@ class App(tk.Tk):
         # Logo chip — the actual program icon in a white square (falls back to a
         # die glyph if the icon can't be loaded).
         try:
-            _logo_im = Image.open(_resource_path("icon.ico")).convert("RGBA").resize((26, 26), Image.LANCZOS)
+            _logo_im = Image.open(_resource_path("icon.ico")).convert("RGBA").resize((28, 28), Image.LANCZOS)
             self._hdr_logo_img = ImageTk.PhotoImage(_logo_im)
             self._hdr_logo = tk.Label(self._hdr_inner, image=self._hdr_logo_img,
-                                      bg=C_SURFACE, padx=4, pady=3)
+                                      bg=C_NAVY_900, bd=0, padx=0, pady=0)
         except Exception:
             self._hdr_logo = tk.Label(
                 self._hdr_inner, text="\U0001f3b2",
-                bg=C_SURFACE, fg=C_NAVY_900,
-                font=("Segoe UI", 14, "bold"), padx=5, pady=1,
+                bg=C_NAVY_900, fg=C_SURFACE,
+                font=("Segoe UI", 14, "bold"), padx=2, pady=1,
             )
         self._hdr_logo.pack(side="left", padx=(0, self.SP["sm"]))
 
@@ -938,6 +944,22 @@ class App(tk.Tk):
         size_cb.pack()
         size_cb.bind("<<ComboboxSelected>>",
                      lambda e: self._set_card_size(_sz_keys[self._size_var.get()]))
+
+        # SELECTED bulk-actions — only visible in table view (multi-select).
+        self._bulk_field = ttk.Frame(bar, style="Filter.TFrame")
+        if self._view_mode == "table":
+            self._bulk_field.pack(side="right", padx=(0, SP["md"]))
+        ttk.Label(self._bulk_field, text="SELECTED", style="Filter.TLabel").pack(anchor="w")
+        _bulk_row = ttk.Frame(self._bulk_field, style="Filter.TFrame")
+        _bulk_row.pack(anchor="w")
+        ttk.Button(_bulk_row, text="★ Favorite", style="Ghost.TButton",
+                   command=self._bulk_favorite).pack(side="left", padx=(0, 2))
+        ttk.Button(_bulk_row, text="☆ Unfavorite", style="Ghost.TButton",
+                   command=self._bulk_unfavorite).pack(side="left", padx=2)
+        ttk.Button(_bulk_row, text="Tag…", style="Ghost.TButton",
+                   command=self._bulk_tag).pack(side="left", padx=2)
+        ttk.Button(_bulk_row, text="Delete", style="Danger.TButton",
+                   command=self._bulk_delete).pack(side="left", padx=2)
 
         # ── filter bar: labelled groups, bottom-aligned ────────────────────────
         fbar = ttk.Frame(parent, style="Filter.TFrame",
@@ -1335,35 +1357,20 @@ class App(tk.Tk):
             ("status",  "Status",      140, "center"),
             ("plays",   "Plays",        50, "center"),
         ]
-        # All columns use stretch=False so Tkinter never overrides a manual
-        # column resize.  We auto-size the name column ourselves below.
-        self._fixed_col_ids = [c for c, *_ in col_defs if c != "name"]
+        # Fixed-width columns stay put; the "name" column has stretch=True so
+        # Tkinter hands all spare horizontal space to it — the table stays
+        # adaptive to the window width with no manual bookkeeping.
         for cid, heading, width, anchor in col_defs:
             self.games_tree.heading(cid, text=heading,
                                     command=lambda c=cid: self._sort_table(c))
-            self.games_tree.column(cid, width=width, anchor=anchor, stretch=False,
-                                   minwidth=30 if cid != "name" else 80)
+            self.games_tree.column(cid, width=width, anchor=anchor,
+                                   stretch=(cid == "name"),
+                                   minwidth=30 if cid != "name" else 120)
 
         vsb = ttk.Scrollbar(parent, orient="vertical", command=self.games_tree.yview)
         self.games_tree.configure(yscrollcommand=vsb.set)
         self.games_tree.pack(side="left", fill="both", expand=True)
         vsb.pack(side="right", fill="y")
-
-        # Auto-resize the name column when the *window* width changes.
-        # We skip Configure events that come from column drags (those don't
-        # change the Treeview's overall width) by checking event.width.
-        self._tree_last_width: int = 0
-
-        def _on_tree_configure(event: tk.Event) -> None:
-            w = event.width
-            if w == self._tree_last_width:
-                return           # column drag or unrelated event — leave it alone
-            self._tree_last_width = w
-            fixed = sum(self.games_tree.column(c, "width") for c in self._fixed_col_ids)
-            name_w = max(80, w - fixed - 4)   # 4 = border fudge
-            self.games_tree.column("name", width=name_w)
-
-        self.games_tree.bind("<Configure>", _on_tree_configure)
 
         self.games_tree.bind("<Double-1>",  self._on_table_double_click)
         self.games_tree.bind("<Return>",    self._on_table_return)
@@ -1373,22 +1380,8 @@ class App(tk.Tk):
         self.games_tree.tag_configure("out",       background=C_WN_BG)
         self.games_tree.tag_configure("favorite",  foreground=C_GOLD)
         self.games_tree.tag_configure("expansion", background="#f3e5f5")
-
-        # ── bulk-action toolbar (shown below tree, always present) ────────────
-        bulk_bar = ttk.Frame(parent, padding=(self.SP["xs"], self.SP["xs"], 0, 0))
-        bulk_bar.pack(side="bottom", fill="x")
-        ttk.Label(bulk_bar, text="Selected:",
-                  font=self.FONTS["body_strong"]).pack(side="left", padx=(self.SP["xs"], self.SP["sm"]))
-        ttk.Button(bulk_bar, text="★ Favorite", style="Ghost.TButton",
-                   command=self._bulk_favorite).pack(side="left", padx=2)
-        ttk.Button(bulk_bar, text="☆ Unfavorite", style="Ghost.TButton",
-                   command=self._bulk_unfavorite).pack(side="left", padx=2)
-        ttk.Button(bulk_bar, text="Tag…", style="Ghost.TButton",
-                   command=self._bulk_tag).pack(side="left", padx=2)
-        ttk.Button(bulk_bar, text="Delete", style="Danger.TButton",
-                   command=self._bulk_delete).pack(side="left", padx=2)
-        ttk.Label(bulk_bar, text="(Ctrl+click or Shift+click to select multiple)",
-                  style="Muted.TLabel").pack(side="left", padx=(self.SP["md"], 0))
+        # Bulk actions live in the top toolbar (built in _build_toolbar);
+        # see self._bulk_field, shown only in table view.
 
     def _set_view(self, mode: str) -> None:
         if mode == self._view_mode:
@@ -1399,9 +1392,11 @@ class App(tk.Tk):
         self._view_var.set("Cards" if mode == "cards" else "Table")
         if mode == "table":
             self._size_field.pack_forget()
+            self._bulk_field.pack(side="right", padx=(0, self.SP["md"]))
             self._card_frame.pack_forget()
             self._table_frame.pack(fill="both", expand=True)
         else:
+            self._bulk_field.pack_forget()
             self._size_field.pack(side="right", padx=(0, self.SP["md"]))
             self._table_frame.pack_forget()
             self._card_frame.pack(fill="both", expand=True)
@@ -2703,25 +2698,25 @@ class App(tk.Tk):
         self._hist_plays_pane = ttk.Frame(frame)
 
         pcols = ("game", "date", "players", "winner", "duration")
+        p_tree_row = ttk.Frame(self._hist_plays_pane)
+        p_tree_row.pack(fill="both", expand=True, pady=(SP["sm"], 0))
         self.history_plays_tree = ttk.Treeview(
-            self._hist_plays_pane, columns=pcols, show="headings")
+            p_tree_row, columns=pcols, show="headings")
         self.history_plays_tree.heading("game",     text="Game")
         self.history_plays_tree.heading("date",     text="Date")
         self.history_plays_tree.heading("players",  text="Players")
         self.history_plays_tree.heading("winner",   text="Winner")
         self.history_plays_tree.heading("duration", text="Duration")
-        self.history_plays_tree.column("game",     width=220)
-        self.history_plays_tree.column("date",     width=100, anchor="center")
-        self.history_plays_tree.column("players",  width=200)
-        self.history_plays_tree.column("winner",   width=140, anchor="center")
-        self.history_plays_tree.column("duration", width=90,  anchor="center")
-        p_tree_row = ttk.Frame(self._hist_plays_pane)
-        p_tree_row.pack(fill="both", expand=True, pady=(SP["sm"], 0))
+        self.history_plays_tree.column("game",     width=220, anchor="w")
+        self.history_plays_tree.column("date",     width=110, anchor="center", stretch=False)
+        self.history_plays_tree.column("players",  width=240, anchor="w")
+        self.history_plays_tree.column("winner",   width=150, anchor="center", stretch=False)
+        self.history_plays_tree.column("duration", width=90,  anchor="center", stretch=False)
         p_vsb = ttk.Scrollbar(p_tree_row, orient="vertical",
                                command=self.history_plays_tree.yview)
         self.history_plays_tree.configure(yscrollcommand=p_vsb.set)
         self.history_plays_tree.pack(side="left", fill="both", expand=True)
-        p_vsb.pack(side="left", fill="y")
+        p_vsb.pack(side="right", fill="y")
         ttk.Label(self._hist_plays_pane,
                   text="Use the Plays tab to log or edit plays.",
                   style="Muted.TLabel").pack(anchor="w", pady=(SP["xs"], 0))
@@ -2788,11 +2783,15 @@ class App(tk.Tk):
             rows = db.list_plays(c)
         for r in rows:
             duration = f"{r['duration_minutes']} min" if r["duration_minutes"] else "—"
+            # Plays are date-only events — drop any midnight time component.
+            played = fmt_date(r["played_at"])
+            if played.endswith(" 00:00"):
+                played = played[:-6]
             self.history_plays_tree.insert(
                 "", "end",
                 values=(
                     r["game_name"],
-                    fmt_date(r["played_at"]),
+                    played,
                     r["player_names"] or "",
                     r["winner"] or "—",
                     duration,
@@ -3525,6 +3524,52 @@ class App(tk.Tk):
             daemon=True,
         ).start()
 
+    def on_upgrade_images(self) -> None:
+        """Re-download low-resolution cover images at full quality.
+
+        Older syncs stored BGG's tiny ~150 px thumbnails, so the Large card
+        size couldn't show a bigger image. This finds every cover whose file is
+        smaller than the largest card needs and re-fetches it full-size.
+        """
+        with db.connect() as c:
+            rows = c.execute("SELECT bgg_id, image_path FROM games").fetchall()
+
+        undersized: list[int] = []
+        missing = 0
+        for r in rows:
+            p = r["image_path"]
+            if not p or not Path(p).exists():
+                missing += 1
+                undersized.append(r["bgg_id"])
+                continue
+            try:
+                if max(Image.open(p).size) < 400:
+                    undersized.append(r["bgg_id"])
+            except Exception:
+                undersized.append(r["bgg_id"])
+
+        if not undersized:
+            messagebox.showinfo("Upgrade Image Quality",
+                                "All cover images are already high-resolution.")
+            return
+
+        if not messagebox.askyesno(
+            "Upgrade Image Quality",
+            f"Re-download {len(undersized)} cover image"
+            f"{'s' if len(undersized) != 1 else ''} at full resolution?\n\n"
+            "This runs in the background and may take a few minutes "
+            "(it's polite to BGG, ~2 per second).",
+        ):
+            return
+
+        self.status(f"Upgrading {len(undersized)} cover images in the background…")
+        threading.Thread(
+            target=self._fetch_and_cache_images_bg,
+            args=(undersized,),
+            kwargs={"force": True},
+            daemon=True,
+        ).start()
+
     def on_add_game(self) -> None:
         """Search BGG by title, pick a result, then confirm/edit before saving."""
         dlg = tk.Toplevel(self)
@@ -3936,7 +3981,7 @@ class App(tk.Tk):
         dlg.columnconfigure(1, weight=1)
         dlg.grab_set()
 
-    def _fetch_and_cache_images_bg(self, bgg_ids: list[int]) -> None:
+    def _fetch_and_cache_images_bg(self, bgg_ids: list[int], force: bool = False) -> None:
         """Download box-art for every game that is missing an image.
 
         Image URL priority:
@@ -3945,6 +3990,9 @@ class App(tk.Tk):
              — also collects Best-at data in the same request.
         The /xmlapi2/thing endpoint is no longer used here as it now
         requires a Bearer token.
+
+        When *force* is True, existing on-disk images are re-downloaded (used to
+        upgrade old low-resolution thumbnails to full-size box art).
         """
         IMAGES_DIR.mkdir(parents=True, exist_ok=True)
         total = len(bgg_ids)
@@ -3959,11 +4007,12 @@ class App(tk.Tk):
             with db.connect() as c:
                 row = db.get_game(c, bgg_id)
 
-            need_image = not (row and row["image_path"] and Path(row["image_path"]).exists())
+            need_image = force or not (row and row["image_path"] and Path(row["image_path"]).exists())
 
             # ── image download ────────────────────────────────────────────────
             if need_image:
-                # 1. Use URL already in the DB (populated from CSV import)
+                # 1. Use URL already in the DB (populated from CSV import).
+                #    Prefer the full-resolution image over the tiny thumbnail.
                 url = (
                     (row["image_url"]     if row else None)
                     or (row["thumbnail_url"] if row else None)
@@ -3973,6 +4022,7 @@ class App(tk.Tk):
                     dest = IMAGES_DIR / f"{bgg_id}{ext}"
                     try:
                         bgg.download_image(url, dest)
+                        self._cap_image_file(str(dest))
                         with db.connect() as c:
                             db.set_image_path(c, bgg_id, str(dest))
                         img_ok += 1
@@ -3996,6 +4046,7 @@ class App(tk.Tk):
                         dest = IMAGES_DIR / f"{bgg_id}{ext}"
                         try:
                             bgg.download_image(url, dest)
+                            self._cap_image_file(str(dest))
                             with db.connect() as c:
                                 db.set_image_path(c, bgg_id, str(dest))
                             img_ok += 1
@@ -4078,13 +4129,32 @@ class App(tk.Tk):
                     c, collection_username, collection_name or collection_username)
                 db.replace_collection_games(c, cid, [g.bgg_id for g in games])
 
+    # Largest card cover is 260 px tall; store covers a bit bigger so they look
+    # crisp at the Large size, but cap to keep image files small on disk.
+    IMAGE_MAX_PX = 700
+
+    def _cap_image_file(self, path: str, max_px: int = IMAGE_MAX_PX) -> None:
+        """Downscale an on-disk image in place if it exceeds *max_px* on a side."""
+        try:
+            im = Image.open(path)
+            if max(im.size) <= max_px:
+                return
+            im.thumbnail((max_px, max_px), Image.LANCZOS)
+            if im.mode in ("RGBA", "P", "LA"):
+                im = im.convert("RGB")
+            im.save(path, quality=90)
+        except Exception:
+            pass
+
     def _download_thumbnails_bg(self, games: list[bgg.GameDetails]) -> None:
         IMAGES_DIR.mkdir(parents=True, exist_ok=True)
         ok = 0
         failed = 0
         last_error = ""
         for g in games:
-            url = g.thumbnail_url or g.image_url
+            # Prefer the full-resolution image so Large cards stay crisp; the
+            # tiny BGG thumbnail is only a fallback.
+            url = g.image_url or g.thumbnail_url
             if not url:
                 continue
             with db.connect() as c:
@@ -4095,6 +4165,7 @@ class App(tk.Tk):
             dest = IMAGES_DIR / f"{g.bgg_id}{ext}"
             try:
                 bgg.download_image(url, dest)
+                self._cap_image_file(str(dest))
                 with db.connect() as c:
                     db.set_image_path(c, g.bgg_id, str(dest))
                 ok += 1
@@ -5521,4 +5592,13 @@ class App(tk.Tk):
 
 
 if __name__ == "__main__":
+    # Give Windows an explicit AppUserModelID so the taskbar shows *our* icon
+    # (otherwise it groups under pythonw.exe / a stale cached icon).
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+                "Ballewcifer.BoardGameLibrary")
+        except Exception:
+            pass
     App().mainloop()

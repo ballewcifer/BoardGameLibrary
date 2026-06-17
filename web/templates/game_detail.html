@@ -6,8 +6,8 @@
   <a href="/games" class="back-link">← Games</a>
   {% if game.image_path %}
     <img src="/img/{{ game.bgg_id }}" class="detail-img" alt="{{ game.name }}">
-  {% elif game.thumbnail_url %}
-    <img src="{{ game.thumbnail_url }}" class="detail-img" alt="{{ game.name }}">
+  {% elif game.image_url or game.thumbnail_url %}
+    <img src="{{ game.image_url or game.thumbnail_url }}" class="detail-img" alt="{{ game.name }}">
   {% endif %}
   <div class="detail-info">
     <h1 class="detail-title">

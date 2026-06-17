@@ -51,7 +51,8 @@ img { max-width: 100%; display: block; }
   padding: 0 16px;
   box-shadow: 0 2px 8px rgba(0,0,0,.25);
 }
-.topbar-title { font-weight: 700; font-size: 1.05rem; letter-spacing: .02em; }
+.topbar-title { font-weight: 700; font-size: 1.05rem; letter-spacing: .02em; display: flex; align-items: center; gap: 8px; }
+.topbar-logo { width: 26px; height: 26px; border-radius: 6px; display: block; }
 .topbar-actions { display: flex; align-items: center; gap: 8px; }
 .btn-icon {
   background: none; border: none; color: var(--white);

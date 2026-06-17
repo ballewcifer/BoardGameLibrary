@@ -76,8 +76,8 @@
     <div class="game-card-img">
       {% if g.image_path %}
         <img src="/img/{{ g.bgg_id }}" alt="{{ g.name }}" loading="lazy">
-      {% elif g.thumbnail_url %}
-        <img src="{{ g.thumbnail_url }}" alt="{{ g.name }}" loading="lazy">
+      {% elif g.image_url or g.thumbnail_url %}
+        <img src="{{ g.image_url or g.thumbnail_url }}" alt="{{ g.name }}" loading="lazy">
       {% else %}
         <div class="game-card-no-img">🎲</div>
       {% endif %}
