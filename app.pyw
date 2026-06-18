@@ -1156,11 +1156,10 @@ class App(tk.Tk):
                     preset[key] = round(preset[key] * sc)
 
     def _apply_win_taskbar_icon(self) -> None:
-        """Use the d6 die for the TASKBAR button only (ICON_BIG), loaded at the
-        exact DPI size so it's crisp. Everything else — the title bar, dialogs,
-        shortcut, Start menu, installer — keeps the librarian (icon.ico, set via
-        iconbitmap). The detailed librarian is muddy at taskbar size, the die
-        is not."""
+        """Reinforce the taskbar button icon at the exact DPI size from the
+        (hybrid) icon.ico — its small frames are the d6 die. The embedded icon
+        is what actually drives the taskbar; this just makes the running window's
+        big icon match crisply at the current DPI."""
         if sys.platform != "win32":
             return
         try:
@@ -1180,23 +1179,17 @@ class App(tk.Tk):
             user32.SendMessageW.argtypes = [wintypes.HWND, wintypes.UINT,
                                             wintypes.WPARAM, wintypes.LPARAM]
 
-            # The window that owns the taskbar button is the parent of the Tk frame.
             hwnd = user32.GetParent(self.winfo_id()) or self.winfo_id()
-
-            # DPI-aware, so GetDpiForWindow is accurate. Load the die at the exact
-            # size Windows wants → uses a native die.ico frame, no scaling.
             try:
                 dpi = user32.GetDpiForWindow(hwnd) or 96
             except Exception:
                 dpi = 96
             big = max(16, round(32 * dpi / 96))     # 32@100% 48@150% 64@200%
 
-            die_path = _resource_path("die.ico")
+            path = _resource_path("icon.ico")
             self._hicon_big = user32.LoadImageW(
-                None, die_path, IMAGE_ICON, big, big, LR_LOADFROMFILE)
+                None, path, IMAGE_ICON, big, big, LR_LOADFROMFILE)
             if self._hicon_big:
-                # Set only the BIG icon (taskbar / Alt-Tab). The small icon
-                # (title bar) stays the librarian from iconbitmap.
                 user32.SendMessageW(hwnd, WM_SETICON, ICON_BIG, self._hicon_big)
         except Exception:
             pass

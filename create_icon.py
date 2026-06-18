@@ -18,6 +18,13 @@ SOURCE       = "librarian_meeple.png"
 ICON_SIZES   = [256, 128, 96, 64, 48, 40, 32, 24, 20, 16]
 RADIUS_FRAC  = 0.18          # corner radius as a fraction of the image size
 
+# Frames this size and smaller use the d6 die (taskbar/shortcut/Start list stay
+# crisp); larger frames use the detailed librarian (installer, large views,
+# in-app logo). Windows reads the icon by size, so the taskbar and the desktop
+# shortcut share these small frames — the die can't be limited to the taskbar
+# alone.
+DICE_MAX     = 64
+
 # d6 palette (app navy/blue/gold)
 DIE_NAVY = (26,  58,  92)
 DIE_BLUE = (36, 113, 163)
@@ -111,22 +118,14 @@ def _die_frame(size: int) -> Image.Image:
 
 
 def make_icon(dest: Path) -> None:
-    """icon.ico — the librarian artwork at every size. This is the app's icon
-    everywhere: the .exe, desktop shortcut, Start menu, installer, title bar."""
+    """icon.ico — hybrid: d6 die at small sizes (≤DICE_MAX) so the taskbar and
+    other small icon spots stay crisp; detailed librarian at large sizes. The
+    taskbar reads this embedded icon by size, so this is what controls it."""
     src = crop_to_meeple(Image.open(dest.parent / SOURCE).convert("RGBA"))
-    frames = [_frame(src, sz) for sz in ICON_SIZES]
-    frames[0].save(
-        dest, format="ICO",
-        sizes=[(f.width, f.height) for f in frames],
-        append_images=frames[1:],
-    )
-    print(f"Saved {dest}  ({', '.join(str(f.width) for f in frames)} px)")
-
-
-def make_die_icon(dest: Path) -> None:
-    """die.ico — the d6 die at every size. Used ONLY for the running window's
-    taskbar button (set at runtime), where the detailed art looks muddy."""
-    frames = [_die_frame(sz) for sz in ICON_SIZES]
+    frames = [
+        _die_frame(sz) if sz <= DICE_MAX else _frame(src, sz)
+        for sz in ICON_SIZES
+    ]
     frames[0].save(
         dest, format="ICO",
         sizes=[(f.width, f.height) for f in frames],
@@ -136,6 +135,4 @@ def make_die_icon(dest: Path) -> None:
 
 
 if __name__ == "__main__":
-    here = Path(__file__).parent
-    make_icon(here / "icon.ico")
-    make_die_icon(here / "die.ico")
+    make_icon(Path(__file__).parent / "icon.ico")
