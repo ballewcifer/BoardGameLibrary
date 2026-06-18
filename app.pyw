@@ -463,8 +463,29 @@ class App(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title("Board Game Library")
-        self.geometry("1280x720")
-        self.minsize(980, 560)
+
+        # ── DPI scaling ───────────────────────────────────────────────────────
+        # The process is marked DPI-aware (see __main__), so the display now
+        # reports its true DPI. Scale Tk's point→pixel factor and our fixed
+        # pixel dimensions to that DPI so the whole UI renders crisp and at the
+        # right physical size (instead of being bitmap-stretched and blurry).
+        try:
+            self._ui_scale = max(1.0, self.winfo_fpixels("1i") / 96.0)
+        except Exception:
+            self._ui_scale = 1.0
+        try:
+            self.tk.call("tk", "scaling", self.winfo_fpixels("1i") / 72.0)
+        except Exception:
+            pass
+        if self._ui_scale > 1.01:
+            self._scale_ui_constants(self._ui_scale)
+
+        sc = self._ui_scale
+        # Open at the scaled default size, but never larger than the screen.
+        w = min(round(1280 * sc), self.winfo_screenwidth()  - 40)
+        h = min(round(720 * sc),  self.winfo_screenheight() - 80)
+        self.geometry(f"{w}x{h}")
+        self.minsize(min(round(980 * sc), w), min(round(560 * sc), h))
 
         # Window / title-bar icon (also inherited by Toplevel dialogs via
         # default=…). iconbitmap covers the title bar; the taskbar icon is set
@@ -1121,6 +1142,18 @@ class App(tk.Tk):
         self._build_dashboard_tab()
 
         self.bind_all("<MouseWheel>", self._on_scroll)
+
+    def _scale_ui_constants(self, sc: float) -> None:
+        """Scale the app's fixed *pixel* dimensions by the DPI factor so the UI
+        keeps the same physical size while rendering crisp. Font point sizes are
+        left alone — Tk's scaling factor handles those."""
+        # Spacing scale (class dict → shadow with a scaled per-instance copy).
+        self.SP = {k: max(1, round(v * sc)) for k, v in App.SP.items()}
+        # Card-size presets: scale pixel fields only (not the 'title'/'sub' pts).
+        for preset in _CARD_SIZES.values():
+            for key in ("card_w", "cover_h", "wrap"):
+                if key in preset:
+                    preset[key] = round(preset[key] * sc)
 
     def _apply_win_taskbar_icon(self) -> None:
         """Set the taskbar/title-bar icon directly via Win32 at the DPI-correct
@@ -5832,11 +5865,20 @@ class App(tk.Tk):
 
 
 if __name__ == "__main__":
-    # Give Windows an explicit AppUserModelID so the taskbar shows *our* icon
-    # (otherwise it groups under pythonw.exe / a stale cached icon).
     if sys.platform == "win32":
+        import ctypes
+        # Declare the process DPI-aware BEFORE Tk starts, so Windows renders the
+        # window (and its taskbar icon) at native resolution instead of drawing
+        # at 96 DPI and bitmap-stretching it (blurry) on high-DPI displays.
         try:
-            import ctypes
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)   # per-monitor
+        except Exception:
+            try:
+                ctypes.windll.user32.SetProcessDPIAware()    # system (older OS)
+            except Exception:
+                pass
+        # Explicit AppUserModelID so the taskbar shows *our* icon (not pythonw).
+        try:
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
                 "Ballewcifer.BoardGameLibrary")
         except Exception:
