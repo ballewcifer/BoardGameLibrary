@@ -1,10 +1,8 @@
 """Generate icon.ico for Board Game Library.
 
-Hybrid icon: a simple, bold d6 die for the SMALL frames (16–48px) so the
-taskbar and title bar stay crisp, and the detailed librarian artwork
-(`librarian_meeple.png`) for the LARGE frames (64px+) used by the Start menu,
-large icon views, and the installer. A detailed 3-D illustration just turns to
-mush at 32px, so small sizes need a simple bold shape instead.
+The icon is the librarian-meeple artwork (`librarian_meeple.png`), cropped to
+the meeple subject and rendered at every size the OS asks for. Used everywhere:
+the .exe, desktop shortcut, Start menu, installer, title bar, and taskbar.
 
 Run directly:
     python create_icon.py
@@ -18,22 +16,8 @@ SOURCE       = "librarian_meeple.png"
 ICON_SIZES   = [256, 128, 96, 64, 48, 40, 32, 24, 20, 16]
 RADIUS_FRAC  = 0.18          # corner radius as a fraction of the image size
 
-# Frames this size and smaller use the d6 die (taskbar/shortcut/Start list stay
-# crisp); larger frames use the detailed librarian (installer, large views,
-# in-app logo). Windows reads the icon by size, so the taskbar and the desktop
-# shortcut share these small frames — the die can't be limited to the taskbar
-# alone.
-DICE_MAX     = 64
-
-# d6 palette (app navy/blue/gold)
-DIE_NAVY = (26,  58,  92)
-DIE_BLUE = (36, 113, 163)
-DIE_SKY  = (93, 173, 226)
-DIE_GOLD = (212, 160,  23)
-
-# The source art is a full library scene; at taskbar sizes its fine detail
-# turns to mush. Crop to the meeple (+ the books it holds) so the icon reads as
-# a bold, clear subject at small sizes. Fractions of the 2048px source.
+# The source art is a full library scene; crop to the meeple (+ the books it
+# holds) so the icon reads as a clearer subject. Fractions of the 2048px source.
 MEEPLE_CROP  = (0.18, 0.16, 0.87, 0.85)   # left, top, right, bottom
 
 
@@ -76,56 +60,10 @@ def _frame(src: Image.Image, size: int, radius_frac: float = RADIUS_FRAC) -> Ima
     return out
 
 
-def _die_render(size: int) -> Image.Image:
-    """Draw a d6 die at *size* px: navy body, blue face, gold pips (no scaling)."""
-    img  = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(img)
-    pad = max(2, size // 10)
-    r   = max(4, size // 4)
-
-    so = max(1, size // 16)                                   # drop shadow
-    draw.rounded_rectangle([pad + so, pad + so, size - pad + so // 2,
-                            size - pad + so // 2], radius=r, fill=(0, 0, 0, 90))
-    draw.rounded_rectangle([pad, pad, size - pad, size - pad],
-                           radius=r, fill=(*DIE_NAVY, 255))   # navy outer
-    brd = max(2, size // 16)
-    draw.rounded_rectangle([pad + brd, pad + brd, size - pad - brd,
-                            size - pad - brd], radius=max(3, r - brd),
-                           fill=(*DIE_BLUE, 255))             # blue face
-
-    if size >= 48:                                            # shine
-        hl = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-        ImageDraw.Draw(hl).rounded_rectangle(
-            [pad + brd + max(1, size // 20), pad + brd + max(1, size // 20),
-             size // 2, size // 2], radius=max(2, r // 2), fill=(*DIE_SKY, 55))
-        img = Image.alpha_composite(img, hl); draw = ImageDraw.Draw(img)
-
-    fp = pad + brd; fw = size - 2 * fp; pr = max(1, fw // 9)  # gold pips (6-face)
-    cx_l, cx_r = fp + fw * 29 // 100, fp + fw * 71 // 100
-    cy_t, cy_m, cy_b = fp + fw * 19 // 100, fp + fw * 50 // 100, fp + fw * 81 // 100
-    for px, py in [(cx_l, cy_t), (cx_r, cy_t), (cx_l, cy_m),
-                   (cx_r, cy_m), (cx_l, cy_b), (cx_r, cy_b)]:
-        if pr >= 3:
-            draw.ellipse([px - pr + 1, py - pr + 1, px + pr + 1, py + pr + 1],
-                         fill=(0, 0, 0, 60))
-        draw.ellipse([px - pr, py - pr, px + pr, py + pr], fill=(*DIE_GOLD, 255))
-    return img
-
-
-def _die_frame(size: int) -> Image.Image:
-    """A d6 frame, 4× supersampled then downscaled for smooth edges."""
-    return _die_render(size * 4).resize((size, size), Image.LANCZOS)
-
-
 def make_icon(dest: Path) -> None:
-    """icon.ico — hybrid: d6 die at small sizes (≤DICE_MAX) so the taskbar and
-    other small icon spots stay crisp; detailed librarian at large sizes. The
-    taskbar reads this embedded icon by size, so this is what controls it."""
+    """icon.ico — the librarian artwork at every size."""
     src = crop_to_meeple(Image.open(dest.parent / SOURCE).convert("RGBA"))
-    frames = [
-        _die_frame(sz) if sz <= DICE_MAX else _frame(src, sz)
-        for sz in ICON_SIZES
-    ]
+    frames = [_frame(src, sz) for sz in ICON_SIZES]
     frames[0].save(
         dest, format="ICO",
         sizes=[(f.width, f.height) for f in frames],

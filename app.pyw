@@ -1156,10 +1156,9 @@ class App(tk.Tk):
                     preset[key] = round(preset[key] * sc)
 
     def _apply_win_taskbar_icon(self) -> None:
-        """Reinforce the taskbar button icon at the exact DPI size from the
-        (hybrid) icon.ico — its small frames are the d6 die. The embedded icon
-        is what actually drives the taskbar; this just makes the running window's
-        big icon match crisply at the current DPI."""
+        """Reinforce the taskbar button icon at the exact DPI size from
+        icon.ico, so the running window's big icon is as crisp as Windows can
+        render it at the current display scaling."""
         if sys.platform != "win32":
             return
         try:
