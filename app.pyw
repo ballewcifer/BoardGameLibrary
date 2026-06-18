@@ -466,16 +466,19 @@ class App(tk.Tk):
         self.geometry("1280x720")
         self.minsize(980, 560)
 
-        # Window / title-bar / taskbar icon. Use iconbitmap with the multi-size
-        # icon.ico (set on the root with default=… so every Toplevel inherits
-        # it). We deliberately do NOT use iconphoto: a PhotoImage icon is a
-        # single bitmap that Tk scales for the taskbar and looks blurry — the
-        # .ico lets Windows pick the exact frame per DPI (the crisp "install" icon).
+        # Window / title-bar icon (also inherited by Toplevel dialogs via
+        # default=…). iconbitmap covers the title bar; the taskbar icon is set
+        # separately below with a DPI-correct size because Tk hands Windows a
+        # fixed ~32px icon that gets upscaled (blurry) on high-DPI taskbars.
         try:
             if sys.platform == "win32":
                 self.iconbitmap(default=_resource_path("icon.ico"))
         except Exception:
             pass
+        # Set a crisp, DPI-sized taskbar icon via the Win32 API once the
+        # top-level window actually exists (deferred to the event loop).
+        if sys.platform == "win32":
+            self.after(400, self._apply_win_taskbar_icon)
 
         db.init_db()
         IMAGES_DIR.mkdir(parents=True, exist_ok=True)
@@ -1118,6 +1121,51 @@ class App(tk.Tk):
         self._build_dashboard_tab()
 
         self.bind_all("<MouseWheel>", self._on_scroll)
+
+    def _apply_win_taskbar_icon(self) -> None:
+        """Set the taskbar/title-bar icon directly via Win32 at the DPI-correct
+        size, so Windows uses an exact .ico frame instead of upscaling Tk's
+        default ~32px icon (which looked blurry on high-DPI taskbars)."""
+        if sys.platform != "win32":
+            return
+        try:
+            import ctypes
+            from ctypes import wintypes
+            user32 = ctypes.windll.user32
+
+            IMAGE_ICON      = 1
+            LR_LOADFROMFILE = 0x0010
+            WM_SETICON      = 0x0080
+            ICON_SMALL, ICON_BIG = 0, 1
+
+            user32.LoadImageW.restype  = wintypes.HANDLE
+            user32.LoadImageW.argtypes = [wintypes.HINSTANCE, wintypes.LPCWSTR,
+                                          wintypes.UINT, ctypes.c_int, ctypes.c_int,
+                                          wintypes.UINT]
+            user32.SendMessageW.argtypes = [wintypes.HWND, wintypes.UINT,
+                                            wintypes.WPARAM, wintypes.LPARAM]
+
+            # The window that owns the taskbar button is the parent of the Tk frame.
+            hwnd = user32.GetParent(self.winfo_id()) or self.winfo_id()
+
+            try:
+                dpi = user32.GetDpiForWindow(hwnd) or 96
+            except Exception:
+                dpi = 96
+            big   = max(32, round(32 * dpi / 96))   # 48 @150%, 64 @200%
+            small = max(16, round(16 * dpi / 96))   # 24 @150%, 32 @200%
+
+            path = _resource_path("icon.ico")
+            self._hicon_big = user32.LoadImageW(
+                None, path, IMAGE_ICON, big, big, LR_LOADFROMFILE)
+            self._hicon_small = user32.LoadImageW(
+                None, path, IMAGE_ICON, small, small, LR_LOADFROMFILE)
+            if self._hicon_big:
+                user32.SendMessageW(hwnd, WM_SETICON, ICON_BIG, self._hicon_big)
+            if self._hicon_small:
+                user32.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, self._hicon_small)
+        except Exception:
+            pass
 
     def _build_status_bar(self) -> None:
         """Navy-900 status strip pinned to the bottom edge, with a progress bar
