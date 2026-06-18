@@ -16,6 +16,24 @@ SOURCE       = "librarian_meeple.png"
 ICON_SIZES   = [256, 128, 96, 64, 48, 40, 32, 24, 20, 16]
 RADIUS_FRAC  = 0.18          # corner radius as a fraction of the image size
 
+# The source art is a full library scene; at taskbar sizes its fine detail
+# turns to mush. Crop to the meeple (+ the books it holds) so the icon reads as
+# a bold, clear subject at small sizes. Fractions of the 2048px source.
+MEEPLE_CROP  = (0.18, 0.16, 0.87, 0.85)   # left, top, right, bottom
+
+
+def crop_to_meeple(img: Image.Image) -> Image.Image:
+    """Crop the full scene down to a square framed on the meeple subject."""
+    w, h = img.size
+    l, t, r, b = MEEPLE_CROP
+    box = (int(w * l), int(h * t), int(w * r), int(h * b))
+    cropped = img.crop(box)
+    # Make it square (center-cropped) so frames aren't distorted.
+    cw, ch = cropped.size
+    s = min(cw, ch)
+    ox, oy = (cw - s) // 2, (ch - s) // 2
+    return cropped.crop((ox, oy, ox + s, oy + s))
+
 
 def _rounded(img: Image.Image, radius_frac: float = RADIUS_FRAC) -> Image.Image:
     """Return *img* with rounded corners (transparent outside the radius)."""
@@ -44,12 +62,9 @@ def _frame(src: Image.Image, size: int, radius_frac: float = RADIUS_FRAC) -> Ima
 
 
 def make_icon(dest: Path) -> None:
-    src = Image.open(dest.parent / SOURCE)
-    s = min(src.size)
-    if src.size[0] != src.size[1]:
-        src = src.crop((0, 0, s, s))
+    src = crop_to_meeple(Image.open(dest.parent / SOURCE).convert("RGBA"))
 
-    # Each frame is rendered straight from the 2048px source at its exact pixel
+    # Each frame is rendered straight from the cropped source at its exact pixel
     # size (sharpest result) rather than downscaled from a single rounded image.
     frames = [_frame(src, sz) for sz in ICON_SIZES]
     frames[0].save(

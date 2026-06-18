@@ -1,5 +1,5 @@
 /* Service worker — cache static assets for offline shell */
-const CACHE = 'bgl-v2';
+const CACHE = 'bgl-v3';
 const STATIC = ['/static/style.css', '/static/app.js', '/static/manifest.json'];
 
 self.addEventListener('install', e => {

@@ -14,8 +14,8 @@ import sys
 import tempfile
 from pathlib import Path
 
-# Re-use the rounded-image helper from the Windows icon script.
-from create_icon import SOURCE, _rounded
+# Re-use the helpers from the Windows icon script.
+from create_icon import SOURCE, _rounded, crop_to_meeple
 
 from PIL import Image
 
@@ -44,7 +44,7 @@ def make_icns(dest: Path) -> None:
     if not shutil.which("iconutil"):
         raise RuntimeError("iconutil not found — is Xcode Command Line Tools installed?")
 
-    rounded = _rounded(Image.open(dest.parent / SOURCE))
+    rounded = _rounded(crop_to_meeple(Image.open(dest.parent / SOURCE).convert("RGBA")))
 
     with tempfile.TemporaryDirectory(suffix=".iconset") as tmp:
         iconset = Path(tmp)
