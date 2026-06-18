@@ -466,16 +466,20 @@ class App(tk.Tk):
         self.geometry("1280x720")
         self.minsize(980, 560)
 
-        # Window / title-bar icon to match the program icon (Windows). Set on the
-        # root with default=… so every Toplevel dialog inherits it too.
+        # Window / title-bar / taskbar icon. Set on the root with default=… so
+        # every Toplevel dialog inherits it too.
         try:
             if sys.platform == "win32":
                 self.iconbitmap(default=_resource_path("icon.ico"))
-            # Also set a PhotoImage icon (used by the taskbar / alt-tab on some
-            # platforms and as a fallback when iconbitmap is ignored).
+            # Provide the icon at several exact sizes via iconphoto so Windows
+            # (taskbar, alt-tab) picks a matching size instead of scaling a
+            # single bitmap — a single-size iconphoto looks blurry on the taskbar.
             _ico = Image.open(_resource_path("icon.ico")).convert("RGBA")
-            self._win_icon_img = ImageTk.PhotoImage(_ico.resize((64, 64), Image.LANCZOS))
-            self.iconphoto(True, self._win_icon_img)
+            self._win_icon_imgs = [
+                ImageTk.PhotoImage(_ico.resize((s, s), Image.LANCZOS))
+                for s in (256, 128, 64, 48, 40, 32, 24, 16)
+            ]
+            self.iconphoto(True, *self._win_icon_imgs)
         except Exception:
             pass
 
