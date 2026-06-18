@@ -1181,17 +1181,18 @@ class App(tk.Tk):
             # The window that owns the taskbar button is the parent of the Tk frame.
             hwnd = user32.GetParent(self.winfo_id()) or self.winfo_id()
 
-            # The process is DPI-unaware, so GetDpiForWindow reports 96 even at
-            # 150%/200%. Rather than trust it, hand the taskbar a LARGE icon and
-            # let it downscale to whatever each machine needs — downscaling is
-            # always crisp, whereas a small icon gets upscaled (blurry). This
-            # works on any computer at any display scaling.
+            # The process is now DPI-aware, so GetDpiForWindow returns the true
+            # DPI. Load the icon at the EXACT size Windows wants, which makes
+            # LoadImage pick the matching native frame from the .ico (16/24/32/
+            # 40/48/64…) with no scaling — that's the crispest result. (Forcing
+            # a large icon made Windows downscale it, which looked blurry even
+            # at 100%.)
             try:
                 dpi = user32.GetDpiForWindow(hwnd) or 96
             except Exception:
                 dpi = 96
-            big   = max(64, round(32 * dpi / 96))   # ≥64 → taskbar downscales
-            small = max(32, round(16 * dpi / 96))   # ≥32 → title bar downscales
+            big   = max(16, round(32 * dpi / 96))   # 32@100% 48@150% 64@200%
+            small = max(16, round(16 * dpi / 96))   # 16@100% 24@150% 32@200%
 
             path = _resource_path("icon.ico")
             self._hicon_big = user32.LoadImageW(
