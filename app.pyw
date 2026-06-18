@@ -778,6 +778,11 @@ class App(tk.Tk):
         s.configure("Status.TFrame", background=C_NAVY_900)
         s.configure("Status.TLabel", background=C_NAVY_900, foreground=C_SURFACE,
                     font=self.FONTS["body"])
+        # Determinate progress bar shown in the status strip during long tasks.
+        s.configure("Status.Horizontal.TProgressbar",
+                    troughcolor=C_NAVY_800, background=C_BLUE_600,
+                    bordercolor=C_NAVY_800, lightcolor=C_BLUE_600,
+                    darkcolor=C_BLUE_600, thickness=10)
 
     # ---------- layout ----------
 
@@ -1117,14 +1122,28 @@ class App(tk.Tk):
         self.bind_all("<MouseWheel>", self._on_scroll)
 
     def _build_status_bar(self) -> None:
-        """Navy-900 status strip pinned to the bottom edge."""
+        """Navy-900 status strip pinned to the bottom edge, with a progress bar
+        and an "X of N" count that appear during long tasks (sync / downloads)."""
         self.status_var = tk.StringVar(value="Ready.")
+        self._progress_var = tk.StringVar(value="")
         bar = ttk.Frame(self, style="Status.TFrame")
         bar.pack(side="bottom", fill="x")
         ttk.Label(
             bar, textvariable=self.status_var, anchor="w",
             style="Status.TLabel", padding=(self.SP["md"], self.SP["xs"] + 1),
         ).pack(side="left", fill="x", expand=True)
+
+        # Right side: "34 of 269" + determinate progress bar (hidden when idle).
+        self._progress_count = ttk.Label(
+            bar, textvariable=self._progress_var, anchor="e",
+            style="Status.TLabel", padding=(self.SP["sm"], self.SP["xs"] + 1),
+        )
+        self._progress_bar = ttk.Progressbar(
+            bar, style="Status.Horizontal.TProgressbar",
+            orient="horizontal", mode="determinate", length=160,
+        )
+        # Not packed yet — _set_progress() packs them when a task is running.
+        self._progress_active = False
 
     # ---------- dashboard tab ----------
 
@@ -3231,7 +3250,45 @@ class App(tk.Tk):
 
     def status(self, msg: str) -> None:
         self.status_var.set(msg)
+        prog = self._parse_progress(msg)
+        if prog:
+            self._set_progress(*prog)
+        elif getattr(self, "_progress_active", False):
+            self._clear_progress()
         self.update_idletasks()
+
+    @staticmethod
+    def _parse_progress(msg: str) -> Optional[tuple]:
+        """Pull an (current, total) pair out of a status message, if present.
+        Handles "21-40 of 269", "34/269", and "34 of 269"."""
+        m = re.search(r"(\d+)\s*[-–]\s*(\d+)\s+of\s+(\d+)", msg)
+        if m:
+            return (int(m.group(2)), int(m.group(3)))
+        m = re.search(r"(\d+)\s*/\s*(\d+)", msg)
+        if m:
+            return (int(m.group(1)), int(m.group(2)))
+        m = re.search(r"(\d+)\s+of\s+(\d+)", msg)
+        if m:
+            return (int(m.group(1)), int(m.group(2)))
+        return None
+
+    def _set_progress(self, current: int, total: int) -> None:
+        if total <= 0:
+            return
+        current = max(0, min(current, total))
+        if not getattr(self, "_progress_active", False):
+            self._progress_count.pack(side="right")
+            self._progress_bar.pack(side="right", padx=(0, self.SP["md"]))
+            self._progress_active = True
+        self._progress_bar.configure(maximum=total, value=current)
+        self._progress_var.set(f"{current} of {total}")
+
+    def _clear_progress(self) -> None:
+        if getattr(self, "_progress_active", False):
+            self._progress_bar.pack_forget()
+            self._progress_count.pack_forget()
+            self._progress_var.set("")
+            self._progress_active = False
 
     def on_import_csv(self) -> None:
         path = filedialog.askopenfilename(
@@ -4286,10 +4343,11 @@ class App(tk.Tk):
             time.sleep(0.5)  # be polite to BGG
 
         self.after(0, self.refresh_games)
-        msg = f"Done: {img_ok}/{total} images downloaded."
+        msg = f"Done — {img_ok} of {total} images downloaded."
         if img_failed:
-            msg += f"  {img_failed} failed — last error: {last_error}"
+            msg += f"  {img_failed} failed."
         self._post_status(msg)
+        self.after(0, self._clear_progress)
 
     def _post_status(self, msg: str) -> None:
         self.after(0, self.status, msg)
@@ -4364,7 +4422,9 @@ class App(tk.Tk):
         ok = 0
         failed = 0
         last_error = ""
-        for g in games:
+        total = len(games)
+        for i, g in enumerate(games, 1):
+            self._post_status(f"Downloading images {i} of {total}…")
             # Prefer the full-resolution image so Large cards stay crisp; the
             # tiny BGG thumbnail is only a fallback.
             url = g.image_url or g.thumbnail_url
@@ -4386,10 +4446,11 @@ class App(tk.Tk):
                 failed += 1
                 last_error = str(exc)
         self.after(0, self.refresh_games)
-        msg = f"Thumbnails downloaded: {ok} ok."
+        msg = f"Done — {ok} of {total} images downloaded."
         if failed:
-            msg += f" {failed} failed — last error: {last_error}"
+            msg += f" {failed} failed."
         self._post_status(msg)
+        self.after(0, self._clear_progress)
 
     # ---------- check in / out ----------
 

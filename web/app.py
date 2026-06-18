@@ -651,8 +651,11 @@ def _run_sync():
 
     try:
         collection = _bgg.fetch_collection(username, token=token, on_status=on_status)
+        total = len(collection)
         with db.connect() as c:
-            for g in collection:
+            for i, g in enumerate(collection, 1):
+                if i == 1 or i % 10 == 0 or i == total:
+                    _sync_status["message"] = f"Saving {i} of {total} games…"
                 row = {
                     "bgg_id":       g.bgg_id,
                     "name":         g.name,
