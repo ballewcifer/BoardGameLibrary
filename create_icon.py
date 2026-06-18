@@ -10,7 +10,10 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 
 SOURCE       = "librarian_meeple.png"
-ICON_SIZES   = [256, 128, 64, 48, 32, 16]
+# Include the in-between sizes Windows actually requests for the taskbar at
+# 100/125/150/175/200% display scaling (40/48/56/64…), so it never has to
+# upscale a smaller frame — which is what made the taskbar icon look blurry.
+ICON_SIZES   = [256, 128, 96, 64, 48, 40, 32, 24, 20, 16]
 RADIUS_FRAC  = 0.18          # corner radius as a fraction of the image size
 
 
@@ -28,11 +31,27 @@ def _rounded(img: Image.Image, radius_frac: float = RADIUS_FRAC) -> Image.Image:
     return out
 
 
-def make_icon(dest: Path) -> None:
-    src     = Image.open(dest.parent / SOURCE)
-    rounded = _rounded(src)
+def _frame(src: Image.Image, size: int, radius_frac: float = RADIUS_FRAC) -> Image.Image:
+    """Build one crisp icon frame: a direct high-quality downscale of the
+    full-resolution source to *size*, with rounded corners cut at that size."""
+    img = src.convert("RGBA").resize((size, size), Image.LANCZOS)
+    r = max(1, int(size * radius_frac))
+    mask = Image.new("L", (size, size), 0)
+    ImageDraw.Draw(mask).rounded_rectangle([0, 0, size - 1, size - 1], radius=r, fill=255)
+    out = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    out.paste(img, (0, 0), mask)
+    return out
 
-    frames = [rounded.resize((s, s), Image.LANCZOS) for s in ICON_SIZES]
+
+def make_icon(dest: Path) -> None:
+    src = Image.open(dest.parent / SOURCE)
+    s = min(src.size)
+    if src.size[0] != src.size[1]:
+        src = src.crop((0, 0, s, s))
+
+    # Each frame is rendered straight from the 2048px source at its exact pixel
+    # size (sharpest result) rather than downscaled from a single rounded image.
+    frames = [_frame(src, sz) for sz in ICON_SIZES]
     frames[0].save(
         dest,
         format="ICO",
