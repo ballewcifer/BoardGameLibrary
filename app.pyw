@@ -1156,9 +1156,11 @@ class App(tk.Tk):
                     preset[key] = round(preset[key] * sc)
 
     def _apply_win_taskbar_icon(self) -> None:
-        """Set the taskbar/title-bar icon directly via Win32 at the DPI-correct
-        size, so Windows uses an exact .ico frame instead of upscaling Tk's
-        default ~32px icon (which looked blurry on high-DPI taskbars)."""
+        """Use the d6 die for the TASKBAR button only (ICON_BIG), loaded at the
+        exact DPI size so it's crisp. Everything else — the title bar, dialogs,
+        shortcut, Start menu, installer — keeps the librarian (icon.ico, set via
+        iconbitmap). The detailed librarian is muddy at taskbar size, the die
+        is not."""
         if sys.platform != "win32":
             return
         try:
@@ -1169,7 +1171,7 @@ class App(tk.Tk):
             IMAGE_ICON      = 1
             LR_LOADFROMFILE = 0x0010
             WM_SETICON      = 0x0080
-            ICON_SMALL, ICON_BIG = 0, 1
+            ICON_BIG        = 1
 
             user32.LoadImageW.restype  = wintypes.HANDLE
             user32.LoadImageW.argtypes = [wintypes.HINSTANCE, wintypes.LPCWSTR,
@@ -1181,28 +1183,21 @@ class App(tk.Tk):
             # The window that owns the taskbar button is the parent of the Tk frame.
             hwnd = user32.GetParent(self.winfo_id()) or self.winfo_id()
 
-            # The process is now DPI-aware, so GetDpiForWindow returns the true
-            # DPI. Load the icon at the EXACT size Windows wants, which makes
-            # LoadImage pick the matching native frame from the .ico (16/24/32/
-            # 40/48/64…) with no scaling — that's the crispest result. (Forcing
-            # a large icon made Windows downscale it, which looked blurry even
-            # at 100%.)
+            # DPI-aware, so GetDpiForWindow is accurate. Load the die at the exact
+            # size Windows wants → uses a native die.ico frame, no scaling.
             try:
                 dpi = user32.GetDpiForWindow(hwnd) or 96
             except Exception:
                 dpi = 96
-            big   = max(16, round(32 * dpi / 96))   # 32@100% 48@150% 64@200%
-            small = max(16, round(16 * dpi / 96))   # 16@100% 24@150% 32@200%
+            big = max(16, round(32 * dpi / 96))     # 32@100% 48@150% 64@200%
 
-            path = _resource_path("icon.ico")
+            die_path = _resource_path("die.ico")
             self._hicon_big = user32.LoadImageW(
-                None, path, IMAGE_ICON, big, big, LR_LOADFROMFILE)
-            self._hicon_small = user32.LoadImageW(
-                None, path, IMAGE_ICON, small, small, LR_LOADFROMFILE)
+                None, die_path, IMAGE_ICON, big, big, LR_LOADFROMFILE)
             if self._hicon_big:
+                # Set only the BIG icon (taskbar / Alt-Tab). The small icon
+                # (title bar) stays the librarian from iconbitmap.
                 user32.SendMessageW(hwnd, WM_SETICON, ICON_BIG, self._hicon_big)
-            if self._hicon_small:
-                user32.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, self._hicon_small)
         except Exception:
             pass
 

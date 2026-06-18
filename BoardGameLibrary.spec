@@ -16,6 +16,8 @@ a = Analysis(
         *collect_data_files('certifi'),
         # Window/title-bar icon, loaded at runtime via iconbitmap().
         ('icon.ico', '.'),
+        # d6 die used only for the taskbar button (loaded at runtime).
+        ('die.ico', '.'),
     ],
     hiddenimports=[
         'PIL._tkinter_finder',
