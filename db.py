@@ -104,6 +104,9 @@ MIGRATIONS = [
     "ALTER TABLE plays ADD COLUMN duration_minutes  INTEGER",
     "ALTER TABLE plays ADD COLUMN scores            TEXT",
     "ALTER TABLE games ADD COLUMN manual_fields     TEXT",
+    # A collection can be "claimed" by a member (its owner). When a member owns
+    # one or more collections they may only check out games from them.
+    "ALTER TABLE collections ADD COLUMN owner_user_id INTEGER REFERENCES users(id)",
 ]
 
 
@@ -277,6 +280,49 @@ def rename_collection(c: sqlite3.Connection, collection_id: int, name: str) -> N
 def delete_collection(c: sqlite3.Connection, collection_id: int) -> None:
     """Remove a collection (its game links cascade; the games themselves stay)."""
     c.execute("DELETE FROM collections WHERE id = ?", (collection_id,))
+
+
+# ---------- collection ownership ("claiming") ----------
+
+def claim_collection(c: sqlite3.Connection, collection_id: int,
+                     user_id: Optional[int]) -> None:
+    """Set (or clear, with user_id=None) the member who owns a collection."""
+    c.execute("UPDATE collections SET owner_user_id = ? WHERE id = ?",
+              (user_id, collection_id))
+
+
+def owned_collection_ids(c: sqlite3.Connection, user_id: int) -> set:
+    """Collection ids claimed by a member."""
+    rows = c.execute(
+        "SELECT id FROM collections WHERE owner_user_id = ?", (user_id,)
+    ).fetchall()
+    return {r["id"] for r in rows}
+
+
+def user_can_checkout(c: sqlite3.Connection, user_id: int, game_id: int) -> bool:
+    """A member who has claimed one or more collections may only check out games
+    that belong to one of them. Members who own no collection may check out any
+    game."""
+    owned = owned_collection_ids(c, user_id)
+    if not owned:
+        return True
+    qmarks = ",".join("?" * len(owned))
+    row = c.execute(
+        f"SELECT 1 FROM game_collections "
+        f"WHERE game_id = ? AND collection_id IN ({qmarks}) LIMIT 1",
+        (game_id, *owned),
+    ).fetchone()
+    return row is not None
+
+
+def members_allowed_to_checkout(c: sqlite3.Connection, game_id: int) -> set:
+    """Member ids permitted to check out *game_id*: everyone who owns no
+    collection, plus owners of a collection that contains the game."""
+    allowed = set()
+    for u in c.execute("SELECT id FROM users").fetchall():
+        if user_can_checkout(c, u["id"], game_id):
+            allowed.add(u["id"])
+    return allowed
 
 
 def clear_collections(c: sqlite3.Connection, collection_ids: list[int]) -> list[int]:

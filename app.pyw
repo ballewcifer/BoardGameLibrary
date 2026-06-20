@@ -1567,8 +1567,14 @@ class App(tk.Tk):
         if self._compare_other not in ids:
             self._compare_other = None
 
-        sig = tuple((col["id"], col["name"], col["game_count"]) for col in cols)
+        sig = tuple((col["id"], col["name"], col["game_count"],
+                     col["owner_user_id"]) for col in cols)
         multi = len(cols) >= 2
+        # Map owner id → first name for the claim indicator on each tab.
+        owner_name = {}
+        if any(col["owner_user_id"] for col in cols):
+            with db.connect() as c:
+                owner_name = {u["id"]: u["first_name"] for u in db.list_users(c)}
 
         if sig != self._collection_sig:
             self._collection_sig = sig
@@ -1588,7 +1594,10 @@ class App(tk.Tk):
                       style="Filter.TLabel").pack(side="left", padx=(0, self.SP["sm"]))
             self._make_collection_tab("All", None)
             for col in cols:
-                self._make_collection_tab(f"{col['name']} ({col['game_count']})", col["id"])
+                label = f"{col['name']} ({col['game_count']})"
+                if col["owner_user_id"] and col["owner_user_id"] in owner_name:
+                    label += f"  👤 {owner_name[col['owner_user_id']]}"
+                self._make_collection_tab(label, col["id"])
             # Comparison controls (right-aligned)
             self._other_cb = ttk.Combobox(self._collection_bar, state="readonly",
                                           width=16, values=[])
@@ -1661,8 +1670,62 @@ class App(tk.Tk):
     def _collection_menu(self, event, col_id: int) -> None:
         menu = tk.Menu(self, tearoff=0)
         menu.add_command(label="Rename…", command=lambda: self._rename_collection(col_id))
+        owner = next((col["owner_user_id"] for col in self._collections
+                      if col["id"] == col_id), None)
+        menu.add_command(label="Claim for member…",
+                         command=lambda: self._claim_collection(col_id))
+        if owner:
+            menu.add_command(label="Release claim",
+                             command=lambda: self._claim_collection(col_id, clear=True))
+        menu.add_separator()
         menu.add_command(label="Remove collection", command=lambda: self._delete_collection(col_id))
         menu.tk_popup(event.x_root, event.y_root)
+
+    def _claim_collection(self, col_id: int, clear: bool = False) -> None:
+        if clear:
+            with db.connect() as c:
+                db.claim_collection(c, col_id, None)
+            self._collection_sig = None
+            self.refresh_games()
+            self.status("Collection claim released.")
+            return
+        with db.connect() as c:
+            users = db.list_users(c)
+        if not users:
+            messagebox.showinfo(
+                "No members",
+                "Add a member on the Members tab first, then claim the collection.")
+            return
+        win = tk.Toplevel(self)
+        win.title("Claim Collection")
+        win.transient(self)
+        win.resizable(False, False)
+        win.configure(bg=C_BG)
+        name = next((col["name"] for col in self._collections if col["id"] == col_id), "")
+        ttk.Label(win, text=f"Who owns “{name}”?", padding=(16, 14, 16, 6)).pack(anchor="w")
+        ttk.Label(win, text="They'll be able to check out only games from this collection.",
+                  foreground=C_INK_600, font=("Segoe UI", 8),
+                  padding=(16, 0, 16, 8)).pack(anchor="w")
+        member_names = [f"{u['first_name']} {u['last_name']}" for u in users]
+        var = tk.StringVar(value=member_names[0])
+        ttk.Combobox(win, textvariable=var, values=member_names, state="readonly",
+                     width=30).pack(padx=16, pady=(0, 10))
+
+        def do_claim() -> None:
+            uid = users[member_names.index(var.get())]["id"]
+            with db.connect() as c:
+                db.claim_collection(c, col_id, uid)
+            win.destroy()
+            self._collection_sig = None
+            self.refresh_games()
+            self.status(f"“{name}” claimed by {var.get()}.")
+
+        row = ttk.Frame(win)
+        row.pack(anchor="e", padx=16, pady=(0, 14))
+        ttk.Button(row, text="Cancel", style="Ghost.TButton",
+                   command=win.destroy).pack(side="left", padx=(0, 6))
+        ttk.Button(row, text="Claim", command=do_claim).pack(side="left")
+        win.grab_set()
 
     def _rename_collection(self, col_id: int) -> None:
         cur = next((col["name"] for col in self._collections if col["id"] == col_id), "")
@@ -3437,6 +3500,22 @@ class App(tk.Tk):
             bg=C_BG, fg="#888", font=("Segoe UI", 8), padx=16,
         ).pack(anchor="w", pady=(0, 8))
 
+        # Optional: claim this collection for a member (added automatically).
+        ttk.Label(dialog, text="Collection owner (optional):",
+                  padding=(16, 4, 16, 2)).pack(anchor="w")
+        _name_row = ttk.Frame(dialog)
+        _name_row.pack(padx=16, pady=(0, 2), anchor="w")
+        first_var = tk.StringVar()
+        last_var  = tk.StringVar()
+        ttk.Entry(_name_row, textvariable=first_var, width=15).pack(side="left")
+        ttk.Entry(_name_row, textvariable=last_var, width=16).pack(side="left", padx=(6, 0))
+        tk.Label(
+            dialog,
+            text="Adds this person as a member and lets them check out only\n"
+                 "games from this collection. Leave blank to skip.",
+            bg=C_BG, fg="#888", font=("Segoe UI", 8), padx=16, justify="left",
+        ).pack(anchor="w", pady=(0, 8))
+
         btn_frame = ttk.Frame(dialog)
         btn_frame.pack(padx=16, pady=(4, 14), fill="x")
 
@@ -3452,11 +3531,14 @@ class App(tk.Tk):
             _kr_set_password(pwd)
             if hasattr(self, "username_var"):
                 self.username_var.set(uname)
+            owner_first = first_var.get().strip()
+            owner_last  = last_var.get().strip()
             dialog.destroy()
             self.status(f"Syncing with BGG for {uname}…")
             threading.Thread(
                 target=self._import_from_username_bg,
                 args=(uname, tok, pwd or None),
+                kwargs={"owner_first": owner_first, "owner_last": owner_last},
                 daemon=True,
             ).start()
 
@@ -3466,7 +3548,8 @@ class App(tk.Tk):
         dialog.grab_set()
 
     def _import_from_username_bg(self, username: str, token: str,
-                                   password: Optional[str] = None) -> None:
+                                   password: Optional[str] = None,
+                                   owner_first: str = "", owner_last: str = "") -> None:
         try:
             opener = None
             pwd = password or _kr_get_password()
@@ -3507,6 +3590,24 @@ class App(tk.Tk):
             removed = [g for g in all_bgl if g["bgg_id"] in _old and g["bgg_id"] not in bgg_ids]
 
             self._save_games_to_db(games, collection_username=username)
+
+            # Optionally add the importer as a member and claim this collection
+            # for them (they can then check out only games from this collection).
+            if owner_first or owner_last:
+                with db.connect() as c:
+                    cid = db.collection_id_for_username(c, username)
+                    if cid:
+                        existing = next(
+                            (u for u in db.list_users(c)
+                             if u["first_name"].strip().lower() == owner_first.lower()
+                             and u["last_name"].strip().lower() == owner_last.lower()),
+                            None,
+                        )
+                        uid = existing["id"] if existing else db.add_user(
+                            c, owner_first, owner_last)
+                        db.claim_collection(c, cid, uid)
+                self.after(0, self.refresh_members)
+
             self.after(0, self.refresh_games)
             self._post_status(f"Imported {len(games)} games. Downloading images…")
             if removed:
@@ -4528,10 +4629,23 @@ class App(tk.Tk):
 
     def on_check_out(self, game) -> None:
         with db.connect() as c:
-            users = db.list_users(c)
-        if not users:
+            all_users = db.list_users(c)
+            allowed = db.members_allowed_to_checkout(c, game["bgg_id"])
+        if not all_users:
             messagebox.showinfo("No members", "Add a member on the Members tab first.")
             self.nb.select(self.members_tab)
+            return
+
+        # Members who have claimed a different collection can only check out
+        # their own games, so they're hidden from this game's list.
+        users = [u for u in all_users if u["id"] in allowed]
+        if not users:
+            messagebox.showinfo(
+                "Not available to anyone",
+                f"\"{game['name']}\" isn't in any member's claimed collection, so "
+                "no eligible member can check it out.\n\n"
+                "Members who haven't claimed a collection can borrow any game.",
+            )
             return
 
         dialog = tk.Toplevel(self)
@@ -4558,6 +4672,12 @@ class App(tk.Tk):
             due = due_var.get().strip() or None
             try:
                 with db.connect() as c:
+                    if not db.user_can_checkout(c, user_id, game["bgg_id"]):
+                        messagebox.showerror(
+                            "Not in their collection",
+                            f"{member_var.get()} has claimed a collection and can only "
+                            f"check out games from it.\n\"{game['name']}\" isn't in it.")
+                        return
                     db.check_out(c, game["bgg_id"], user_id, notes_var.get().strip(), due_date=due)
             except ValueError as e:
                 messagebox.showerror("Cannot check out", str(e))
