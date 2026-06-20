@@ -39,7 +39,7 @@
      href="{{ url_for('games', q=q, status=status, tag=tag_filter, exp=('1' if show_exp else none)) }}">All</a>
   {% for col in collections %}
   <a class="collection-tab {% if active_collection == col.id %}active{% endif %}"
-     href="{{ url_for('games', q=q, status=status, tag=tag_filter, exp=('1' if show_exp else none), collection=col.id) }}">{{ col.name }} ({{ col.game_count }})</a>
+     href="{{ url_for('games', q=q, status=status, tag=tag_filter, exp=('1' if show_exp else none), collection=col.id) }}">{{ col.name }} ({{ col.game_count }}){% if col.owner_name %} 👤 {{ col.owner_name }}{% endif %}</a>
   {% endfor %}
 
   <form method="get" action="/games" class="compare-form">
@@ -63,6 +63,8 @@
     {% endif %}
   </form>
 
+  <button class="btn btn-outline btn-sm" onclick="openModal('modal-claim-collection')"
+          aria-label="Claim a collection">Claim…</button>
   <button class="btn btn-outline btn-sm" onclick="openModal('modal-clear-collections')"
           aria-label="Clear collections">Clear…</button>
 </div>
@@ -214,6 +216,41 @@
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" onclick="closeModal('modal-clear-collections')">Cancel</button>
         <button type="submit" class="btn btn-danger">Clear Selected</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ── Claim collection modal ────────────────────────────────────────────── -->
+<div id="modal-claim-collection" class="modal-backdrop" hidden>
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Claim a Collection</h3>
+      <button class="modal-close" onclick="closeModal('modal-claim-collection')">✕</button>
+    </div>
+    <form method="post" action="/collections/claim">
+      <div class="modal-body">
+        <p class="muted" style="font-size:.85rem;margin-top:0">
+          The owner can check out only games from their collection. Members who
+          claim nothing can borrow any game.
+        </p>
+        <label class="form-label">Collection</label>
+        <select name="collection_id" class="form-control">
+          {% for col in collections %}
+          <option value="{{ col.id }}">{{ col.name }}{% if col.owner_name %} — {{ col.owner_name }}{% endif %}</option>
+          {% endfor %}
+        </select>
+        <label class="form-label mt-sm">Owner</label>
+        <select name="user_id" class="form-control">
+          <option value="">(no owner — release claim)</option>
+          {% for u in members %}
+          <option value="{{ u.id }}">{{ u.first_name }} {{ u.last_name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-claim-collection')">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save</button>
       </div>
     </form>
   </div>

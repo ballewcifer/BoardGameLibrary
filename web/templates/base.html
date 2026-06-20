@@ -103,6 +103,13 @@
         <label class="form-label">BGG Username</label>
         <input type="text" name="bgg_username" class="form-control" value="{{ bgg_username }}" placeholder="e.g. Ballewcifer" autocomplete="off">
         <p class="muted" style="font-size:.8rem;margin-top:6px">Pulls your public collection from BoardGameGeek.</p>
+
+        <label class="form-label mt-sm">Collection owner (optional)</label>
+        <div style="display:flex; gap:8px">
+          <input type="text" name="owner_first" class="form-control" placeholder="First name" autocomplete="off">
+          <input type="text" name="owner_last"  class="form-control" placeholder="Last name"  autocomplete="off">
+        </div>
+        <p class="muted" style="font-size:.8rem;margin-top:6px">Adds this person as a member and lets them check out only games from this collection. Leave blank to skip.</p>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" onclick="closeModal('modal-sync')">Cancel</button>

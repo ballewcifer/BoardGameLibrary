@@ -118,6 +118,11 @@ def games():
         all_tags   = db.all_tags(c)
         collections = [_row_to_dict(r) for r in db.list_collections(c) if r["game_count"] > 0]
         gc_map     = db.game_collection_map(c)
+        members    = [_row_to_dict(r) for r in db.list_users(c)]
+
+    member_name = {u["id"]: f"{u['first_name']} {u['last_name']}".strip() for u in members}
+    for col in collections:
+        col["owner_name"] = member_name.get(col.get("owner_user_id"))
 
     coll_ids = {col["id"] for col in collections}
     multi = len(collections) >= 2
@@ -181,10 +186,25 @@ def games():
                            show_exp=show_exp,
                            all_tags=all_tags,
                            collections=collections,
+                           members=members,
                            multi=multi,
                            active_collection=active_cid,
                            compare=compare,
                            compare_other=other_cid)
+
+
+@app.route("/collections/claim", methods=["POST"])
+def claim_collection():
+    """Claim a collection for a member (or release it with user_id empty)."""
+    cid = request.form.get("collection_id", type=int)
+    uid = request.form.get("user_id", type=int)   # None/0 → release
+    if not cid:
+        flash("No collection selected.", "error")
+        return redirect(url_for("games"))
+    with db.connect() as c:
+        db.claim_collection(c, cid, uid or None)
+    flash("Collection ownership updated.", "success")
+    return redirect(url_for("games"))
 
 
 @app.route("/api/random_game")
@@ -283,7 +303,10 @@ def game_detail(bgg_id):
         loan      = _row_to_dict(db.open_loan_for_game(c, bgg_id))
         plays     = [_row_to_dict(r) for r in db.list_plays(c, game_id=bgg_id)]
         stats     = db.game_play_stats(c, bgg_id)
-        users     = [_row_to_dict(r) for r in db.list_users(c)]
+        # Only members allowed to borrow this game (owners of a claimed
+        # collection that contains it, plus members who claimed nothing).
+        allowed   = db.members_allowed_to_checkout(c, bgg_id)
+        users     = [_row_to_dict(r) for r in db.list_users(c) if r["id"] in allowed]
 
     today = datetime.now().date().isoformat()
     if loan:
@@ -310,6 +333,10 @@ def checkout(bgg_id):
         return redirect(url_for("game_detail", bgg_id=bgg_id))
     try:
         with db.connect() as c:
+            if not db.user_can_checkout(c, user_id, bgg_id):
+                flash("That member has claimed a collection and can only check out "
+                      "games from it.", "error")
+                return redirect(url_for("game_detail", bgg_id=bgg_id))
             db.check_out(c, bgg_id, user_id, notes=notes, due_date=due_date)
         flash("Checked out successfully.", "success")
     except ValueError as e:
@@ -640,7 +667,7 @@ def add_game():
 # BGG Sync
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _run_sync():
+def _run_sync(owner_first: str = "", owner_last: str = ""):
     global _sync_status
     settings = _settings()
     username = settings.get("bgg_username", "")
@@ -696,6 +723,18 @@ def _run_sync():
                 cid = db.get_or_create_collection(c, username, username)
                 db.replace_collection_games(c, cid, [g.bgg_id for g in collection])
 
+                # Optionally add the importer as a member and claim the collection.
+                if owner_first or owner_last:
+                    existing = next(
+                        (u for u in db.list_users(c)
+                         if u["first_name"].strip().lower() == owner_first.lower()
+                         and u["last_name"].strip().lower() == owner_last.lower()),
+                        None,
+                    )
+                    uid = existing["id"] if existing else db.add_user(
+                        c, owner_first, owner_last)
+                    db.claim_collection(c, cid, uid)
+
         _sync_status["message"] = f"Sync complete — {len(collection)} games."
     except Exception as e:
         _sync_status["error"]   = str(e)
@@ -712,6 +751,8 @@ def sync():
         s = _config.load()
         s["bgg_username"] = new_username
         _config.save(s)
+    owner_first = request.form.get("owner_first", "").strip()
+    owner_last  = request.form.get("owner_last", "").strip()
     with _sync_lock:
         if _sync_status["running"]:
             flash("Sync already in progress.", "info")
@@ -722,7 +763,9 @@ def sync():
         _sync_status["running"] = True
         _sync_status["message"] = "Starting sync…"
         _sync_status["error"]   = None
-    threading.Thread(target=_run_sync, daemon=True).start()
+    threading.Thread(target=_run_sync,
+                     kwargs={"owner_first": owner_first, "owner_last": owner_last},
+                     daemon=True).start()
     flash("BGG sync started — refresh in a moment.", "info")
     return redirect(url_for("dashboard"))
 
