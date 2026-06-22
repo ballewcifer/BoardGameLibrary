@@ -3737,9 +3737,10 @@ class App(tk.Tk):
                         db.claim_collection(c, cid, uid)
                         self.settings["claimed_member_id"] = uid
                         config.save(self.settings)
-                self.after(0, self.refresh_members)
 
-            self.after(0, self.refresh_games)
+            # Refresh everything (dashboard tiles, games, members, history,
+            # plays) — not just the games grid — so the stat counts update too.
+            self.after(0, self.refresh_all)
             self._post_status(f"Imported {len(games)} games. Downloading images…")
             if removed:
                 self.after(0, lambda r=removed, cid=_cid: self._prompt_bgg_removals(r, cid))
@@ -3783,7 +3784,7 @@ class App(tk.Tk):
                 _old = db.collection_game_ids(c, _cid) if _cid else set()
             removed = [g for g in all_bgl if g["bgg_id"] in _old and g["bgg_id"] not in bgg_ids]
             self._save_games_to_db(games, collection_username=username)
-            self.after(0, self.refresh_games)
+            self.after(0, self.refresh_all)
             n = len(games)
             self._post_status(f"BGG auto-sync complete: {n} game{'s' if n != 1 else ''} updated.")
             if removed:
