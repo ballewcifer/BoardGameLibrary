@@ -283,6 +283,13 @@ def clear_collections():
         return redirect(url_for("games"))
     with db.connect() as c:
         deleted = db.clear_collections(c, ids)
+        # If the device owner's collection was just cleared, drop the claim so a
+        # new collection can be claimed.
+        s = _config.load()
+        mid = s.get("claimed_member_id")
+        if mid and not db.owned_collection_ids(c, mid):
+            s.pop("claimed_member_id", None)
+            _config.save(s)
     for gid in deleted:
         for p in IMAGES_DIR.glob(f"{gid}.*"):
             try:

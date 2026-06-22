@@ -95,6 +95,9 @@ jobs:
           name: windows-installer
           path: installer/BoardGameLibrarySetup-*.exe
           if-no-files-found: error
+          # Intermediate handoff to the release job only; expire fast so these
+          # large installers don't exhaust the account artifact-storage quota.
+          retention-days: 1
 
   # ── macOS: .dmg installer ────────────────────────────────────────────────────
   build-macos:
@@ -150,6 +153,9 @@ jobs:
           name: macos-dmg
           path: dist/BoardGameLibraryInstaller-*.dmg
           if-no-files-found: error
+          # Intermediate handoff to the release job only; expire fast so these
+          # large installers don't exhaust the account artifact-storage quota.
+          retention-days: 1
 
   # ── Desktop GitHub Release: Windows + macOS installers ────────────────────────
   release-desktop:

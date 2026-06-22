@@ -1174,7 +1174,10 @@ class App(tk.Tk):
             IMAGE_ICON      = 1
             LR_LOADFROMFILE = 0x0010
             WM_SETICON      = 0x0080
+            ICON_SMALL      = 0
             ICON_BIG        = 1
+            SM_CXICON       = 11
+            SM_CXSMICON     = 49
 
             user32.LoadImageW.restype  = wintypes.HANDLE
             user32.LoadImageW.argtypes = [wintypes.HINSTANCE, wintypes.LPCWSTR,
@@ -1188,13 +1191,28 @@ class App(tk.Tk):
                 dpi = user32.GetDpiForWindow(hwnd) or 96
             except Exception:
                 dpi = 96
-            big = max(16, round(32 * dpi / 96))     # 32@100% 48@150% 64@200%
+
+            # Ask Windows for the exact icon metrics at this DPI so LoadImageW can
+            # return the native .ico frame (16/20/24/32/40/48/64…) untouched,
+            # rather than us handing it 32px that the taskbar then downscales.
+            def _metric(idx, fallback):
+                try:
+                    return user32.GetSystemMetricsForDpi(idx, dpi) or fallback
+                except Exception:
+                    return fallback
+
+            big   = max(16, _metric(SM_CXICON,   round(32 * dpi / 96)))
+            small = max(16, _metric(SM_CXSMICON, round(16 * dpi / 96)))
 
             path = _resource_path("icon.ico")
             self._hicon_big = user32.LoadImageW(
                 None, path, IMAGE_ICON, big, big, LR_LOADFROMFILE)
+            self._hicon_small = user32.LoadImageW(
+                None, path, IMAGE_ICON, small, small, LR_LOADFROMFILE)
             if self._hicon_big:
                 user32.SendMessageW(hwnd, WM_SETICON, ICON_BIG, self._hicon_big)
+            if self._hicon_small:
+                user32.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, self._hicon_small)
         except Exception:
             pass
 
@@ -3254,6 +3272,18 @@ class App(tk.Tk):
                 except OSError:
                     pass
 
+    def _reset_claim_if_orphaned(self) -> None:
+        """Drop the device-owner claim if that member no longer owns any
+        collection (e.g. it was just cleared), so a new collection can be claimed."""
+        mid = self.settings.get("claimed_member_id")
+        if not mid:
+            return
+        with db.connect() as c:
+            still_owns = db.owned_collection_ids(c, mid)
+        if not still_owns:
+            self.settings.pop("claimed_member_id", None)
+            config.save(self.settings)
+
     def _clear_one_collection(self, col) -> None:
         name = col["name"]
         if not messagebox.askyesno(
@@ -3267,6 +3297,7 @@ class App(tk.Tk):
         with db.connect() as c:
             deleted = db.clear_collections(c, [col["id"]])
         self._drop_images(deleted)
+        self._reset_claim_if_orphaned()
         self._image_cache.clear()
         self._gradient_cache.clear()
         self._placeholder_img = None
@@ -3363,6 +3394,7 @@ class App(tk.Tk):
                         p.unlink()
                     except OSError:
                         pass
+            self._reset_claim_if_orphaned()
             self._image_cache.clear()
             self._gradient_cache.clear()
             self._placeholder_img = None
@@ -3600,6 +3632,7 @@ class App(tk.Tk):
 
         btn_frame = ttk.Frame(dialog)
         btn_frame.pack(padx=16, pady=(4, 14), fill="x")
+        btn_frame.columnconfigure(0, weight=1)  # spacer keeps buttons grouped right
 
         def do_import() -> None:
             uname = uname_var.get().strip()
@@ -3633,8 +3666,10 @@ class App(tk.Tk):
                 daemon=True,
             ).start()
 
-        ttk.Button(btn_frame, text="Cancel", command=dialog.destroy).pack(side="left")
-        ttk.Button(btn_frame, text="Save & Sync", command=do_import).pack(side="right")
+        ttk.Button(btn_frame, text="Cancel", command=dialog.destroy).grid(
+            row=0, column=1, padx=(0, 8))
+        ttk.Button(btn_frame, text="Save & Sync", command=do_import).grid(
+            row=0, column=2)
         dialog.bind("<Return>", lambda *_: do_import())
         dialog.bind("<Escape>", lambda *_: dialog.destroy())
         dialog.grab_set()
