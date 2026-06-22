@@ -535,6 +535,7 @@ class App(tk.Tk):
         self._compare_other: Optional[int] = None
         self._collections: list = []                    # cached collection rows
         self._gc_map: dict = {}                          # {game_id: {collection_id,...}}
+        self._my_collection_ids = None                   # collections owned by "me" (None = no claim)
         self._collection_sig = None                     # rebuild guard for the tab bar
 
         apply_theme(self.settings.get("ui_theme", "Classic Navy"))
@@ -1914,6 +1915,11 @@ class App(tk.Tk):
             # drops its tab automatically.
             self._collections = [r for r in db.list_collections(c) if r["game_count"] > 0]
             self._gc_map = db.game_collection_map(c)
+            # Collections owned by "me" (the device owner who claimed during
+            # import). None → no claim, so check-out is offered for every game.
+            _mine = self.settings.get("claimed_member_id")
+            self._my_collection_ids = (
+                db.owned_collection_ids(c, _mine) if _mine else None)
 
         # Refresh tag dropdown (preserve selection if tag still exists)
         cur_tag = self.tag_filter_var.get()
@@ -2396,7 +2402,7 @@ class App(tk.Tk):
                         padx=SP["sm"] if _is_sm else SP["lg"], pady=SP["sm"])
         body.pack(fill="both", expand=True)
 
-        # Status badge + favourite star on one row.
+        # Status badge (left) + favourite star (right) on one row.
         status_row = tk.Frame(body, bg=C_SURFACE)
         status_row.pack(fill="x", pady=(0, SP["xs"]))
         tk.Label(status_row, text=badge_txt, bg=badge_bg, fg=badge_fg,
@@ -2405,7 +2411,7 @@ class App(tk.Tk):
             status_row, text="★" if is_fav else "☆",
             bg=C_SURFACE, fg=C_STAR_FILL if is_fav else C_INK_500,
             font=("Segoe UI", 17, "bold"), cursor="hand2", padx=SP["sm"])
-        _star_lbl.pack(side="left")
+        _star_lbl.pack(side="right")
         _star_lbl.bind("<Button-1>", lambda e, g=game: self.on_toggle_favorite(g))
 
         # Loaned-to line: "To Name · due Date" (prototype: 13px ink-600)
@@ -2457,15 +2463,24 @@ class App(tk.Tk):
         # Expanding spacer pushes buttons to the row's baseline
         tk.Frame(body, bg=C_SURFACE).pack(fill="both", expand=True)
 
-        # Primary button — full width
+        # Primary button — full width. When a collection has been claimed as
+        # "mine", only games from my collection can be checked out, so the
+        # Check Out button is hidden for games in other collections.
+        my_ids = getattr(self, "_my_collection_ids", None)
+        can_checkout = (my_ids is None) or bool(
+            self._gc_map.get(bgg_id, set()) & my_ids)
         if out_to:
             ttk.Button(body, text="Check In",
                        command=lambda g=game: self.on_check_in(g)
                        ).pack(fill="x", pady=(0, SP["xs"]))
-        else:
+        elif can_checkout:
             ttk.Button(body, text="Check Out",
                        command=lambda g=game: self.on_check_out(g)
                        ).pack(fill="x", pady=(0, SP["xs"]))
+        else:
+            tk.Label(body, text="Not in your collection",
+                     bg=C_SURFACE, fg=C_INK_500, font=("Segoe UI", 9),
+                     pady=4).pack(fill="x", pady=(0, SP["xs"]))
 
         if not _is_sm:
             sec = tk.Frame(body, bg=C_SURFACE)
@@ -3555,23 +3570,25 @@ class App(tk.Tk):
         ttk.Entry(dialog, textvariable=pwd_var, width=34, show="●").pack(padx=16, pady=(0, 2))
         tk.Label(
             dialog,
-            text="Needed for private collections (same approach as BG Stats).",
-            bg=C_BG, fg="#888", font=("Segoe UI", 8), padx=16,
+            text="Optional — only needed for private collections\n"
+                 "(same approach as BG Stats).",
+            bg=C_BG, fg="#888", font=("Segoe UI", 8), padx=16, justify="left",
         ).pack(anchor="w", pady=(0, 8))
 
-        # Optional: claim this collection for a member (added automatically).
-        ttk.Label(dialog, text="Collection owner (optional):",
-                  padding=(16, 4, 16, 2)).pack(anchor="w")
+        # Claim this collection as your own.
+        claim_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(dialog, text="Claim this collection as my own",
+                        variable=claim_var).pack(anchor="w", padx=16, pady=(2, 0))
         _name_row = ttk.Frame(dialog)
-        _name_row.pack(padx=16, pady=(0, 2), anchor="w")
+        _name_row.pack(padx=16, pady=(2, 2), anchor="w")
         first_var = tk.StringVar()
         last_var  = tk.StringVar()
         ttk.Entry(_name_row, textvariable=first_var, width=15).pack(side="left")
         ttk.Entry(_name_row, textvariable=last_var, width=16).pack(side="left", padx=(6, 0))
         tk.Label(
             dialog,
-            text="Adds this person as a member and lets them check out only\n"
-                 "games from this collection. Leave blank to skip.",
+            text="Adds you as a member and restricts check-outs so only you can\n"
+                 "borrow games from this collection.",
             bg=C_BG, fg="#888", font=("Segoe UI", 8), padx=16, justify="left",
         ).pack(anchor="w", pady=(0, 8))
 
@@ -3584,20 +3601,29 @@ class App(tk.Tk):
             if not uname:
                 messagebox.showerror("Username required", "Enter your BGG username.", parent=dialog)
                 return
+            owner_first = first_var.get().strip()
+            owner_last  = last_var.get().strip()
+            claim = claim_var.get()
+            if claim and not (owner_first or owner_last):
+                messagebox.showerror(
+                    "Name required",
+                    "Enter your name to claim this collection as your own.",
+                    parent=dialog)
+                return
             self.settings["bgg_username"] = uname
             self.settings.pop("bgg_password", None)
             config.save(self.settings)
             _kr_set_password(pwd)
             if hasattr(self, "username_var"):
                 self.username_var.set(uname)
-            owner_first = first_var.get().strip()
-            owner_last  = last_var.get().strip()
             dialog.destroy()
             self.status(f"Syncing with BGG for {uname}…")
             threading.Thread(
                 target=self._import_from_username_bg,
                 args=(uname, tok, pwd or None),
-                kwargs={"owner_first": owner_first, "owner_last": owner_last},
+                kwargs={"owner_first": owner_first if claim else "",
+                        "owner_last":  owner_last if claim else "",
+                        "claim_as_mine": claim},
                 daemon=True,
             ).start()
 
@@ -3608,7 +3634,8 @@ class App(tk.Tk):
 
     def _import_from_username_bg(self, username: str, token: str,
                                    password: Optional[str] = None,
-                                   owner_first: str = "", owner_last: str = "") -> None:
+                                   owner_first: str = "", owner_last: str = "",
+                                   claim_as_mine: bool = False) -> None:
         try:
             opener = None
             pwd = password or _kr_get_password()
@@ -3650,9 +3677,10 @@ class App(tk.Tk):
 
             self._save_games_to_db(games, collection_username=username)
 
-            # Optionally add the importer as a member and claim this collection
-            # for them (they can then check out only games from this collection).
-            if owner_first or owner_last:
+            # Optionally add the importer as a member, claim this collection for
+            # them, and mark them as this device's owner ("me") so the UI only
+            # offers check-outs from their own collection.
+            if claim_as_mine and (owner_first or owner_last):
                 with db.connect() as c:
                     cid = db.collection_id_for_username(c, username)
                     if cid:
@@ -3665,6 +3693,8 @@ class App(tk.Tk):
                         uid = existing["id"] if existing else db.add_user(
                             c, owner_first, owner_last)
                         db.claim_collection(c, cid, uid)
+                        self.settings["claimed_member_id"] = uid
+                        config.save(self.settings)
                 self.after(0, self.refresh_members)
 
             self.after(0, self.refresh_games)
