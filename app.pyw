@@ -524,6 +524,10 @@ class App(tk.Tk):
         self._sort_col: Optional[str] = None
         self._sort_rev: bool = False
         self._table_games: list = []
+        self._card_games: list = []      # full ordered list backing the card view
+        self._cards_rendered: int = 0    # how many card widgets are built (batched)
+        self._card_open_loans: dict = {}
+        self._card_play_counts: dict = {}
         self._lazy_generation: int = 0   # incremented each refresh to cancel stale loaders
         # ── multi-collection state ──
         self._active_collection: Optional[int] = None   # None = "All"
@@ -1394,9 +1398,10 @@ class App(tk.Tk):
 
         scroll = ttk.Scrollbar(self._card_frame, orient="vertical")
         scroll.pack(side="right", fill="y")
+        self._card_scroll = scroll
 
         self.games_canvas = tk.Canvas(self._card_frame, highlightthickness=0, background=C_BG,
-                                      yscrollcommand=scroll.set)
+                                      yscrollcommand=self._card_yscroll)
         scroll.configure(command=self.games_canvas.yview)
         self.games_canvas.pack(side="left", fill="both", expand=True)
 
@@ -1959,14 +1964,21 @@ class App(tk.Tk):
                 and (self._active_collection is not None or self._compare_mode != "off"))
         )
 
-    def _refresh_card_view(self, games, open_loans, play_counts) -> None:
-        # Hide the canvas window during the destroy+create loop so the
-        # geometry manager doesn't recalculate layout on every widget change.
-        self.games_canvas.itemconfigure(self.games_window_id, state="hidden")
+    # Cards are rendered in batches as the user scrolls, so a large library
+    # opens fast instead of building every card widget up front.
+    _CARD_BATCH = 60
 
+    def _refresh_card_view(self, games, open_loans, play_counts) -> None:
         for card in self._cards:
             card.destroy()
         self._cards.clear()
+
+        # Store the full set; _render_more_cards() builds it batch by batch.
+        self._card_games = games
+        self._card_open_loans = open_loans
+        self._card_play_counts = play_counts
+        self._cards_rendered = 0
+        self._lazy_generation += 1   # cancel any in-flight loaders from a prior view
 
         if not games:
             msg = (
@@ -1978,26 +1990,54 @@ class App(tk.Tk):
                               padding=self.SP["xl"])
             empty.grid(row=0, column=0)
             self._cards.append(empty)
-            self.games_canvas.itemconfigure(self.games_window_id, state="normal")
+            self.after(80, lambda: self._update_alpha_bar([]))
             return
 
+        self._render_more_cards()
+        self.after(80, lambda g=games: self._update_alpha_bar(g))
+
+    def _render_more_cards(self) -> None:
+        """Build the next batch of card widgets (called initially and on scroll)."""
+        games = getattr(self, "_card_games", None)
+        if not games:
+            return
+        start = self._cards_rendered
+        if start >= len(games):
+            return
+        end = min(start + self._CARD_BATCH, len(games))
+
+        self.games_canvas.itemconfigure(self.games_window_id, state="hidden")
         lazy_queue: list[tuple] = []
-        for game in games:
-            card, lazy = self._build_card(game, open_loans.get(game["bgg_id"]), play_counts)
+        for game in games[start:end]:
+            card, lazy = self._build_card(
+                game, self._card_open_loans.get(game["bgg_id"]), self._card_play_counts)
             self._cards.append(card)
             lazy_queue.append(lazy)
+        self._cards_rendered = end
 
         self._layout_cards(self.games_canvas.winfo_width())
         self.games_canvas.itemconfigure(self.games_window_id, state="normal")
 
-        # Kick off lazy image loading and rebuild the A-Z bar
-        self._lazy_generation += 1
         threading.Thread(
             target=self._lazy_load_images,
             args=(lazy_queue, self._lazy_generation),
             daemon=True,
         ).start()
-        self.after(80, lambda g=games: self._update_alpha_bar(g))
+
+    def _flush_card_batches(self) -> None:
+        """Render all remaining card batches now (used before an A–Z jump)."""
+        while self._cards_rendered < len(getattr(self, "_card_games", [])):
+            self._render_more_cards()
+
+    def _card_yscroll(self, first: str, last: str) -> None:
+        """Scrollbar callback: keep the bar in sync and load more cards as the
+        bottom approaches."""
+        self._card_scroll.set(first, last)
+        try:
+            if float(last) > 0.9 and self._cards_rendered < len(getattr(self, "_card_games", [])):
+                self.after_idle(self._render_more_cards)
+        except (ValueError, tk.TclError):
+            pass
 
     # ---------- lazy image loading ----------
 
@@ -2106,6 +2146,11 @@ class App(tk.Tk):
 
     def _scroll_to_card(self, card_idx: int) -> None:
         """Scroll the card canvas so the card at card_idx is near the top."""
+        # The target card may not be built yet (cards load in batches) — render
+        # everything up to it first.
+        if card_idx >= self._cards_rendered:
+            self._flush_card_batches()
+            self.update_idletasks()
         if card_idx >= len(self._cards):
             return
         card = self._cards[card_idx]
