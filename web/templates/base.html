@@ -100,16 +100,24 @@
     </div>
     <form method="post" action="/sync">
       <div class="modal-body">
-        <label class="form-label">BGG Username</label>
-        <input type="text" name="bgg_username" class="form-control" value="{{ bgg_username }}" placeholder="e.g. Ballewcifer" autocomplete="off">
+        <label class="form-label" for="sync-username">BGG Username</label>
+        <input type="text" id="sync-username" name="bgg_username" class="form-control" value="{{ bgg_username }}" placeholder="e.g. Ballewcifer" autocomplete="off">
         <p class="muted" style="font-size:.8rem;margin-top:6px">Pulls your public collection from BoardGameGeek.</p>
 
-        <label class="form-label mt-sm">Collection owner (optional)</label>
+        {% if already_claimed %}
+        <p class="muted mt-sm" style="font-size:.85rem">You've already claimed a collection as your own.</p>
+        {% else %}
+        <label class="filter-check mt-sm" style="display:flex;gap:6px;align-items:center">
+          <input type="checkbox" id="sync-claim" name="claim_as_mine" value="1">
+          Claim this collection as my own
+        </label>
+        <label class="form-label mt-sm" for="sync-owner-first">Your name</label>
         <div style="display:flex; gap:8px">
-          <input type="text" name="owner_first" class="form-control" placeholder="First name" autocomplete="off">
-          <input type="text" name="owner_last"  class="form-control" placeholder="Last name"  autocomplete="off">
+          <input type="text" id="sync-owner-first" name="owner_first" class="form-control" placeholder="First name" autocomplete="off" aria-label="Owner first name">
+          <input type="text" id="sync-owner-last"  name="owner_last"  class="form-control" placeholder="Last name"  autocomplete="off" aria-label="Owner last name">
         </div>
-        <p class="muted" style="font-size:.8rem;margin-top:6px">Adds this person as a member and lets them check out only games from this collection. Leave blank to skip.</p>
+        <p class="muted" style="font-size:.8rem;margin-top:6px">Adds you as a member and restricts check-outs so only you can borrow games from this collection.</p>
+        {% endif %}
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" onclick="closeModal('modal-sync')">Cancel</button>

@@ -43,10 +43,10 @@
     </div>
     <form method="post" action="/members/add">
       <div class="modal-body">
-        <label class="form-label">First Name</label>
-        <input type="text" name="first_name" class="form-control" required autofocus>
-        <label class="form-label mt-sm">Last Name</label>
-        <input type="text" name="last_name" class="form-control" required>
+        <label class="form-label" for="m-first">First Name</label>
+        <input type="text" id="m-first" name="first_name" class="form-control" required autofocus>
+        <label class="form-label mt-sm" for="m-last">Last Name</label>
+        <input type="text" id="m-last" name="last_name" class="form-control" required>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" onclick="closeModal('modal-add-member')">Cancel</button>

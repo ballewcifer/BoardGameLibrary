@@ -307,6 +307,10 @@ def game_detail(bgg_id):
         # collection that contains it, plus members who claimed nothing).
         allowed   = db.members_allowed_to_checkout(c, bgg_id)
         users     = [_row_to_dict(r) for r in db.list_users(c) if r["id"] in allowed]
+        # If this device's owner has claimed a collection, only their own games
+        # may be checked out here.
+        my_id = _config.load().get("claimed_member_id")
+        can_checkout_here = (not my_id) or db.user_can_checkout(c, my_id, bgg_id)
 
     today = datetime.now().date().isoformat()
     if loan:
@@ -318,6 +322,7 @@ def game_detail(bgg_id):
                            plays=plays,
                            stats=stats,
                            users=users,
+                           can_checkout_here=can_checkout_here,
                            today=today)
 
 
@@ -667,7 +672,7 @@ def add_game():
 # BGG Sync
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _run_sync(owner_first: str = "", owner_last: str = ""):
+def _run_sync(owner_first: str = "", owner_last: str = "", claim_as_mine: bool = False):
     global _sync_status
     settings = _settings()
     username = settings.get("bgg_username", "")
@@ -723,8 +728,9 @@ def _run_sync(owner_first: str = "", owner_last: str = ""):
                 cid = db.get_or_create_collection(c, username, username)
                 db.replace_collection_games(c, cid, [g.bgg_id for g in collection])
 
-                # Optionally add the importer as a member and claim the collection.
-                if owner_first or owner_last:
+                # Optionally add the importer as a member, claim the collection
+                # for them, and mark them as this device's owner ("me").
+                if claim_as_mine and (owner_first or owner_last):
                     existing = next(
                         (u for u in db.list_users(c)
                          if u["first_name"].strip().lower() == owner_first.lower()
@@ -734,6 +740,9 @@ def _run_sync(owner_first: str = "", owner_last: str = ""):
                     uid = existing["id"] if existing else db.add_user(
                         c, owner_first, owner_last)
                     db.claim_collection(c, cid, uid)
+                    s = _config.load()
+                    s["claimed_member_id"] = uid
+                    _config.save(s)
 
         _sync_status["message"] = f"Sync complete — {len(collection)} games."
     except Exception as e:
@@ -753,6 +762,7 @@ def sync():
         _config.save(s)
     owner_first = request.form.get("owner_first", "").strip()
     owner_last  = request.form.get("owner_last", "").strip()
+    claim_as_mine = request.form.get("claim_as_mine") == "1"
     with _sync_lock:
         if _sync_status["running"]:
             flash("Sync already in progress.", "info")
@@ -764,7 +774,8 @@ def sync():
         _sync_status["message"] = "Starting sync…"
         _sync_status["error"]   = None
     threading.Thread(target=_run_sync,
-                     kwargs={"owner_first": owner_first, "owner_last": owner_last},
+                     kwargs={"owner_first": owner_first, "owner_last": owner_last,
+                             "claim_as_mine": claim_as_mine},
                      daemon=True).start()
     flash("BGG sync started — refresh in a moment.", "info")
     return redirect(url_for("dashboard"))
@@ -785,6 +796,7 @@ def inject_globals():
         "now": datetime.now(),
         "sync_status": _sync_status,
         "bgg_username": _config.load().get("bgg_username", ""),
+        "already_claimed": bool(_config.load().get("claimed_member_id")),
     }
 
 

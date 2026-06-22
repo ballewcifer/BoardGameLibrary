@@ -176,14 +176,14 @@
       <button class="modal-close" onclick="closeModal('modal-random')">✕</button>
     </div>
     <div class="modal-body">
-      <label class="form-label">Players</label>
+      <label class="form-label" for="rnd-players">Players</label>
       <select id="rnd-players" class="form-control">
         <option value="Any">Any</option>
         <option>1</option><option>2</option><option>3</option><option>4</option>
         <option>5</option><option>6</option><option>7</option><option value="8+">8+</option>
       </select>
 
-      <label class="form-label mt-sm">Max play time</label>
+      <label class="form-label mt-sm" for="rnd-time">Max play time</label>
       <select id="rnd-time" class="form-control">
         <option value="Any">Any</option>
         <option value="30">≤ 30 min</option>
@@ -192,7 +192,7 @@
         <option value="120">≤ 120 min</option>
       </select>
 
-      <label class="form-label mt-sm">Complexity</label>
+      <label class="form-label mt-sm" for="rnd-complexity">Complexity</label>
       <select id="rnd-complexity" class="form-control">
         <option value="Any">Any</option>
         <option value="light">Light (1–2)</option>
@@ -256,14 +256,14 @@
           The owner can check out only games from their collection. Members who
           claim nothing can borrow any game.
         </p>
-        <label class="form-label">Collection</label>
-        <select name="collection_id" class="form-control">
+        <label class="form-label" for="claim-collection">Collection</label>
+        <select id="claim-collection" name="collection_id" class="form-control">
           {% for col in collections %}
           <option value="{{ col.id }}">{{ col.name }}{% if col.owner_name %} — {{ col.owner_name }}{% endif %}</option>
           {% endfor %}
         </select>
-        <label class="form-label mt-sm">Owner</label>
-        <select name="user_id" class="form-control">
+        <label class="form-label mt-sm" for="claim-owner">Owner</label>
+        <select id="claim-owner" name="user_id" class="form-control">
           <option value="">(no owner — release claim)</option>
           {% for u in members %}
           <option value="{{ u.id }}">{{ u.first_name }} {{ u.last_name }}</option>

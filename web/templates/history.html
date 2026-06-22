@@ -133,23 +133,23 @@
       <div class="modal-body">
         <div id="edit-loan-title" class="mb" style="font-weight:600"></div>
 
-        <label class="form-label">Checked Out</label>
+        <label class="form-label" for="edit-checked-out">Checked Out</label>
         <div class="input-with-btn">
           <input type="datetime-local" name="checked_out_at" id="edit-checked-out" class="form-control" required>
           <button type="button" class="btn btn-secondary btn-sm" onclick="setNow('edit-checked-out')">Now</button>
         </div>
 
-        <label class="form-label mt-sm">Returned (leave blank = still out)</label>
+        <label class="form-label mt-sm" for="edit-returned">Returned (leave blank = still out)</label>
         <div class="input-with-btn">
           <input type="datetime-local" name="returned_at" id="edit-returned" class="form-control">
           <button type="button" class="btn btn-secondary btn-sm" onclick="setNow('edit-returned')">Now</button>
           <button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById('edit-returned').value=''">Clear</button>
         </div>
 
-        <label class="form-label mt-sm">Due Date</label>
+        <label class="form-label mt-sm" for="edit-due-date">Due Date</label>
         <input type="date" name="due_date" id="edit-due-date" class="form-control">
 
-        <label class="form-label mt-sm">Notes</label>
+        <label class="form-label mt-sm" for="edit-notes">Notes</label>
         <input type="text" name="notes" id="edit-notes" class="form-control">
       </div>
       <div class="modal-footer">

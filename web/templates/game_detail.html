@@ -39,8 +39,10 @@
     </form>
   {% else %}
     Available
-    {% if users %}
+    {% if can_checkout_here and users %}
       <button class="btn btn-sm btn-light ml" onclick="openModal('modal-checkout')">Check Out</button>
+    {% elif not can_checkout_here %}
+      <span class="muted ml" style="font-size:.85rem">Not in your collection</span>
     {% endif %}
   {% endif %}
 </div>
@@ -119,17 +121,17 @@
     </div>
     <form method="post" action="/games/{{ game.bgg_id }}/checkout">
       <div class="modal-body">
-        <label class="form-label">Member</label>
-        <select name="user_id" class="form-control" required>
+        <label class="form-label" for="co-member">Member</label>
+        <select id="co-member" name="user_id" class="form-control" required>
           <option value="">— select —</option>
           {% for u in users %}
             <option value="{{ u.id }}">{{ u.first_name }} {{ u.last_name }}</option>
           {% endfor %}
         </select>
-        <label class="form-label mt-sm">Due Date (optional)</label>
-        <input type="date" name="due_date" class="form-control">
-        <label class="form-label mt-sm">Notes</label>
-        <input type="text" name="notes" class="form-control" placeholder="Optional notes…">
+        <label class="form-label mt-sm" for="co-due">Due Date (optional)</label>
+        <input type="date" id="co-due" name="due_date" class="form-control">
+        <label class="form-label mt-sm" for="co-notes">Notes</label>
+        <input type="text" id="co-notes" name="notes" class="form-control" placeholder="Optional notes…">
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" onclick="closeModal('modal-checkout')">Cancel</button>
@@ -149,18 +151,18 @@
     <form method="post" action="/plays/add">
       <input type="hidden" name="game_id" value="{{ game.bgg_id }}">
       <div class="modal-body">
-        <label class="form-label">Date Played</label>
-        <input type="date" name="played_at" class="form-control" value="{{ today }}" required>
-        <label class="form-label mt-sm">Players (comma-separated)</label>
+        <label class="form-label" for="dlp-date">Date Played</label>
+        <input type="date" id="dlp-date" name="played_at" class="form-control" value="{{ today }}" required>
+        <label class="form-label mt-sm" for="dlp-players">Players (comma-separated)</label>
         <input type="text" name="player_names" id="dlp-players" class="form-control" placeholder="Alice, Bob, Carol">
-        <label class="form-label mt-sm">Winner</label>
+        <label class="form-label mt-sm" for="dlp-winner">Winner</label>
         <select name="winner" id="dlp-winner" class="form-control"></select>
-        <label class="form-label mt-sm">Duration (minutes)</label>
-        <input type="number" name="duration_minutes" class="form-control" min="1">
-        <label class="form-label mt-sm">Scores</label>
-        <input type="text" name="scores" class="form-control" placeholder="Alice: 45, Bob: 37">
-        <label class="form-label mt-sm">Notes</label>
-        <input type="text" name="notes" class="form-control">
+        <label class="form-label mt-sm" for="dlp-duration">Duration (minutes)</label>
+        <input type="number" id="dlp-duration" name="duration_minutes" class="form-control" min="1">
+        <label class="form-label mt-sm" for="dlp-scores">Scores</label>
+        <input type="text" id="dlp-scores" name="scores" class="form-control" placeholder="Alice: 45, Bob: 37">
+        <label class="form-label mt-sm" for="dlp-notes">Notes</label>
+        <input type="text" id="dlp-notes" name="notes" class="form-control">
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" onclick="closeModal('modal-log-play')">Cancel</button>
@@ -179,14 +181,14 @@
     </div>
     <form method="post" action="/games/{{ game.bgg_id }}/update">
       <div class="modal-body">
-        <label class="form-label">Best At (players)</label>
-        <input type="text" name="best_players" class="form-control" value="{{ game.best_players or '' }}" placeholder="e.g. 4">
-        <label class="form-label mt-sm">My Rating (1–10)</label>
-        <input type="number" name="my_rating" class="form-control" min="1" max="10" value="{{ game.my_rating or '' }}">
-        <label class="form-label mt-sm">Tags (comma-separated)</label>
-        <input type="text" name="tags" class="form-control" value="{{ game.tags or '' }}" placeholder="Party, Family, Filler">
-        <label class="form-label mt-sm">Comment</label>
-        <input type="text" name="my_comment" class="form-control" value="{{ game.my_comment or '' }}">
+        <label class="form-label" for="eg-best">Best At (players)</label>
+        <input type="text" id="eg-best" name="best_players" class="form-control" value="{{ game.best_players or '' }}" placeholder="e.g. 4">
+        <label class="form-label mt-sm" for="eg-rating">My Rating (1–10)</label>
+        <input type="number" id="eg-rating" name="my_rating" class="form-control" min="1" max="10" value="{{ game.my_rating or '' }}">
+        <label class="form-label mt-sm" for="eg-tags">Tags (comma-separated)</label>
+        <input type="text" id="eg-tags" name="tags" class="form-control" value="{{ game.tags or '' }}" placeholder="Party, Family, Filler">
+        <label class="form-label mt-sm" for="eg-comment">Comment</label>
+        <input type="text" id="eg-comment" name="my_comment" class="form-control" value="{{ game.my_comment or '' }}">
         <label class="form-label mt-sm" style="display:flex;align-items:center;gap:8px">
           <input type="checkbox" name="has_insert" value="1" {% if game.has_insert %}checked{% endif %}>
           Has 3D printed insert
