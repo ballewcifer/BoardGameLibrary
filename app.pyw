@@ -2369,9 +2369,11 @@ class App(tk.Tk):
         )
         img_canvas._cover_title_id = _title_id  # lazy-loader hides this
 
-        # Favourite star — 34×34px circular chip, top-right of cover
+        # Favourite star — 34×34px circular chip, top-right of cover.
+        # A thin outline keeps the white chip visible on light cover art.
         _star_bg = img_canvas.create_oval(0, 0, 0, 0,
-                                          fill="white", outline="", tags="star")
+                                          fill="white", outline=C_LINE_200,
+                                          width=1, tags="star")
         _star_id = img_canvas.create_text(
             0, 0,
             text="★" if is_fav else "☆",
@@ -2399,13 +2401,18 @@ class App(tk.Tk):
                                 lambda e: img_canvas.itemconfigure(_star_bg,
                                           fill="white" if True else C_SURFACE))
 
-        # Expansion ribbon — bottom-left of cover
+        # Expansion ribbon — bottom-left of cover, sized to fit the label so it
+        # never clips (the text width grows with DPI / card size).
         if game["is_expansion"]:
-            img_canvas.create_rectangle(0, _IH - 22, 80, _IH,
-                                        fill=C_BLUE_050, outline="")
-            img_canvas.create_text(SP["sm"], _IH - 11, anchor="w",
-                                   text="Expansion", fill=C_BLUE_800,
-                                   font=self.FONTS["label"])
+            _exp_id = img_canvas.create_text(
+                SP["sm"], _IH - 12, anchor="w", text="Expansion",
+                fill=C_BLUE_800, font=self.FONTS["label"])
+            bb = img_canvas.bbox(_exp_id)
+            x2 = (bb[2] + SP["sm"]) if bb else 90
+            y1 = (bb[1] - 3) if bb else (_IH - 22)
+            _exp_bg = img_canvas.create_rectangle(0, y1, x2, _IH,
+                                                  fill=C_BLUE_050, outline="")
+            img_canvas.tag_lower(_exp_bg, _exp_id)   # behind the text, above the image
 
         # ── card body ──────────────────────────────────────────────────────────
         _is_sm = self._card_size == "sm"
