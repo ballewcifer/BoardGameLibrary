@@ -3565,30 +3565,36 @@ class App(tk.Tk):
         entry.pack(padx=16, pady=(0, 8))
         entry.focus_set()
 
-        ttk.Label(dialog, text="BGG password:", padding=(16, 4, 16, 2)).pack(anchor="w")
+        ttk.Label(dialog, text="BGG password (optional):",
+                  padding=(16, 4, 16, 2)).pack(anchor="w")
         pwd_var = tk.StringVar(value=password)
         ttk.Entry(dialog, textvariable=pwd_var, width=34, show="●").pack(padx=16, pady=(0, 2))
         tk.Label(
-            dialog,
-            text="Optional — only needed for private collections\n"
-                 "(same approach as BG Stats).",
+            dialog, text="Only needed for private collections.",
             bg=C_BG, fg="#888", font=("Segoe UI", 8), padx=16, justify="left",
         ).pack(anchor="w", pady=(0, 8))
 
-        # Claim this collection as your own.
+        # Claim this collection as your own — disabled once you've claimed one.
+        already_claimed = bool(self.settings.get("claimed_member_id"))
+        _state = "disabled" if already_claimed else "normal"
         claim_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(dialog, text="Claim this collection as my own",
-                        variable=claim_var).pack(anchor="w", padx=16, pady=(2, 0))
+                        variable=claim_var, state=_state).pack(
+                            anchor="w", padx=16, pady=(2, 0))
         _name_row = ttk.Frame(dialog)
         _name_row.pack(padx=16, pady=(2, 2), anchor="w")
         first_var = tk.StringVar()
         last_var  = tk.StringVar()
-        ttk.Entry(_name_row, textvariable=first_var, width=15).pack(side="left")
-        ttk.Entry(_name_row, textvariable=last_var, width=16).pack(side="left", padx=(6, 0))
+        ttk.Entry(_name_row, textvariable=first_var, width=15,
+                  state=_state).pack(side="left")
+        ttk.Entry(_name_row, textvariable=last_var, width=16,
+                  state=_state).pack(side="left", padx=(6, 0))
         tk.Label(
             dialog,
-            text="Adds you as a member and restricts check-outs so only you can\n"
-                 "borrow games from this collection.",
+            text=("You've already claimed a collection."
+                  if already_claimed else
+                  "Adds you as a member and restricts check-outs so only you can\n"
+                  "borrow games from this collection."),
             bg=C_BG, fg="#888", font=("Segoe UI", 8), padx=16, justify="left",
         ).pack(anchor="w", pady=(0, 8))
 
@@ -3630,6 +3636,7 @@ class App(tk.Tk):
         ttk.Button(btn_frame, text="Cancel", command=dialog.destroy).pack(side="left")
         ttk.Button(btn_frame, text="Save & Sync", command=do_import).pack(side="right")
         dialog.bind("<Return>", lambda *_: do_import())
+        dialog.bind("<Escape>", lambda *_: dialog.destroy())
         dialog.grab_set()
 
     def _import_from_username_bg(self, username: str, token: str,

@@ -1,13 +1,36 @@
 /* Board Game Library — web client JS */
 
 // ── Modal helpers ──────────────────────────────────────────────────────────
+let _modalLastFocus = null;
+
 function openModal(id) {
   const el = document.getElementById(id);
-  if (el) { el.hidden = false; el.focus && el.focus(); }
+  if (!el) return;
+  _modalLastFocus = document.activeElement;     // restore focus on close
+  el.hidden = false;
+
+  const dlg = el.querySelector('.modal');
+  if (dlg) {
+    dlg.setAttribute('role', 'dialog');
+    dlg.setAttribute('aria-modal', 'true');
+    dlg.setAttribute('tabindex', '-1');
+    const h = dlg.querySelector('.modal-header h3, h3');
+    if (h && h.textContent) dlg.setAttribute('aria-label', h.textContent.trim());
+    const x = dlg.querySelector('.modal-close');
+    if (x && !x.getAttribute('aria-label')) x.setAttribute('aria-label', 'Close dialog');
+  }
+  // Move focus into the dialog (first real control, else the dialog itself).
+  const focusable = el.querySelector(
+    'input:not([type=hidden]), select, textarea, button:not(.modal-close)');
+  (focusable || dlg || el).focus();
 }
+
 function closeModal(id) {
   const el = document.getElementById(id);
-  if (el) el.hidden = true;
+  if (!el) return;
+  el.hidden = true;
+  if (_modalLastFocus && _modalLastFocus.focus) _modalLastFocus.focus();
+  _modalLastFocus = null;
 }
 
 // ── Winner dropdown (populated from the listed players) ─────────────────────
@@ -39,17 +62,21 @@ function bindWinner(playersInputId, winnerSelectId) {
   syncWinnerOptions(pin.value, sel, sel.value);
 }
 
+function _dismissModal(m) {
+  m.hidden = true;
+  if (_modalLastFocus && _modalLastFocus.focus) _modalLastFocus.focus();
+  _modalLastFocus = null;
+}
+
 // Close modal when clicking backdrop
 document.addEventListener('click', e => {
-  if (e.target.classList.contains('modal-backdrop')) {
-    e.target.hidden = true;
-  }
+  if (e.target.classList.contains('modal-backdrop')) _dismissModal(e.target);
 });
 
 // Close modal on Escape
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
-    document.querySelectorAll('.modal-backdrop:not([hidden])').forEach(m => { m.hidden = true; });
+    document.querySelectorAll('.modal-backdrop:not([hidden])').forEach(_dismissModal);
   }
 });
 
