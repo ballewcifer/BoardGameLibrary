@@ -286,7 +286,14 @@ def delete_collection(c: sqlite3.Connection, collection_id: int) -> None:
 
 def claim_collection(c: sqlite3.Connection, collection_id: int,
                      user_id: Optional[int]) -> None:
-    """Set (or clear, with user_id=None) the member who owns a collection."""
+    """Set (or clear, with user_id=None) the member who owns a collection.
+
+    A member may own only one collection, so claiming releases any other
+    collection that member previously owned.
+    """
+    if user_id is not None:
+        c.execute("UPDATE collections SET owner_user_id = NULL WHERE owner_user_id = ?",
+                  (user_id,))
     c.execute("UPDATE collections SET owner_user_id = ? WHERE id = ?",
               (user_id, collection_id))
 
@@ -328,8 +335,9 @@ def members_allowed_to_checkout(c: sqlite3.Connection, game_id: int) -> set:
 def clear_collections(c: sqlite3.Connection, collection_ids: list[int]) -> list[int]:
     """Delete the given collections and any games left orphaned by the removal.
 
-    A game shared with a collection that is *not* being cleared is kept; a game
-    that ends up in no collection at all is deleted (its loans/plays cascade).
+    A game shared with a collection that is *not* being cleared is kept. A game
+    that ends up in no collection is deleted — UNLESS it has play history, which
+    is preserved (the game stays so its plays are never lost).
     Returns the bgg_ids of the deleted games so callers can drop cached images.
     """
     ids = [int(i) for i in collection_ids]
@@ -345,15 +353,17 @@ def clear_collections(c: sqlite3.Connection, collection_ids: list[int]) -> list[
     # Removing the collections cascades their game_collections links.
     c.execute(f"DELETE FROM collections WHERE id IN ({qmarks})", ids)
 
-    orphaned = [
-        gid for gid in affected
-        if not c.execute(
-            "SELECT 1 FROM game_collections WHERE game_id = ? LIMIT 1", (gid,)
-        ).fetchone()
-    ]
+    orphaned = []
+    for gid in affected:
+        if c.execute("SELECT 1 FROM game_collections WHERE game_id = ? LIMIT 1",
+                     (gid,)).fetchone():
+            continue   # still in another collection
+        if c.execute("SELECT 1 FROM plays WHERE game_id = ? LIMIT 1",
+                     (gid,)).fetchone():
+            continue   # keep games with play history so plays aren't deleted
+        orphaned.append(gid)
     if orphaned:
         om = ",".join("?" * len(orphaned))
-        # loans/plays cascade via ON DELETE CASCADE (foreign_keys is ON).
         c.execute(f"DELETE FROM games WHERE bgg_id IN ({om})", orphaned)
     return orphaned
 
