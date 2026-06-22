@@ -2369,37 +2369,13 @@ class App(tk.Tk):
         )
         img_canvas._cover_title_id = _title_id  # lazy-loader hides this
 
-        # Favourite star — 34×34px circular chip, top-right of cover.
-        # A thin outline keeps the white chip visible on light cover art.
-        _star_bg = img_canvas.create_oval(0, 0, 0, 0,
-                                          fill="white", outline=C_LINE_200,
-                                          width=1, tags="star")
-        _star_id = img_canvas.create_text(
-            0, 0,
-            text="★" if is_fav else "☆",
-            fill=C_STAR_FILL if is_fav else C_INK_500,
-            font=("Segoe UI", 15, "bold"),
-            anchor="center", tags="star",
-        )
-
+        # Keep the cover image + title overlay centred on resize. (The favourite
+        # star now lives in the card body, next to the status badge.)
         def _place_overlays(e=None, iid=_img_id, h=_IH):
             w = img_canvas.winfo_width()
             img_canvas.coords(iid, w // 2, h // 2)
             img_canvas.coords(_title_id, w // 2, h // 2)
-            # Star: 34×34px circle, 10px inset from top-right
-            sx, sy, r = w - 10 - 17, 10 + 17, 17
-            img_canvas.coords(_star_bg, sx - r, sy - r, sx + r, sy + r)
-            img_canvas.coords(_star_id, sx, sy)
         img_canvas.bind("<Configure>", _place_overlays)
-
-        for _it in (_star_bg, _star_id):
-            img_canvas.tag_bind(_it, "<Button-1>",
-                                lambda e, g=game: self.on_toggle_favorite(g))
-            img_canvas.tag_bind(_it, "<Enter>",
-                                lambda e: img_canvas.itemconfigure(_star_bg, fill="white"))
-            img_canvas.tag_bind(_it, "<Leave>",
-                                lambda e: img_canvas.itemconfigure(_star_bg,
-                                          fill="white" if True else C_SURFACE))
 
         # Expansion ribbon — bottom-left of cover, sized to fit the label so it
         # never clips (the text width grows with DPI / card size).
@@ -2420,10 +2396,17 @@ class App(tk.Tk):
                         padx=SP["sm"] if _is_sm else SP["lg"], pady=SP["sm"])
         body.pack(fill="both", expand=True)
 
-        # Status badge (prototype: 12.5px bold, 4px/10px padding)
-        tk.Label(body, text=badge_txt, bg=badge_bg, fg=badge_fg,
-                 font=("Segoe UI", 12, "bold"), padx=10, pady=4,
-                 ).pack(anchor="w", pady=(0, SP["xs"]))
+        # Status badge + favourite star on one row.
+        status_row = tk.Frame(body, bg=C_SURFACE)
+        status_row.pack(fill="x", pady=(0, SP["xs"]))
+        tk.Label(status_row, text=badge_txt, bg=badge_bg, fg=badge_fg,
+                 font=("Segoe UI", 12, "bold"), padx=10, pady=4).pack(side="left")
+        _star_lbl = tk.Label(
+            status_row, text="★" if is_fav else "☆",
+            bg=C_SURFACE, fg=C_STAR_FILL if is_fav else C_INK_500,
+            font=("Segoe UI", 17, "bold"), cursor="hand2", padx=SP["sm"])
+        _star_lbl.pack(side="left")
+        _star_lbl.bind("<Button-1>", lambda e, g=game: self.on_toggle_favorite(g))
 
         # Loaned-to line: "To Name · due Date" (prototype: 13px ink-600)
         if out_to:
@@ -3223,7 +3206,7 @@ class App(tk.Tk):
         ).grid(row=9, column=0, sticky="w")
         tk.Label(
             frame,
-            text="Removes all games, images, play logs,\nand loan history. Members are kept.",
+            text="Removes games and loan history. Play history is kept\n(games with logged plays stay). Members are kept.",
             bg=C_BG, fg=C_INK_500,
             font=("Segoe UI", 8), justify="left",
         ).grid(row=9, column=1, sticky="w", padx=(12, 0))
@@ -3238,50 +3221,73 @@ class App(tk.Tk):
         win.grab_set()
 
     def on_clear_collection(self) -> None:
-        # With 2+ collections, let the user choose which to clear instead of
-        # wiping everything.
         with db.connect() as c:
             collections = db.list_collections(c)
         if len(collections) >= 2:
             self._clear_collection_picker(collections)
-            return
-        self._clear_entire_library()
+        elif len(collections) == 1:
+            self._clear_one_collection(collections[0])
+        else:
+            self._clear_entire_library()
 
-    def _clear_entire_library(self) -> None:
+    def _drop_images(self, bgg_ids) -> None:
+        """Delete cached cover files for the given game ids."""
+        for gid in bgg_ids:
+            for p in IMAGES_DIR.glob(f"{gid}.*"):
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
+
+    def _clear_one_collection(self, col) -> None:
+        name = col["name"]
         if not messagebox.askyesno(
             "Clear collection",
-            "This will permanently delete ALL games, play logs, and loan history.\n\n"
-            "Members and settings will be kept.\n\n"
-            "Are you sure?",
-            icon="warning",
-        ):
-            return
-        # Second confirmation — hard to click through by accident
-        if not messagebox.askyesno(
-            "Are you sure?",
-            "This cannot be undone. Delete the entire collection?",
+            f"Remove the collection “{name}” and its games?\n\n"
+            "Play history is kept — any game with logged plays stays in your "
+            "library. Members and settings are kept.\n\nThis cannot be undone.",
             icon="warning",
         ):
             return
         with db.connect() as c:
-            c.execute("DELETE FROM plays")
-            c.execute("DELETE FROM loans")
-            c.execute("DELETE FROM games")
-            c.execute("DELETE FROM collections")
-        # Remove all cached images
-        try:
-            if IMAGES_DIR.exists():
-                shutil.rmtree(IMAGES_DIR)
-                IMAGES_DIR.mkdir(parents=True, exist_ok=True)
-        except Exception:
-            pass
+            deleted = db.clear_collections(c, [col["id"]])
+        self._drop_images(deleted)
         self._image_cache.clear()
         self._gradient_cache.clear()
         self._placeholder_img = None
         self._active_collection = None
         self._collection_sig = None
         self.refresh_all()
-        self.status("Collection cleared.")
+        self.status(
+            f"Cleared “{name}”; deleted {len(deleted)} game"
+            f"{'s' if len(deleted) != 1 else ''} (games with plays kept).")
+
+    def _clear_entire_library(self) -> None:
+        if not messagebox.askyesno(
+            "Clear library",
+            "This will remove all games and loan history. Play history is kept "
+            "(games with logged plays stay).\n\nMembers and settings are kept.\n\n"
+            "Are you sure?",
+            icon="warning",
+        ):
+            return
+        with db.connect() as c:
+            # Keep games that have plays so their play history survives.
+            deleted = [r["bgg_id"] for r in c.execute(
+                "SELECT bgg_id FROM games "
+                "WHERE bgg_id NOT IN (SELECT DISTINCT game_id FROM plays)")]
+            c.execute("DELETE FROM games "
+                      "WHERE bgg_id NOT IN (SELECT DISTINCT game_id FROM plays)")
+            c.execute("DELETE FROM collections")
+        self._drop_images(deleted)
+        self._image_cache.clear()
+        self._gradient_cache.clear()
+        self._placeholder_img = None
+        self._active_collection = None
+        self._collection_sig = None
+        self.refresh_all()
+        self.status(f"Library cleared; {len(deleted)} game"
+                    f"{'s' if len(deleted) != 1 else ''} removed (games with plays kept).")
 
     def _clear_collection_picker(self, collections: list) -> None:
         """Dialog to choose which collection(s) to clear (2+ collections)."""
@@ -3327,8 +3333,9 @@ class App(tk.Tk):
                 "Clear collections",
                 f"Permanently clear {len(sel)} collection"
                 f"{'s' if len(sel) != 1 else ''}?\n\n• " + "\n• ".join(names)
-                + "\n\nGames kept only by these collections will be deleted, "
-                  "along with their play and loan history.\nThis cannot be undone.",
+                + "\n\nGames kept only by these collections will be deleted. "
+                  "Play history is kept — any game with logged plays stays.\n"
+                  "This cannot be undone.",
                 icon="warning", parent=win,
             ):
                 return
