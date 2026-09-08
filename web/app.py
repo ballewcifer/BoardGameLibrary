@@ -294,13 +294,26 @@ def clear_collections():
         flash("No collections selected.", "error")
         return redirect(url_for("games"))
     with db.connect() as c:
+        # Collections synced from BGG are looked up (and recreated if
+        # missing) by username -- clearing one without also forgetting its
+        # username would have the next sync silently bring it right back.
+        placeholders = ",".join("?" * len(ids))
+        cleared_usernames = [r["bgg_username"] for r in c.execute(
+            f"SELECT bgg_username FROM collections WHERE id IN ({placeholders})", ids)]
         deleted = db.clear_collections(c, ids)
+        s = _config.load()
+        changed = False
         # If the device owner's collection was just cleared, drop the claim so a
         # new collection can be claimed.
-        s = _config.load()
         mid = s.get("claimed_member_id")
         if mid and not db.owned_collection_ids(c, mid):
             s.pop("claimed_member_id", None)
+            changed = True
+        username = s.get("bgg_username")
+        if username and username in cleared_usernames:
+            s["bgg_username"] = ""
+            changed = True
+        if changed:
             _config.save(s)
     for gid in deleted:
         for p in IMAGES_DIR.glob(f"{gid}.*"):

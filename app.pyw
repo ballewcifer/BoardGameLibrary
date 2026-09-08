@@ -3522,6 +3522,15 @@ class App(tk.Tk):
             self.settings.pop("claimed_member_id", None)
             config.save(self.settings)
 
+    def _forget_bgg_username_if_cleared(self, cleared_usernames: list) -> None:
+        """Collections synced from BGG are looked up (and recreated if
+        missing) by username -- clearing one without also forgetting its
+        username would have the next sync silently bring it right back."""
+        username = self.settings.get("bgg_username")
+        if username and username in cleared_usernames:
+            self.settings["bgg_username"] = ""
+            config.save(self.settings)
+
     def _clear_one_collection(self, col) -> None:
         name = col["name"]
         if not messagebox.askyesno(
@@ -3536,6 +3545,7 @@ class App(tk.Tk):
             deleted = db.clear_collections(c, [col["id"]])
         self._drop_images(deleted)
         self._reset_claim_if_orphaned()
+        self._forget_bgg_username_if_cleared([col["bgg_username"]])
         self._image_cache.clear()
         self._gradient_cache.clear()
         self._placeholder_img = None
@@ -3562,8 +3572,11 @@ class App(tk.Tk):
                 "WHERE bgg_id NOT IN (SELECT DISTINCT game_id FROM plays)")]
             c.execute("DELETE FROM games "
                       "WHERE bgg_id NOT IN (SELECT DISTINCT game_id FROM plays)")
+            cleared_usernames = [r["bgg_username"] for r in c.execute(
+                "SELECT bgg_username FROM collections WHERE bgg_username IS NOT NULL")]
             c.execute("DELETE FROM collections")
         self._drop_images(deleted)
+        self._forget_bgg_username_if_cleared(cleared_usernames)
         self._image_cache.clear()
         self._gradient_cache.clear()
         self._placeholder_img = None
@@ -3623,6 +3636,7 @@ class App(tk.Tk):
                 icon="warning", parent=win,
             ):
                 return
+            cleared_usernames = [c["bgg_username"] for c in collections if c["id"] in sel]
             with db.connect() as c:
                 deleted = db.clear_collections(c, sel)
             # Drop cached image files for deleted games
@@ -3633,6 +3647,7 @@ class App(tk.Tk):
                     except OSError:
                         pass
             self._reset_claim_if_orphaned()
+            self._forget_bgg_username_if_cleared(cleared_usernames)
             self._image_cache.clear()
             self._gradient_cache.clear()
             self._placeholder_img = None
