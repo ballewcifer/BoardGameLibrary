@@ -107,6 +107,8 @@ MIGRATIONS = [
     # A collection can be "claimed" by a member (its owner). When a member owns
     # one or more collections they may only check out games from them.
     "ALTER TABLE collections ADD COLUMN owner_user_id INTEGER REFERENCES users(id)",
+    # 1 = cooperative, 0 = competitive, NULL = unset.
+    "ALTER TABLE games ADD COLUMN is_cooperative INTEGER",
 ]
 
 
@@ -156,6 +158,7 @@ def upsert_game(
         "playing_time", "min_age", "weight", "avg_rating", "my_rating",
         "description", "categories", "mechanics", "designers", "publishers",
         "best_players", "my_comment", "own", "last_synced", "is_expansion",
+        "is_cooperative",
     ]
     placeholders = ", ".join(["?"] * len(cols))
     # is_favorite / has_insert are always protected; caller may add more.

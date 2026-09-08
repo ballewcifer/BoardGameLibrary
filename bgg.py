@@ -119,6 +119,18 @@ class GameDetails:
     is_expansion: bool = False
 
 
+def derive_cooperative(mechanics: list[str]) -> Optional[int]:
+    """BGG tags cooperative games as a mechanic ("Cooperative Game",
+    "Semi-Cooperative Game") rather than a separate field. Returns 1
+    (cooperative), 0 (competitive), or None if no mechanics data is
+    available at all (e.g. a manually-added game with no BGG match) --
+    callers should leave a game's existing value alone in that case rather
+    than treat it as competitive."""
+    if not mechanics:
+        return None
+    return 1 if any("cooperative" in m.lower() for m in mechanics) else 0
+
+
 def _http_get(
     url: str,
     timeout: int = 30,

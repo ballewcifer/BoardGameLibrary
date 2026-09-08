@@ -25,6 +25,12 @@
     </select>
     {% endif %}
 
+    <select name="coop" class="filter-select" aria-label="Filter by cooperative or competitive">
+      <option value="any"         {% if coop=='any'         %}selected{% endif %}>Any type</option>
+      <option value="coop"        {% if coop=='coop'        %}selected{% endif %}>🤝 Cooperative</option>
+      <option value="competitive" {% if coop=='competitive' %}selected{% endif %}>⚔️ Competitive</option>
+    </select>
+
     <label class="filter-check"><input type="checkbox" name="exp" value="1" {% if show_exp %}checked{% endif %}> Expansions</label>
 
     <button type="submit" class="btn btn-primary btn-sm">Filter</button>
@@ -50,10 +56,10 @@
 <div class="collection-bar">
   <span class="collection-label">Library:</span>
   <a class="collection-tab {% if active_collection is none %}active{% endif %}"
-     href="{{ url_for('games', q=q, status=status, tag=tag_filter, exp=('1' if show_exp else none)) }}">All</a>
+     href="{{ url_for('games', q=q, status=status, tag=tag_filter, exp=('1' if show_exp else none), coop=coop) }}">All</a>
   {% for col in collections %}
   <a class="collection-tab {% if active_collection == col.id %}active{% endif %}"
-     href="{{ url_for('games', q=q, status=status, tag=tag_filter, exp=('1' if show_exp else none), collection=col.id) }}">{{ col.name }} ({{ col.game_count }}){% if col.owner_name %} 👤 {{ col.owner_name }}{% endif %}</a>
+     href="{{ url_for('games', q=q, status=status, tag=tag_filter, exp=('1' if show_exp else none), coop=coop, collection=col.id) }}">{{ col.name }} ({{ col.game_count }}){% if col.owner_name %} 👤 {{ col.owner_name }}{% endif %}</a>
   {% endfor %}
 
   <form method="get" action="/games" class="compare-form">
@@ -61,6 +67,7 @@
     <input type="hidden" name="status" value="{{ status }}">
     {% if tag_filter %}<input type="hidden" name="tag" value="{{ tag_filter }}">{% endif %}
     {% if show_exp %}<input type="hidden" name="exp" value="1">{% endif %}
+    {% if coop and coop != 'any' %}<input type="hidden" name="coop" value="{{ coop }}">{% endif %}
     {% if active_collection is not none %}<input type="hidden" name="collection" value="{{ active_collection }}">{% endif %}
     <select name="compare" class="filter-select" onchange="this.form.submit()" aria-label="Compare collections">
       <option value="off"    {% if compare=='off'    %}selected{% endif %}>Compare: Off</option>
@@ -301,6 +308,13 @@ function bulkSubmit(hasInsert) {
         <option value="heavy">Heavy (3–5)</option>
       </select>
 
+      <label class="form-label mt-sm" for="rnd-coop">Type</label>
+      <select id="rnd-coop" class="form-control">
+        <option value="Any">Any</option>
+        <option value="coop">🤝 Cooperative</option>
+        <option value="competitive">⚔️ Competitive</option>
+      </select>
+
       <label class="filter-check mt-sm">
         <input type="checkbox" id="rnd-available" checked> Only available (not checked out)
       </label>
@@ -386,6 +400,7 @@ function pickRandomGame() {
     players:    document.getElementById('rnd-players').value,
     max_time:   document.getElementById('rnd-time').value,
     complexity: document.getElementById('rnd-complexity').value,
+    coop:       document.getElementById('rnd-coop').value,
     available:  document.getElementById('rnd-available').checked ? '1' : '0',
     collection: {{ (active_collection if active_collection is not none else 'all') | tojson }},
   });
@@ -405,6 +420,7 @@ function pickRandomGame() {
         (g.min_players && g.max_players) ? (g.min_players + '–' + g.max_players + ' players') : null,
         (g.playing_time || g.max_playtime) ? ((g.playing_time || g.max_playtime) + ' min') : null,
         g.weight ? ('Complexity ' + Number(g.weight).toFixed(1) + '/5') : null,
+        g.is_cooperative === 1 ? '🤝 Cooperative' : (g.is_cooperative === 0 ? '⚔️ Competitive' : null),
         g.checked_out ? '⬤ checked out' : null,
       ].filter(Boolean).join(' · ');
       box.innerHTML =

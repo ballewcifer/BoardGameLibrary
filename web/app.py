@@ -117,6 +117,7 @@ def games():
     q          = request.args.get("q", "").strip()
     tag_filter = request.args.get("tag", "")
     status     = request.args.get("status", "all")   # all | available | out | favs
+    coop       = request.args.get("coop", "any")     # any | coop | competitive
     show_exp   = request.args.get("exp", "") == "1"
     collection = request.args.get("collection", "all")
     compare    = request.args.get("compare", "off")          # off | shared | only | diff
@@ -171,6 +172,10 @@ def games():
             continue
         if status == "favs" and not g["is_favorite"]:
             continue
+        if coop == "coop" and g["is_cooperative"] != 1:
+            continue
+        if coop == "competitive" and g["is_cooperative"] != 0:
+            continue
 
         # collection tab / comparison filter
         if multi:
@@ -195,6 +200,7 @@ def games():
                            q=q,
                            tag_filter=tag_filter,
                            status=status,
+                           coop=coop,
                            show_exp=show_exp,
                            all_tags=all_tags,
                            collections=collections,
@@ -225,6 +231,7 @@ def api_random_game():
     players    = request.args.get("players", "Any")
     max_time   = request.args.get("max_time", "Any")     # 30|60|90|120|Any
     complexity = request.args.get("complexity", "Any")   # light|medium|heavy|Any
+    coop       = request.args.get("coop", "Any")         # coop|competitive|Any
     available  = request.args.get("available", "1") == "1"
     collection = request.args.get("collection", "all")
 
@@ -275,6 +282,10 @@ def api_random_game():
                 return False
             if complexity == "heavy"  and not (w > 3.0):
                 return False
+        if coop == "coop" and g["is_cooperative"] != 1:
+            return False
+        if coop == "competitive" and g["is_cooperative"] != 0:
+            return False
         return True
 
     pool = [g for g in rows if matches(g)]
@@ -422,10 +433,11 @@ def update_game(bgg_id):
         my_rating = None
     tags       = request.form.get("tags", "").strip()
     my_comment = request.form.get("my_comment", "").strip() or None
+    coop       = {"coop": 1, "competitive": 0}.get(request.form.get("is_cooperative", ""))
     with db.connect() as c:
         c.execute(
-            "UPDATE games SET best_players=?, my_rating=?, my_comment=? WHERE bgg_id=?",
-            (best_players, my_rating, my_comment, bgg_id),
+            "UPDATE games SET best_players=?, my_rating=?, my_comment=?, is_cooperative=? WHERE bgg_id=?",
+            (best_players, my_rating, my_comment, coop, bgg_id),
         )
         db.set_tags(c, bgg_id, tags)
         db.set_insert(c, bgg_id, bool(has_insert))
@@ -712,6 +724,7 @@ def add_game():
             "own":           1,
             "last_synced":   db.now_iso(),
             "is_expansion":  int(details.is_expansion),
+            "is_cooperative": _bgg.derive_cooperative(details.mechanics),
         }
         with db.connect() as c:
             db.upsert_game(c, row)
@@ -767,6 +780,7 @@ def _run_sync(owner_first: str = "", owner_last: str = "", claim_as_mine: bool =
                     "own":          1,
                     "last_synced":  db.now_iso(),
                     "is_expansion": int(g.is_expansion),
+                    "is_cooperative": _bgg.derive_cooperative(g.mechanics),
                 }
                 existing = db.get_game(c, g.bgg_id)
                 skip = set()

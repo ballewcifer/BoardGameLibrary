@@ -20,6 +20,7 @@
       {% if game.min_players and game.max_players %} · {{ game.min_players }}–{{ game.max_players }} players{% endif %}
       {% if game.playing_time %} · {{ game.playing_time }} min{% endif %}
       {% if game.weight %} · Complexity {{ "%.1f"|format(game.weight) }}/5{% endif %}
+      {% if game.is_cooperative == 1 %} · 🤝 Cooperative{% elif game.is_cooperative == 0 %} · ⚔️ Competitive{% endif %}
     </div>
     {% if game.avg_rating %}<div class="muted">BGG ★ {{ "%.1f"|format(game.avg_rating) }}</div>{% endif %}
     {% if game.designers %}<div class="muted">By {{ game.designers }}</div>{% endif %}
@@ -198,6 +199,12 @@
           <input type="checkbox" name="has_insert" value="1" {% if game.has_insert %}checked{% endif %}>
           Has 3D printed insert
         </label>
+        <label class="form-label mt-sm" for="eg-coop">Type</label>
+        <select id="eg-coop" name="is_cooperative" class="form-control">
+          <option value="unset"       {% if game.is_cooperative is none  %}selected{% endif %}>Unset</option>
+          <option value="coop"        {% if game.is_cooperative == 1     %}selected{% endif %}>🤝 Cooperative</option>
+          <option value="competitive" {% if game.is_cooperative == 0     %}selected{% endif %}>⚔️ Competitive</option>
+        </select>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" onclick="closeModal('modal-edit-game')">Cancel</button>

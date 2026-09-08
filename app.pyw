@@ -1056,6 +1056,12 @@ class App(tk.Tk):
         ))
         self.tag_filter_cb.bind("<<ComboboxSelected>>", lambda *_: self.refresh_games())
 
+        self.coop_filter_var = tk.StringVar(value="Any")
+        fgroup("TYPE", lambda p: ttk.Combobox(
+            p, textvariable=self.coop_filter_var, width=12, state="readonly",
+            values=["Any", "Cooperative", "Competitive"],
+        )).bind("<<ComboboxSelected>>", lambda *_: self.refresh_games())
+
         reset_frame = ttk.Frame(fbar, style="Filter.TFrame")
         reset_frame.pack(side="left", padx=(SP["xs"], SP["lg"]), anchor="s")
         ttk.Label(reset_frame, text=" ", style="Filter.TLabel").pack(anchor="w")
@@ -1834,6 +1840,7 @@ class App(tk.Tk):
         self.weight_var.set("Any")
         self.status_filter_var.set("Any")
         self.tag_filter_var.set("Any")
+        self.coop_filter_var.set("Any")
         self._active_collection = None
         self._compare_mode = "off"
         self._compare_other = None
@@ -1956,6 +1963,13 @@ class App(tk.Tk):
                 if tag_val not in game_tags:
                     continue
 
+            # --- cooperative/competitive filter ---
+            coop_val = self.coop_filter_var.get()
+            if coop_val == "Cooperative" and g["is_cooperative"] != 1:
+                continue
+            if coop_val == "Competitive" and g["is_cooperative"] != 0:
+                continue
+
             # --- collection tab / comparison filter ---
             if not self._collection_pass(g["bgg_id"]):
                 continue
@@ -2041,7 +2055,8 @@ class App(tk.Tk):
             any(v != "Any" for v in [self.players_var.get(), self.best_at_var.get(),
                                       self.time_var.get(), self.weight_var.get(),
                                       self.status_filter_var.get(),
-                                      self.tag_filter_var.get()])
+                                      self.tag_filter_var.get(),
+                                      self.coop_filter_var.get()])
             or self.exact_players_var.get()
             or bool(self.search_var.get())
             or (len(self._collections) >= 2
@@ -4275,6 +4290,7 @@ class App(tk.Tk):
         players_var    = tk.StringVar(value="Any")
         time_var       = tk.StringVar(value="Any")
         complexity_var = tk.StringVar(value="Any")
+        coop_var       = tk.StringVar(value="Any")
         available_var  = tk.BooleanVar(value=True)
 
         def crit_row(r, label, var, values):
@@ -4289,23 +4305,25 @@ class App(tk.Tk):
                  ["Any", "≤ 30 min", "≤ 60 min", "≤ 90 min", "≤ 120 min"])
         crit_row(3, "Complexity:", complexity_var,
                  ["Any", "Light (1–2)", "Medium (2–3)", "Heavy (3–5)"])
+        crit_row(4, "Type:", coop_var,
+                 ["Any", "Cooperative", "Competitive"])
         ttk.Checkbutton(frame, text="Only games that are available (not checked out)",
                         variable=available_var,
-                        style="Filter.TCheckbutton").grid(row=4, column=0, columnspan=2,
+                        style="Filter.TCheckbutton").grid(row=5, column=0, columnspan=2,
                                                           sticky="w", pady=(6, 0))
 
         ttk.Separator(frame, orient="horizontal").grid(
-            row=5, column=0, columnspan=2, sticky="ew", pady=12)
+            row=6, column=0, columnspan=2, sticky="ew", pady=12)
 
         # ── result area ───────────────────────────────────────────────────────
         result_name = tk.StringVar(value="Set your criteria, then press Pick.")
         result_meta = tk.StringVar(value="")
         name_lbl = ttk.Label(frame, textvariable=result_name,
                              font=("Segoe UI", 12, "bold"), wraplength=320, justify="left")
-        name_lbl.grid(row=6, column=0, columnspan=2, sticky="w")
+        name_lbl.grid(row=7, column=0, columnspan=2, sticky="w")
         meta_lbl = ttk.Label(frame, textvariable=result_meta, foreground=C_INK_600,
                              font=("Segoe UI", 9), wraplength=320, justify="left")
-        meta_lbl.grid(row=7, column=0, columnspan=2, sticky="w", pady=(2, 0))
+        meta_lbl.grid(row=8, column=0, columnspan=2, sticky="w", pady=(2, 0))
 
         picked: list = [None]   # holds the current game row
 
@@ -4345,6 +4363,11 @@ class App(tk.Tk):
                     return False
                 if cv == "Heavy (3–5)" and not (w > 3.0):
                     return False
+            tv = coop_var.get()
+            if tv == "Cooperative" and g["is_cooperative"] != 1:
+                return False
+            if tv == "Competitive" and g["is_cooperative"] != 0:
+                return False
             return True
 
         def pick() -> None:
@@ -4375,6 +4398,10 @@ class App(tk.Tk):
                 bits.append(f"{pt} min")
             if g["weight"]:
                 bits.append(f'Complexity {g["weight"]:.1f}/5')
+            if g["is_cooperative"] == 1:
+                bits.append("🤝 Cooperative")
+            elif g["is_cooperative"] == 0:
+                bits.append("⚔️ Competitive")
             if g["bgg_id"] in open_ids:
                 bits.append("⬤ checked out")
             result_meta.set(" · ".join(bits))
@@ -4387,7 +4414,7 @@ class App(tk.Tk):
 
         # ── buttons ───────────────────────────────────────────────────────────
         btn_row = ttk.Frame(frame)
-        btn_row.grid(row=8, column=0, columnspan=2, sticky="e", pady=(16, 0))
+        btn_row.grid(row=9, column=0, columnspan=2, sticky="e", pady=(16, 0))
         ttk.Button(btn_row, text="Close", style="Ghost.TButton",
                    command=win.destroy).pack(side="left", padx=(0, 6))
         open_btn = ttk.Button(btn_row, text="Open Details", style="Ghost.TButton",
@@ -4638,10 +4665,27 @@ class App(tk.Tk):
                         variable=insert_var).grid(row=12, column=1, sticky="w",
                                                    padx=(4, 12), pady=3)
 
+        # Cooperative/competitive — auto-derived from BGG mechanics for a new
+        # game, editable/overridable like any other field here.
+        _COOP_LABELS = {None: "Unset", 1: "Cooperative", 0: "Competitive"}
+        _COOP_VALUES = {v: k for k, v in _COOP_LABELS.items()}
+        if is_new:
+            _current_coop = bgg.derive_cooperative(d.mechanics)
+        else:
+            with db.connect() as c:
+                _gi = db.get_game(c, d.bgg_id)
+                _current_coop = _gi["is_cooperative"] if _gi else None
+        coop_var = tk.StringVar(value=_COOP_LABELS[_current_coop])
+        ttk.Label(dlg, text="Type",
+                  font=("Segoe UI", 9, "bold")).grid(row=13, column=0, **lpad)
+        ttk.Combobox(dlg, textvariable=coop_var, state="readonly", width=16,
+                     values=["Unset", "Cooperative", "Competitive"]
+                     ).grid(row=13, column=1, sticky="w", padx=(4, 12), pady=3)
+
         err_var = tk.StringVar()
         ttk.Label(dlg, textvariable=err_var, foreground=C_DR_TEXT,
                   font=("Segoe UI", 8)).grid(
-            row=13, column=0, columnspan=2, padx=12, sticky="w")
+            row=14, column=0, columnspan=2, padx=12, sticky="w")
 
         # --- lock-status row (editing an existing game only) ---
         _FIELD_DISPLAY = {
@@ -4651,10 +4695,11 @@ class App(tk.Tk):
             "max_playtime": "Play time",
             "weight": "Complexity", "description": "Description",
             "my_comment": "Comment", "best_players": "Best at",
+            "is_cooperative": "Type",
         }
         lock_lbl_var = tk.StringVar()
         lock_frame = ttk.Frame(dlg)
-        lock_frame.grid(row=14, column=0, columnspan=2,
+        lock_frame.grid(row=15, column=0, columnspan=2,
                         padx=12, pady=(0, 2), sticky="w")
         ttk.Label(lock_frame, textvariable=lock_lbl_var,
                   foreground=C_INK_600, font=("Segoe UI", 8)).pack(side="left")
@@ -4751,6 +4796,7 @@ class App(tk.Tk):
                 "my_comment":    comment_var.get().strip() or None,
                 "own":           1,
                 "last_synced":   db.now_iso(),
+                "is_cooperative": _COOP_VALUES[coop_var.get()],
             }
             with db.connect() as c:
                 # Auto-lock any fields the user explicitly changed vs the DB.
@@ -4764,6 +4810,7 @@ class App(tk.Tk):
                         ("best_players", game_row["best_players"],  existing["best_players"]),
                         ("description",  game_row["description"],   existing["description"]),
                         ("my_comment",   game_row["my_comment"],    existing["my_comment"]),
+                        ("is_cooperative", game_row["is_cooperative"], existing["is_cooperative"]),
                     ]
                     for field, new_val, old_val in field_checks:
                         if new_val != old_val:
@@ -4801,7 +4848,7 @@ class App(tk.Tk):
                 ).start()
 
         btn_row = ttk.Frame(dlg, padding=(12, 4, 12, 12))
-        btn_row.grid(row=15, column=0, columnspan=2, sticky="e")
+        btn_row.grid(row=16, column=0, columnspan=2, sticky="e")
         ttk.Button(btn_row, text="Cancel", command=dlg.destroy).pack(side="left", padx=(0, 6))
         ttk.Button(btn_row, text="Save Game" if is_new else "Save Changes",
                    command=save).pack(side="left")
@@ -4941,6 +4988,7 @@ class App(tk.Tk):
                     "own": 1,
                     "last_synced": db.now_iso(),
                     "is_expansion": int(g.is_expansion),
+                    "is_cooperative": bgg.derive_cooperative(g.mechanics),
                 }
                 # Don't clobber image_path or manually-locked fields on re-sync.
                 existing = db.get_game(c, g.bgg_id)
@@ -5542,6 +5590,7 @@ class App(tk.Tk):
                     "best_players": d.best_players if d else None,
                     "my_comment": None, "own": 0, "last_synced": db.now_iso(),
                     "is_expansion": int(d.is_expansion) if d else 0,
+                    "is_cooperative": bgg.derive_cooperative(d.mechanics) if d else None,
                 })
             # Refresh game list in combobox
             game_id_map[name] = bgg_id
@@ -5836,6 +5885,10 @@ class App(tk.Tk):
             detail_rows.append(("Best at",    f"{game['best_players']} players"))
         if game["weight"]:
             detail_rows.append(("Complexity", f"{game['weight']:.2f} / 5"))
+        if game["is_cooperative"] == 1:
+            detail_rows.append(("Type", "🤝 Cooperative"))
+        elif game["is_cooperative"] == 0:
+            detail_rows.append(("Type", "⚔️ Competitive"))
         if game["avg_rating"]:
             detail_rows.append(("BGG rating", f"{game['avg_rating']:.2f}"))
         if game["my_rating"]:
