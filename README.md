@@ -18,7 +18,7 @@ Both share the same local SQLite database and the `db.py` / `bgg.py` / `config.p
 - **Browse** — card and table views with filters (players, best-at, play time, complexity, status, tags, favorites, cooperative/competitive, BGG collection status) and sort
 - **"Surprise Me"** random game picker, filtered by players, time, complexity, and game type
 - **Lending** — check games out to named **members**, with due dates, overdue flags, and full loan history
-- **Multi-collection** — sync several BGG users and compare libraries: *shared by all*, *unique to one*, or *in A but not B* (desktop, web)
+- **Multi-collection** — sync several BGG users and compare libraries: *shared by all*, *unique to one*, or *in A but not B*
 - **Play log** — date, players, winner, duration, scores → win leaderboard + dashboard stats
 - Favorites, tags, custom cover photos, and 3D-insert badges
 - **Offline** — local SQLite, with backup export / import (including custom photos and per-game customizations)
