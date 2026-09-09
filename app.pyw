@@ -173,6 +173,23 @@ def _open_url(url: str) -> None:
     except Exception:
         pass
 
+# ── Collection status filter (BGG's own/wishlist/fortrade/etc. flags) ────────
+# "Owned" is the default view (matches pre-existing behavior — own=1 only).
+# "All" shows every status. The rest map 1:1 to bgg.STATUS_FLAGS via their label.
+_COLLECTION_STATUS_LABELS = ["Owned", "All"] + [
+    bgg.STATUS_LABELS[f] for f in bgg.STATUS_FLAGS if f != "own"
+]
+_COLLECTION_STATUS_LABEL_TO_FLAG = {v: k for k, v in bgg.STATUS_LABELS.items()}
+
+
+def _collection_status_param(label: str) -> Optional[str]:
+    """Map a _COLLECTION_STATUS_LABELS selection to db.list_games()'s `status` kwarg."""
+    if label == "Owned":
+        return None   # respects owned_only=True, unchanged default behavior
+    if label == "All":
+        return "all"
+    return _COLLECTION_STATUS_LABEL_TO_FLAG.get(label)
+
 # ── Design system tokens (design-tokens.json) ────────────────────────────────
 # Brand / navy
 C_NAVY_900 = "#0E2A47"   # header / top bar
@@ -1062,6 +1079,12 @@ class App(tk.Tk):
             values=["Any", "Cooperative", "Competitive"],
         )).bind("<<ComboboxSelected>>", lambda *_: self.refresh_games())
 
+        self.collection_status_var = tk.StringVar(value="Owned")
+        fgroup("COLLECTION", lambda p: ttk.Combobox(
+            p, textvariable=self.collection_status_var, width=14, state="readonly",
+            values=_COLLECTION_STATUS_LABELS,
+        )).bind("<<ComboboxSelected>>", lambda *_: self.refresh_games())
+
         reset_frame = ttk.Frame(fbar, style="Filter.TFrame")
         reset_frame.pack(side="left", padx=(SP["xs"], SP["lg"]), anchor="s")
         ttk.Label(reset_frame, text=" ", style="Filter.TLabel").pack(anchor="w")
@@ -1119,6 +1142,9 @@ class App(tk.Tk):
         if self.tag_filter_var.get() != "Any":
             v = self.tag_filter_var.get()
             active.append(("Tag", v, lambda _v=v: self.tag_filter_var.set("Any")))
+        if self.collection_status_var.get() != "Owned":
+            v = self.collection_status_var.get()
+            active.append(("Collection", v, lambda _v=v: self.collection_status_var.set("Owned")))
 
         # Never re-pack the frame — it's already in the correct position above
         # the card grid. Just populate or clear its children.
@@ -1841,6 +1867,7 @@ class App(tk.Tk):
         self.status_filter_var.set("Any")
         self.tag_filter_var.set("Any")
         self.coop_filter_var.set("Any")
+        self.collection_status_var.set("Owned")
         self._active_collection = None
         self._compare_mode = "off"
         self._compare_other = None
@@ -1988,9 +2015,10 @@ class App(tk.Tk):
                                  else self.games_canvas.yview()[0])
             except Exception:
                 _prev_scroll = 0.0
+        status_param = _collection_status_param(self.collection_status_var.get())
         with db.connect() as c:
-            games = db.list_games(c, self.search_var.get().strip())
-            total_count = c.execute("SELECT COUNT(*) FROM games WHERE own = 1").fetchone()[0]
+            games = db.list_games(c, self.search_var.get().strip(), status=status_param)
+            total_count = db.count_games(c, status=status_param)
             open_loans = {
                 row["game_id"]: row
                 for row in c.execute(
@@ -2057,6 +2085,7 @@ class App(tk.Tk):
                                       self.status_filter_var.get(),
                                       self.tag_filter_var.get(),
                                       self.coop_filter_var.get()])
+            or self.collection_status_var.get() != "Owned"
             or self.exact_players_var.get()
             or bool(self.search_var.get())
             or (len(self._collections) >= 2
@@ -3970,7 +3999,7 @@ class App(tk.Tk):
             if not games:
                 self.after(0, lambda: messagebox.showinfo(
                     "Nothing found",
-                    f"No owned games found for '{username}'.\n"
+                    f"No games found in {username}'s BGG collection.\n"
                     "Check the username is correct. If your collection is private,\n"
                     "enter your BGG password in the sync dialog.",
                 ))
@@ -4173,17 +4202,19 @@ class App(tk.Tk):
     def _sync_api_bg(self, username: str, token: str) -> None:
         try:
             self._post_status(f"Fetching collection for {username}...")
-            collection = bgg.fetch_collection(username, token=token, on_status=self._post_status)
+            collection = bgg.fetch_collection(username, token=token, on_status=self._post_status,
+                                               own_only=False)
             ids = [e.bgg_id for e in collection]
             self._post_status(f"Got {len(ids)} games. Fetching details...")
             details = bgg.fetch_things(ids, token=token, on_status=self._post_status)
-            # merge collection-only fields (my_rating, my_comment) into details
+            # merge collection-only fields (my_rating, my_comment, bgg_status) into details
             by_id = {d.bgg_id: d for d in details}
             for entry in collection:
                 d = by_id.get(entry.bgg_id)
                 if d is not None:
                     d.my_rating = entry.my_rating
                     d.my_comment = entry.my_comment
+                    d.bgg_status = entry.bgg_status
 
             # Detect games that left THIS collection's BGG list (not other collections')
             bgg_ids = set(by_id.keys())
@@ -4682,10 +4713,29 @@ class App(tk.Tk):
                      values=["Unset", "Cooperative", "Competitive"]
                      ).grid(row=13, column=1, sticky="w", padx=(4, 12), pady=3)
 
+        # Collection status — normally set by BGG sync, but editable here for
+        # manually-added games (or to override until the next sync overwrites it).
+        _STATUS_LABEL_LIST = ["Owned"] + [
+            bgg.STATUS_LABELS[f] for f in bgg.STATUS_FLAGS if f != "own"
+        ]
+        if is_new:
+            _current_status_label = "Owned"
+        else:
+            with db.connect() as c:
+                _gi = db.get_game(c, d.bgg_id)
+            _current_status_label = bgg.STATUS_LABELS.get(
+                _gi["bgg_status"] if _gi else None, "Owned")
+        status_var = tk.StringVar(value=_current_status_label)
+        ttk.Label(dlg, text="Collection",
+                  font=("Segoe UI", 9, "bold")).grid(row=14, column=0, **lpad)
+        ttk.Combobox(dlg, textvariable=status_var, state="readonly", width=16,
+                     values=_STATUS_LABEL_LIST
+                     ).grid(row=14, column=1, sticky="w", padx=(4, 12), pady=3)
+
         err_var = tk.StringVar()
         ttk.Label(dlg, textvariable=err_var, foreground=C_DR_TEXT,
                   font=("Segoe UI", 8)).grid(
-            row=14, column=0, columnspan=2, padx=12, sticky="w")
+            row=15, column=0, columnspan=2, padx=12, sticky="w")
 
         # --- lock-status row (editing an existing game only) ---
         _FIELD_DISPLAY = {
@@ -4695,11 +4745,11 @@ class App(tk.Tk):
             "max_playtime": "Play time",
             "weight": "Complexity", "description": "Description",
             "my_comment": "Comment", "best_players": "Best at",
-            "is_cooperative": "Type",
+            "is_cooperative": "Type", "bgg_status": "Collection",
         }
         lock_lbl_var = tk.StringVar()
         lock_frame = ttk.Frame(dlg)
-        lock_frame.grid(row=15, column=0, columnspan=2,
+        lock_frame.grid(row=16, column=0, columnspan=2,
                         padx=12, pady=(0, 2), sticky="w")
         ttk.Label(lock_frame, textvariable=lock_lbl_var,
                   foreground=C_INK_600, font=("Segoe UI", 8)).pack(side="left")
@@ -4794,11 +4844,12 @@ class App(tk.Tk):
                 "publishers":    ", ".join(d.publishers) if d.publishers else None,
                 "best_players":  best_var.get().strip() or None,
                 "my_comment":    comment_var.get().strip() or None,
-                "own":           1,
+                "own":           1 if status_var.get() == "Owned" else 0,
                 "last_synced":   db.now_iso(),
                 "is_cooperative": _COOP_VALUES[coop_var.get()],
                 "base_game_id":   d.base_game_id,
                 "base_game_name": d.base_game_name,
+                "bgg_status":    {v: k for k, v in bgg.STATUS_LABELS.items()}[status_var.get()],
             }
             with db.connect() as c:
                 # Auto-lock any fields the user explicitly changed vs the DB.
@@ -4817,6 +4868,11 @@ class App(tk.Tk):
                     for field, new_val, old_val in field_checks:
                         if new_val != old_val:
                             manual.add(field)
+                    # Collection status and `own` move together — a manual status
+                    # change should stay put until the next sync's real BGG data
+                    # is deliberately allowed back in (via "Clear overrides").
+                    if game_row["bgg_status"] != existing["bgg_status"]:
+                        manual.update({"bgg_status", "own"})
                     # Weight: round to 2 dp to avoid float-precision false positives.
                     new_w = game_row["weight"]
                     old_w = existing["weight"]
@@ -4850,7 +4906,7 @@ class App(tk.Tk):
                 ).start()
 
         btn_row = ttk.Frame(dlg, padding=(12, 4, 12, 12))
-        btn_row.grid(row=16, column=0, columnspan=2, sticky="e")
+        btn_row.grid(row=17, column=0, columnspan=2, sticky="e")
         ttk.Button(btn_row, text="Cancel", command=dlg.destroy).pack(side="left", padx=(0, 6))
         ttk.Button(btn_row, text="Save Game" if is_new else "Save Changes",
                    command=save).pack(side="left")
@@ -4987,12 +5043,17 @@ class App(tk.Tk):
                     "publishers": ", ".join(g.publishers) if g.publishers else None,
                     "best_players": g.best_players,
                     "my_comment": g.my_comment,
-                    "own": 1,
+                    # BGG collection status, when known, determines real ownership;
+                    # unknown status (e.g. an older CSV export with no status
+                    # columns) defaults to owned, matching this function's
+                    # pre-existing behavior.
+                    "own": 1 if g.bgg_status in (None, "own") else 0,
                     "last_synced": db.now_iso(),
                     "is_expansion": int(g.is_expansion),
                     "is_cooperative": bgg.derive_cooperative(g.mechanics),
                     "base_game_id": g.base_game_id,
                     "base_game_name": g.base_game_name,
+                    "bgg_status": g.bgg_status,
                 }
                 # Don't clobber image_path or manually-locked fields on re-sync.
                 existing = db.get_game(c, g.bgg_id)
@@ -5004,11 +5065,14 @@ class App(tk.Tk):
                 db.upsert_game(c, row, skip_fields=skip)
 
             # Link these games to their collection (one collection per synced BGG
-            # username); the collection's membership becomes exactly this set.
+            # username); the collection's membership becomes exactly the games
+            # actually owned — wishlist/for-trade/etc. entries are saved above so
+            # they're browsable, but don't count toward collection comparisons.
             if collection_username:
                 cid = db.get_or_create_collection(
                     c, collection_username, collection_name or collection_username)
-                db.replace_collection_games(c, cid, [g.bgg_id for g in games])
+                owned_ids = [g.bgg_id for g in games if g.bgg_status in (None, "own")]
+                db.replace_collection_games(c, cid, owned_ids)
 
     # Largest card cover is 260 px tall; store covers a bit bigger so they look
     # crisp at the Large size, but cap to keep image files small on disk.
@@ -5909,6 +5973,8 @@ class App(tk.Tk):
             detail_rows.append(("Publishers", game["publishers"]))
         if game["base_game_id"]:
             detail_rows.append(("Expansion for", game["base_game_name"] or f"#{game['base_game_id']}"))
+        if game["bgg_status"] and game["bgg_status"] != "own":
+            detail_rows.append(("Collection", bgg.STATUS_LABELS.get(game["bgg_status"], game["bgg_status"])))
 
         base_game_row = None
         if game["base_game_id"]:
@@ -6506,10 +6572,12 @@ class App(tk.Tk):
                         c.execute(
                             "UPDATE games SET tags=?, is_favorite=?, has_insert=?, "
                             "my_comment=?, my_rating=?, best_players=?, is_cooperative=?, "
-                            "manual_fields=?, image_path=COALESCE(?, image_path) WHERE bgg_id=?",
+                            "manual_fields=?, image_path=COALESCE(?, image_path), "
+                            "own=COALESCE(?, own), bgg_status=COALESCE(?, bgg_status) WHERE bgg_id=?",
                             (cu.get("tags"), cu.get("is_favorite") or 0, cu.get("has_insert") or 0,
                              cu.get("my_comment"), cu.get("my_rating"), cu.get("best_players"),
                              cu.get("is_cooperative"), cu.get("manual_fields"), image_path,
+                             cu.get("own"), cu.get("bgg_status"),
                              cu["bgg_id"]),
                         )
                         counts["customisations"] += 1
@@ -6573,12 +6641,13 @@ class App(tk.Tk):
             customisations = [dict(r) for r in c.execute(
                 """SELECT bgg_id, name, tags, is_favorite, has_insert,
                           my_comment, my_rating, best_players, is_cooperative,
-                          manual_fields, image_path
+                          manual_fields, image_path, own, bgg_status
                    FROM games
                    WHERE tags IS NOT NULL OR is_favorite = 1 OR has_insert = 1
                       OR my_comment IS NOT NULL OR my_rating IS NOT NULL
                       OR best_players IS NOT NULL OR is_cooperative IS NOT NULL
-                      OR image_path IS NOT NULL
+                      OR image_path IS NOT NULL OR own = 0
+                      OR (bgg_status IS NOT NULL AND bgg_status != 'own')
                    """).fetchall()]
 
         # Embed any custom cover photo as base64 -- the raw image_path is a
@@ -6595,7 +6664,7 @@ class App(tk.Tk):
                     pass  # Photo file unreadable -- skip it, don't fail the whole export.
 
         payload = {
-            "version": 2,
+            "version": 3,
             "exported_at": db.now_iso(),
             "members": members,
             "plays": plays,

@@ -33,6 +33,14 @@
 
     <label class="filter-check"><input type="checkbox" name="exp" value="1" {% if show_exp %}checked{% endif %}> Expansions</label>
 
+    <select name="bstatus" class="filter-select" aria-label="Filter by BGG collection status">
+      <option value="owned" {% if bstatus=='owned' %}selected{% endif %}>Owned</option>
+      <option value="all"   {% if bstatus=='all'   %}selected{% endif %}>All statuses</option>
+      {% for f in bgg_status_flags if f != 'own' %}
+        <option value="{{ f }}" {% if bstatus==f %}selected{% endif %}>{{ bgg_status_labels[f] }}</option>
+      {% endfor %}
+    </select>
+
     <button type="submit" class="btn btn-primary btn-sm">Filter</button>
   </form>
 
@@ -56,10 +64,10 @@
 <div class="collection-bar">
   <span class="collection-label">Library:</span>
   <a class="collection-tab {% if active_collection is none %}active{% endif %}"
-     href="{{ url_for('games', q=q, status=status, tag=tag_filter, exp=('1' if show_exp else none), coop=coop) }}">All</a>
+     href="{{ url_for('games', q=q, status=status, tag=tag_filter, exp=('1' if show_exp else none), coop=coop, bstatus=bstatus) }}">All</a>
   {% for col in collections %}
   <a class="collection-tab {% if active_collection == col.id %}active{% endif %}"
-     href="{{ url_for('games', q=q, status=status, tag=tag_filter, exp=('1' if show_exp else none), coop=coop, collection=col.id) }}">{{ col.name }} ({{ col.game_count }}){% if col.owner_name %} 👤 {{ col.owner_name }}{% endif %}</a>
+     href="{{ url_for('games', q=q, status=status, tag=tag_filter, exp=('1' if show_exp else none), coop=coop, bstatus=bstatus, collection=col.id) }}">{{ col.name }} ({{ col.game_count }}){% if col.owner_name %} 👤 {{ col.owner_name }}{% endif %}</a>
   {% endfor %}
 
   <form method="get" action="/games" class="compare-form">

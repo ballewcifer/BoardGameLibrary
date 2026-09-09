@@ -11,8 +11,8 @@ A self-hosted **board game library manager** — catalog your collection, **lend
 Both share the same local SQLite database and the `db.py` / `bgg.py` / `config.py` modules.
 
 ## Features
-- **BoardGameGeek sync** — import your collection by username (public, or private via login)
-- **Browse** — card and table views with filters (players, best-at, play time, complexity, status, tags, favorites) and sort
+- **BoardGameGeek sync** — import your collection by username (public, or private via login), including wishlist, for-trade, preordered and other BGG collection statuses, not just what you own. Read-only on Web and Mobile. On **Desktop**, an opt-in setting can also post plays you log here back to your BGG account (off by default; your BGG password is used once per post and never stored).
+- **Browse** — card and table views with filters (players, best-at, play time, complexity, status, tags, favorites, BGG collection status) and sort
 - **Lending** — check games out to named **members**, with due dates, overdue flags, and full loan history
 - **Multi-collection** — sync several BGG users and compare libraries: *shared by all*, *unique to one*, or *in A but not B* (desktop)
 - **Play log** — date, players, winner, duration, scores → win leaderboard + dashboard stats

@@ -26,6 +26,7 @@
     {% if game.designers %}<div class="muted">By {{ game.designers }}</div>{% endif %}
     {% if game.best_players %}<div class="muted">★ Best at {{ game.best_players }} players</div>{% endif %}
     {% if game.has_insert %}<div class="muted">📦 Has 3D printed insert</div>{% endif %}
+    {% if game.bgg_status and game.bgg_status != 'own' %}<div class="muted">{{ bgg_status_labels[game.bgg_status] }}</div>{% endif %}
     {% if game.base_game_id %}
       <div class="muted">
         {% if base_game %}
@@ -224,6 +225,12 @@
           <option value="unset"       {% if game.is_cooperative is none  %}selected{% endif %}>Unset</option>
           <option value="coop"        {% if game.is_cooperative == 1     %}selected{% endif %}>🤝 Cooperative</option>
           <option value="competitive" {% if game.is_cooperative == 0     %}selected{% endif %}>⚔️ Competitive</option>
+        </select>
+        <label class="form-label mt-sm" for="eg-status">Collection</label>
+        <select id="eg-status" name="bgg_status" class="form-control">
+          {% for f in bgg_status_flags %}
+            <option value="{{ f }}" {% if (game.bgg_status or 'own')==f %}selected{% endif %}>{{ bgg_status_labels[f] }}</option>
+          {% endfor %}
         </select>
       </div>
       <div class="modal-footer">

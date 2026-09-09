@@ -119,13 +119,15 @@ def games():
     tag_filter = request.args.get("tag", "")
     status     = request.args.get("status", "all")   # all | available | out | favs
     coop       = request.args.get("coop", "any")     # any | coop | competitive
+    bstatus    = request.args.get("bstatus", "owned")   # owned | all | a bgg.STATUS_FLAGS value
     show_exp   = request.args.get("exp", "") == "1"
     collection = request.args.get("collection", "all")
     compare    = request.args.get("compare", "off")          # off | shared | only | diff
     compare_other_raw = request.args.get("compare_other", "")
 
+    status_param = None if bstatus == "owned" else bstatus
     with db.connect() as c:
-        rows      = db.list_games(c, search=q)
+        rows      = db.list_games(c, search=q, status=status_param)
         open_loans = {r["game_id"]: _row_to_dict(r)
                       for r in db.currently_checked_out(c)}
         play_cts   = db.play_counts(c)
@@ -202,6 +204,9 @@ def games():
                            tag_filter=tag_filter,
                            status=status,
                            coop=coop,
+                           bstatus=bstatus,
+                           bgg_status_labels=_bgg.STATUS_LABELS,
+                           bgg_status_flags=_bgg.STATUS_FLAGS,
                            show_exp=show_exp,
                            all_tags=all_tags,
                            collections=collections,
@@ -371,7 +376,9 @@ def game_detail(bgg_id):
                            can_checkout_here=can_checkout_here,
                            today=today,
                            base_game=base_game,
-                           owned_expansions=owned_expansions)
+                           owned_expansions=owned_expansions,
+                           bgg_status_labels=_bgg.STATUS_LABELS,
+                           bgg_status_flags=_bgg.STATUS_FLAGS)
 
 
 # ── Checkout ──────────────────────────────────────────────────────────────────
@@ -439,10 +446,15 @@ def update_game(bgg_id):
     tags       = request.form.get("tags", "").strip()
     my_comment = request.form.get("my_comment", "").strip() or None
     coop       = {"coop": 1, "competitive": 0}.get(request.form.get("is_cooperative", ""))
+    status     = request.form.get("bgg_status", "own")
+    if status not in _bgg.STATUS_FLAGS:
+        status = "own"
+    own = 1 if status == "own" else 0
     with db.connect() as c:
         c.execute(
-            "UPDATE games SET best_players=?, my_rating=?, my_comment=?, is_cooperative=? WHERE bgg_id=?",
-            (best_players, my_rating, my_comment, coop, bgg_id),
+            "UPDATE games SET best_players=?, my_rating=?, my_comment=?, is_cooperative=?, "
+            "bgg_status=?, own=? WHERE bgg_id=?",
+            (best_players, my_rating, my_comment, coop, status, own, bgg_id),
         )
         db.set_tags(c, bgg_id, tags)
         db.set_insert(c, bgg_id, bool(has_insert))
@@ -755,10 +767,13 @@ def _run_sync(owner_first: str = "", owner_last: str = "", claim_as_mine: bool =
         _sync_status["message"] = msg
 
     try:
-        collection = _bgg.fetch_collection(username, token=token, on_status=on_status)
-        total = len(collection)
+        # import_from_username fetches /collection (all BGG statuses — own,
+        # wishlist, fortrade, etc.) then enriches every game via /thing
+        # (weight, categories, designers, best-at...) and returns GameDetails.
+        games = _bgg.import_from_username(username, token=token, on_status=on_status)
+        total = len(games)
         with db.connect() as c:
-            for i, g in enumerate(collection, 1):
+            for i, g in enumerate(games, 1):
                 if i == 1 or i % 10 == 0 or i == total:
                     _sync_status["message"] = f"Saving {i} of {total} games…"
                 row = {
@@ -784,12 +799,15 @@ def _run_sync(owner_first: str = "", owner_last: str = "", claim_as_mine: bool =
                     "publishers":   ", ".join(g.publishers) if g.publishers else None,
                     "best_players": g.best_players,
                     "my_comment":   g.my_comment,
-                    "own":          1,
+                    # BGG collection status, when known, determines real ownership;
+                    # unknown status defaults to owned (matches prior behavior).
+                    "own":          1 if g.bgg_status in (None, "own") else 0,
                     "last_synced":  db.now_iso(),
                     "is_expansion": int(g.is_expansion),
                     "is_cooperative": _bgg.derive_cooperative(g.mechanics),
                     "base_game_id": g.base_game_id,
                     "base_game_name": g.base_game_name,
+                    "bgg_status":   g.bgg_status,
                 }
                 existing = db.get_game(c, g.bgg_id)
                 skip = set()
@@ -799,10 +817,14 @@ def _run_sync(owner_first: str = "", owner_last: str = "", claim_as_mine: bool =
                     skip = db.get_manual_fields(c, g.bgg_id)
                 db.upsert_game(c, row, skip_fields=skip)
 
-            # Link the synced games to this user's collection (multi-collection)
+            # Link the synced games to this user's collection (multi-collection).
+            # Membership is only the games actually owned — wishlist/for-trade/
+            # etc. are saved above so they're browsable, but don't count toward
+            # collection comparisons.
             if username:
                 cid = db.get_or_create_collection(c, username, username)
-                db.replace_collection_games(c, cid, [g.bgg_id for g in collection])
+                owned_ids = [g.bgg_id for g in games if g.bgg_status in (None, "own")]
+                db.replace_collection_games(c, cid, owned_ids)
 
                 # Optionally add the importer as a member, claim the collection
                 # for them, and mark them as this device's owner ("me").
@@ -820,7 +842,7 @@ def _run_sync(owner_first: str = "", owner_last: str = "", claim_as_mine: bool =
                     s["claimed_member_id"] = uid
                     _config.save(s)
 
-        _sync_status["message"] = f"Sync complete — {len(collection)} games."
+        _sync_status["message"] = f"Sync complete — {len(games)} games."
     except Exception as e:
         _sync_status["error"]   = str(e)
         _sync_status["message"] = f"Sync failed: {e}"
@@ -887,12 +909,13 @@ def backup_export():
         customisations = [dict(r) for r in c.execute(
             """SELECT bgg_id, name, tags, is_favorite, has_insert,
                       my_comment, my_rating, best_players, is_cooperative,
-                      manual_fields, image_path
+                      manual_fields, image_path, own, bgg_status
                FROM games
                WHERE tags IS NOT NULL OR is_favorite = 1 OR has_insert = 1
                   OR my_comment IS NOT NULL OR my_rating IS NOT NULL
                   OR best_players IS NOT NULL OR is_cooperative IS NOT NULL
-                  OR image_path IS NOT NULL
+                  OR image_path IS NOT NULL OR own = 0
+                  OR (bgg_status IS NOT NULL AND bgg_status != 'own')
                """).fetchall()]
 
     # Embed any custom cover photo as base64 -- the raw image_path is a
@@ -908,7 +931,7 @@ def backup_export():
                 pass  # Photo file unreadable -- skip it, don't fail the whole export.
 
     payload = {
-        "version": 2,
+        "version": 3,
         "exported_at": db.now_iso(),
         "members": members,
         "plays": plays,
@@ -1005,10 +1028,12 @@ def backup_import():
             c.execute(
                 "UPDATE games SET tags=?, is_favorite=?, has_insert=?, "
                 "my_comment=?, my_rating=?, best_players=?, is_cooperative=?, "
-                "manual_fields=?, image_path=COALESCE(?, image_path) WHERE bgg_id=?",
+                "manual_fields=?, image_path=COALESCE(?, image_path), "
+                "own=COALESCE(?, own), bgg_status=COALESCE(?, bgg_status) WHERE bgg_id=?",
                 (cu.get("tags"), cu.get("is_favorite") or 0, cu.get("has_insert") or 0,
                  cu.get("my_comment"), cu.get("my_rating"), cu.get("best_players"),
                  cu.get("is_cooperative"), cu.get("manual_fields"), image_path,
+                 cu.get("own"), cu.get("bgg_status"),
                  cu["bgg_id"]),
             )
             counts["customisations"] += 1

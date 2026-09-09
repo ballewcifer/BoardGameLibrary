@@ -75,6 +75,37 @@ def _ssl_ctx() -> ssl.SSLContext:
     return ctx
 
 
+# BGG's collection status flags, in the order we resolve a single "primary"
+# status when more than one is set at once (e.g. a game can be own=1 AND
+# fortrade=1 simultaneously — "I own it but I'll trade it"). Owning it is
+# always the most useful single label; after that we favor the flags that
+# represent active intent over passive history ("prevowned").
+STATUS_FLAGS = ("own", "fortrade", "preordered", "wanttobuy", "wanttoplay", "wishlist", "prevowned", "want")
+
+# Human-readable labels for UI (filter dropdowns, badges) — keyed by the same
+# strings stored in bgg_status.
+STATUS_LABELS = {
+    "own": "Owned",
+    "fortrade": "For Trade",
+    "preordered": "Preordered",
+    "wanttobuy": "Want to Buy",
+    "wanttoplay": "Want to Play",
+    "wishlist": "Wishlist",
+    "prevowned": "Previously Owned",
+    "want": "Want",
+}
+
+
+def resolve_status(flags: dict) -> Optional[str]:
+    """Pick one status string from a dict of {flag_name: bool}, in STATUS_FLAGS
+    priority order. Returns None if no flag is set (e.g. a manually-added game
+    with no BGG collection data)."""
+    for key in STATUS_FLAGS:
+        if flags.get(key):
+            return key
+    return None
+
+
 @dataclass
 class CollectionEntry:
     bgg_id: int
@@ -85,6 +116,7 @@ class CollectionEntry:
     my_rating: Optional[float]
     my_comment: Optional[str]
     own: bool
+    bgg_status: Optional[str] = None
     # Parsed from <stats> when stats=1 is included in the request
     min_players: Optional[int] = None
     max_players: Optional[int] = None
@@ -119,6 +151,7 @@ class GameDetails:
     is_expansion: bool = False
     base_game_id: Optional[int] = None
     base_game_name: Optional[str] = None
+    bgg_status: Optional[str] = None
 
 
 def derive_cooperative(mechanics: list[str]) -> Optional[int]:
@@ -245,7 +278,9 @@ def fetch_collection(
         my_rating = rating_el.get("value") if rating_el is not None else None
         comment_el = item.find("comment")
         status_el = item.find("status")
-        own = status_el is not None and status_el.get("own") == "1"
+        flags = {f: (status_el is not None and status_el.get(f) == "1") for f in STATUS_FLAGS}
+        own = flags["own"]
+        bgg_status = resolve_status(flags)
 
         # Parse player counts / playtime from <stats> (present when stats=1)
         min_players = max_players = min_playtime = max_playtime = None
@@ -268,6 +303,7 @@ def fetch_collection(
             my_rating=_f(my_rating) if my_rating not in ("N/A", None) else None,
             my_comment=_unescape((comment_el.text or "").strip()) if comment_el is not None and comment_el.text else None,
             own=own,
+            bgg_status=bgg_status,
             min_players=min_players,
             max_players=max_players,
             min_playtime=min_playtime,
@@ -284,7 +320,8 @@ def import_from_username(
     on_status: Optional[Callable[[str], None]] = None,
     opener: Optional[urllib.request.OpenerDirector] = None,
 ) -> list[GameDetails]:
-    """Import an owned collection by BGG username.
+    """Import a BGG username's full collection (all statuses — owned, wishlist,
+    for trade, etc; see STATUS_FLAGS), tagging each game with its bgg_status.
 
     Pass *opener* from _bgg_login() to access private collections without
     requiring the user to make their collection public (BG Stats approach).
@@ -294,7 +331,8 @@ def import_from_username(
     """
     if on_status:
         on_status(f"Fetching collection for {username}…")
-    entries = fetch_collection(username, token=token, on_status=on_status, opener=opener)
+    entries = fetch_collection(username, token=token, on_status=on_status,
+                                opener=opener, own_only=False)
     if not entries:
         return []
 
@@ -314,6 +352,7 @@ def import_from_username(
             avg_rating=e.avg_rating,
             my_rating=e.my_rating,
             my_comment=e.my_comment,
+            bgg_status=e.bgg_status,
         )
 
     # Enrich with /thing details (weight, categories, designers, best-at, etc.).
@@ -331,6 +370,7 @@ def import_from_username(
             d.thumbnail_url = d.thumbnail_url or existing.thumbnail_url
             d.my_rating     = existing.my_rating
             d.my_comment    = existing.my_comment
+            d.bgg_status    = existing.bgg_status
             result[d.bgg_id] = d
     except PermissionError:
         if on_status:
@@ -763,6 +803,8 @@ def import_collection_csv(csv_path: Path) -> list[GameDetails]:
             )
             details.my_rating = _f(_pick(row, "rating"))
             details.my_comment = _pick(row, "comment")
+            # BGG's CSV export has one 0/1 column per status flag (own, fortrade, etc.)
+            details.bgg_status = resolve_status({f: row.get(f) == "1" for f in STATUS_FLAGS})
             games.append(details)
     return games
 
