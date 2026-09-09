@@ -144,6 +144,9 @@ img { max-width: 100%; display: block; }
 /* ── Section title ────────────────────────────────────────────────────────── */
 .section-title { font-size: .95rem; font-weight: 700; margin-bottom: 8px; color: var(--navy); }
 
+/* ── Plain list (e.g. expansions-you-own links) ──────────────────────────── */
+.plain-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+
 /* ── Two-column layout ────────────────────────────────────────────────────── */
 .two-col { display: grid; gap: 14px; }
 @media (min-width: 640px) { .two-col { grid-template-columns: 1fr 1fr; } }

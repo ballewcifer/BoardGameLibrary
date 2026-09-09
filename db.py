@@ -109,6 +109,10 @@ MIGRATIONS = [
     "ALTER TABLE collections ADD COLUMN owner_user_id INTEGER REFERENCES users(id)",
     # 1 = cooperative, 0 = competitive, NULL = unset.
     "ALTER TABLE games ADD COLUMN is_cooperative INTEGER",
+    # BGG id/name of this game's base game, if it's an expansion. Purely
+    # BGG-derived (not user-editable), so always overwritten on sync.
+    "ALTER TABLE games ADD COLUMN base_game_id INTEGER",
+    "ALTER TABLE games ADD COLUMN base_game_name TEXT",
 ]
 
 
@@ -158,7 +162,7 @@ def upsert_game(
         "playing_time", "min_age", "weight", "avg_rating", "my_rating",
         "description", "categories", "mechanics", "designers", "publishers",
         "best_players", "my_comment", "own", "last_synced", "is_expansion",
-        "is_cooperative",
+        "is_cooperative", "base_game_id", "base_game_name",
     ]
     placeholders = ", ".join(["?"] * len(cols))
     # is_favorite / has_insert are always protected; caller may add more.
@@ -248,6 +252,14 @@ def get_game(c: sqlite3.Connection, bgg_id: int) -> Optional[sqlite3.Row]:
 def delete_game(c: sqlite3.Connection, bgg_id: int) -> None:
     """Remove a game and all its related loans/plays (CASCADE handles FK rows)."""
     c.execute("DELETE FROM games WHERE bgg_id = ?", (bgg_id,))
+
+
+def list_expansions_of(c: sqlite3.Connection, base_game_id: int) -> list[sqlite3.Row]:
+    """Games in the library that are expansions of the given base game."""
+    return c.execute(
+        f"SELECT * FROM games WHERE base_game_id = ? ORDER BY {_NAME_SORT_KEY}",
+        (base_game_id,),
+    ).fetchall()
 
 
 # ---------- collections ----------

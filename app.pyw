@@ -4797,6 +4797,8 @@ class App(tk.Tk):
                 "own":           1,
                 "last_synced":   db.now_iso(),
                 "is_cooperative": _COOP_VALUES[coop_var.get()],
+                "base_game_id":   d.base_game_id,
+                "base_game_name": d.base_game_name,
             }
             with db.connect() as c:
                 # Auto-lock any fields the user explicitly changed vs the DB.
@@ -4989,6 +4991,8 @@ class App(tk.Tk):
                     "last_synced": db.now_iso(),
                     "is_expansion": int(g.is_expansion),
                     "is_cooperative": bgg.derive_cooperative(g.mechanics),
+                    "base_game_id": g.base_game_id,
+                    "base_game_name": g.base_game_name,
                 }
                 # Don't clobber image_path or manually-locked fields on re-sync.
                 existing = db.get_game(c, g.bgg_id)
@@ -5591,6 +5595,8 @@ class App(tk.Tk):
                     "my_comment": None, "own": 0, "last_synced": db.now_iso(),
                     "is_expansion": int(d.is_expansion) if d else 0,
                     "is_cooperative": bgg.derive_cooperative(d.mechanics) if d else None,
+                    "base_game_id": d.base_game_id if d else None,
+                    "base_game_name": d.base_game_name if d else None,
                 })
             # Refresh game list in combobox
             game_id_map[name] = bgg_id
@@ -5901,14 +5907,27 @@ class App(tk.Tk):
             detail_rows.append(("Designers",  game["designers"]))
         if game["publishers"]:
             detail_rows.append(("Publishers", game["publishers"]))
+        if game["base_game_id"]:
+            detail_rows.append(("Expansion for", game["base_game_name"] or f"#{game['base_game_id']}"))
+
+        base_game_row = None
+        if game["base_game_id"]:
+            with db.connect() as c:
+                base_game_row = db.get_game(c, game["base_game_id"])
 
         grid = ttk.Frame(info)
         grid.pack(anchor="w", pady=(8, 0), fill="x")
         for i, (k, v) in enumerate(detail_rows):
             ttk.Label(grid, text=f"{k}:", font=("Segoe UI", 9, "bold")).grid(
                 row=i, column=0, sticky="nw", padx=(0, 8))
-            ttk.Label(grid, text=v, wraplength=320, justify="left").grid(
-                row=i, column=1, sticky="w")
+            if k == "Expansion for" and base_game_row is not None:
+                link = tk.Label(grid, text=f"{v}  →", fg=C_BLUE_700, cursor="hand2",
+                                 wraplength=320, justify="left", bg=C_BG)
+                link.grid(row=i, column=1, sticky="w")
+                link.bind("<Button-1>", lambda e, bg_row=base_game_row: self.show_details(bg_row))
+            else:
+                ttk.Label(grid, text=v, wraplength=320, justify="left").grid(
+                    row=i, column=1, sticky="w")
 
         if game["tags"]:
             ttk.Label(content, text="Tags:",
@@ -5925,6 +5944,17 @@ class App(tk.Tk):
                       font=("Segoe UI", 9, "bold"), padding=(0, 6, 0, 0)).pack(anchor="w")
             ttk.Label(content, text=game["my_comment"],
                       wraplength=600, justify="left").pack(anchor="w")
+
+        with db.connect() as c:
+            owned_expansions = db.list_expansions_of(c, game["bgg_id"])
+        if owned_expansions:
+            ttk.Label(content, text="Expansions you own:",
+                      font=("Segoe UI", 9, "bold"), padding=(0, 6, 0, 0)).pack(anchor="w")
+            for exp in owned_expansions:
+                link = tk.Label(content, text=f"• {exp['name']}", fg=C_BLUE_700,
+                                 cursor="hand2", bg=C_BG)
+                link.pack(anchor="w")
+                link.bind("<Button-1>", lambda e, exp_row=exp: self.show_details(exp_row))
 
         # ── play statistics ────────────────────────────────────────────────────
         with db.connect() as c:
@@ -6458,15 +6488,28 @@ class App(tk.Tk):
                         counts["loans"] += 1
 
                     # ── Game customisations ─────────────────────────────────────
+                    import base64 as _base64
                     for cu in data.get("customisations") or []:
                         if not db.get_game(c, cu.get("bgg_id")):
                             counts["skipped"] += 1
                             continue
+                        image_path = None
+                        if cu.get("photo_base64"):
+                            try:
+                                ext = cu.get("photo_ext") or "jpg"
+                                dest = IMAGES_DIR / f"{cu['bgg_id']}.{ext}"
+                                IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+                                dest.write_bytes(_base64.b64decode(cu["photo_base64"]))
+                                image_path = str(dest)
+                            except (OSError, ValueError):
+                                pass  # Couldn't write the photo -- keep any existing one.
                         c.execute(
                             "UPDATE games SET tags=?, is_favorite=?, has_insert=?, "
-                            "my_comment=?, my_rating=?, manual_fields=? WHERE bgg_id=?",
+                            "my_comment=?, my_rating=?, best_players=?, is_cooperative=?, "
+                            "manual_fields=?, image_path=COALESCE(?, image_path) WHERE bgg_id=?",
                             (cu.get("tags"), cu.get("is_favorite") or 0, cu.get("has_insert") or 0,
-                             cu.get("my_comment"), cu.get("my_rating"), cu.get("manual_fields"),
+                             cu.get("my_comment"), cu.get("my_rating"), cu.get("best_players"),
+                             cu.get("is_cooperative"), cu.get("manual_fields"), image_path,
                              cu["bgg_id"]),
                         )
                         counts["customisations"] += 1
@@ -6529,14 +6572,30 @@ class App(tk.Tk):
 
             customisations = [dict(r) for r in c.execute(
                 """SELECT bgg_id, name, tags, is_favorite, has_insert,
-                          my_comment, my_rating, manual_fields
+                          my_comment, my_rating, best_players, is_cooperative,
+                          manual_fields, image_path
                    FROM games
                    WHERE tags IS NOT NULL OR is_favorite = 1 OR has_insert = 1
                       OR my_comment IS NOT NULL OR my_rating IS NOT NULL
+                      OR best_players IS NOT NULL OR is_cooperative IS NOT NULL
+                      OR image_path IS NOT NULL
                    """).fetchall()]
 
+        # Embed any custom cover photo as base64 -- the raw image_path is a
+        # device-local absolute path that means nothing on another machine.
+        import base64 as _base64
+        for cu in customisations:
+            path = cu.pop("image_path", None)
+            if path and os.path.isfile(path):
+                try:
+                    with open(path, "rb") as imgf:
+                        cu["photo_base64"] = _base64.b64encode(imgf.read()).decode("ascii")
+                    cu["photo_ext"] = os.path.splitext(path)[1].lstrip(".").lower() or "jpg"
+                except OSError:
+                    pass  # Photo file unreadable -- skip it, don't fail the whole export.
+
         payload = {
-            "version": 1,
+            "version": 2,
             "exported_at": db.now_iso(),
             "members": members,
             "plays": plays,

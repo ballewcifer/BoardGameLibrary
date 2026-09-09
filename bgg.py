@@ -117,6 +117,8 @@ class GameDetails:
     my_rating: Optional[float] = None
     my_comment: Optional[str] = None
     is_expansion: bool = False
+    base_game_id: Optional[int] = None
+    base_game_name: Optional[str] = None
 
 
 def derive_cooperative(mechanics: list[str]) -> Optional[int]:
@@ -375,6 +377,8 @@ def _parse_thing(item: ET.Element) -> GameDetails:
     mechanics: list[str] = []
     designers: list[str] = []
     publishers: list[str] = []
+    base_game_id: Optional[int] = None
+    base_game_name: Optional[str] = None
     for link in item.findall("link"):
         ltype = link.get("type", "")
         value = _unescape(link.get("value", "")) or ""
@@ -386,6 +390,17 @@ def _parse_thing(item: ET.Element) -> GameDetails:
             designers.append(value)
         elif ltype == "boardgamepublisher":
             publishers.append(value)
+        elif ltype == "boardgameexpansion" and link.get("inbound") == "true" and base_game_id is None:
+            # BGG marks the reverse relationship on an expansion's own /thing
+            # page with inbound="true" — this item IS an expansion of that
+            # base game. Unverified against live BGG data (network access to
+            # BGG is blocked in this dev environment); based on BGG's
+            # documented XML API v2 behavior. Double-check against a real
+            # synced expansion.
+            bid = link.get("id")
+            if bid:
+                base_game_id = _i(bid)
+                base_game_name = value
 
     best_players = _best_players_from_poll(item)
 
@@ -410,6 +425,8 @@ def _parse_thing(item: ET.Element) -> GameDetails:
         publishers=publishers,
         best_players=best_players,
         is_expansion=is_expansion,
+        base_game_id=base_game_id,
+        base_game_name=base_game_name,
     )
 
 
@@ -941,6 +958,20 @@ def fetch_game_details_from_page(bgg_id: int, *, fallback_name: str = "") -> Opt
         g_designers  = _names("boardgamedesigner")
         g_publishers = _names("boardgamepublisher")
 
+        # Base game this is an expansion of, if any (mirrors _parse_thing's
+        # XML "inbound" link handling — see the comment there. Field names in
+        # this page-scraped JSON blob are unverified from this environment).
+        g_base_game_id: Optional[int] = None
+        g_base_game_name: Optional[str] = None
+        for x in links.get("boardgameexpansion", []):
+            if x.get("inbound") and x.get("id"):
+                try:
+                    g_base_game_id = int(x["id"])
+                except (TypeError, ValueError):
+                    g_base_game_id = None
+                g_base_game_name = _unescape(x.get("name", "")) or ""
+                break
+
         # ── best-players from poll ────────────────────────────────────────────
         best_list = (item.get("polls") or {}).get("userplayers", {}).get("best", [])
         parts: list[str] = []
@@ -999,6 +1030,8 @@ def fetch_game_details_from_page(bgg_id: int, *, fallback_name: str = "") -> Opt
             best_players=g_best_players,
             image_url=g_image_url,
             is_expansion=is_expansion,
+            base_game_id=g_base_game_id,
+            base_game_name=g_base_game_name,
         )
     except Exception:
         return None

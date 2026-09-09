@@ -6,6 +6,7 @@ Then open  http://localhost:5000  on any device on the same Wi-Fi.
 """
 from __future__ import annotations
 
+import base64
 import json
 import os
 import random
@@ -354,6 +355,8 @@ def game_detail(bgg_id):
         # may be checked out here.
         my_id = _config.load().get("claimed_member_id")
         can_checkout_here = (not my_id) or db.user_can_checkout(c, my_id, bgg_id)
+        base_game = _row_to_dict(db.get_game(c, game["base_game_id"])) if game.get("base_game_id") else None
+        owned_expansions = [_row_to_dict(r) for r in db.list_expansions_of(c, bgg_id)]
 
     today = datetime.now().date().isoformat()
     if loan:
@@ -366,7 +369,9 @@ def game_detail(bgg_id):
                            stats=stats,
                            users=users,
                            can_checkout_here=can_checkout_here,
-                           today=today)
+                           today=today,
+                           base_game=base_game,
+                           owned_expansions=owned_expansions)
 
 
 # ── Checkout ──────────────────────────────────────────────────────────────────
@@ -725,6 +730,8 @@ def add_game():
             "last_synced":   db.now_iso(),
             "is_expansion":  int(details.is_expansion),
             "is_cooperative": _bgg.derive_cooperative(details.mechanics),
+            "base_game_id":   details.base_game_id,
+            "base_game_name": details.base_game_name,
         }
         with db.connect() as c:
             db.upsert_game(c, row)
@@ -781,6 +788,8 @@ def _run_sync(owner_first: str = "", owner_last: str = "", claim_as_mine: bool =
                     "last_synced":  db.now_iso(),
                     "is_expansion": int(g.is_expansion),
                     "is_cooperative": _bgg.derive_cooperative(g.mechanics),
+                    "base_game_id": g.base_game_id,
+                    "base_game_name": g.base_game_name,
                 }
                 existing = db.get_game(c, g.bgg_id)
                 skip = set()
@@ -877,14 +886,29 @@ def backup_export():
                ORDER BY loans.checked_out_at DESC""").fetchall()]
         customisations = [dict(r) for r in c.execute(
             """SELECT bgg_id, name, tags, is_favorite, has_insert,
-                      my_comment, my_rating, manual_fields
+                      my_comment, my_rating, best_players, is_cooperative,
+                      manual_fields, image_path
                FROM games
                WHERE tags IS NOT NULL OR is_favorite = 1 OR has_insert = 1
                   OR my_comment IS NOT NULL OR my_rating IS NOT NULL
+                  OR best_players IS NOT NULL OR is_cooperative IS NOT NULL
+                  OR image_path IS NOT NULL
                """).fetchall()]
 
+    # Embed any custom cover photo as base64 -- the raw image_path is a
+    # server-local absolute path that means nothing once restored elsewhere.
+    for cu in customisations:
+        path = cu.pop("image_path", None)
+        if path and os.path.isfile(path):
+            try:
+                with open(path, "rb") as imgf:
+                    cu["photo_base64"] = base64.b64encode(imgf.read()).decode("ascii")
+                cu["photo_ext"] = os.path.splitext(path)[1].lstrip(".").lower() or "jpg"
+            except OSError:
+                pass  # Photo file unreadable -- skip it, don't fail the whole export.
+
     payload = {
-        "version": 1,
+        "version": 2,
         "exported_at": db.now_iso(),
         "members": members,
         "plays": plays,
@@ -968,11 +992,23 @@ def backup_import():
             if not db.get_game(c, cu.get("bgg_id")):
                 counts["skipped"] += 1
                 continue
+            image_path = None
+            if cu.get("photo_base64"):
+                try:
+                    ext = cu.get("photo_ext") or "jpg"
+                    IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+                    dest = IMAGES_DIR / f"{cu['bgg_id']}.{ext}"
+                    dest.write_bytes(base64.b64decode(cu["photo_base64"]))
+                    image_path = str(dest)
+                except (OSError, ValueError):
+                    pass  # Couldn't write the photo -- keep any existing one.
             c.execute(
                 "UPDATE games SET tags=?, is_favorite=?, has_insert=?, "
-                "my_comment=?, my_rating=?, manual_fields=? WHERE bgg_id=?",
+                "my_comment=?, my_rating=?, best_players=?, is_cooperative=?, "
+                "manual_fields=?, image_path=COALESCE(?, image_path) WHERE bgg_id=?",
                 (cu.get("tags"), cu.get("is_favorite") or 0, cu.get("has_insert") or 0,
-                 cu.get("my_comment"), cu.get("my_rating"), cu.get("manual_fields"),
+                 cu.get("my_comment"), cu.get("my_rating"), cu.get("best_players"),
+                 cu.get("is_cooperative"), cu.get("manual_fields"), image_path,
                  cu["bgg_id"]),
             )
             counts["customisations"] += 1
