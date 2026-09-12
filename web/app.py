@@ -6,6 +6,7 @@ Then open  http://localhost:5000  on any device on the same Wi-Fi.
 """
 from __future__ import annotations
 
+import base64
 import json
 import os
 import random
@@ -118,13 +119,16 @@ def games():
     tag_filter = request.args.get("tag", "")
     status     = request.args.get("status", "all")   # all | available | out | favs
     coop       = request.args.get("coop", "any")     # any | coop | competitive
+    bstatus    = request.args.get("bstatus", "owned")   # owned | all | a bgg.STATUS_FLAGS value
     show_exp   = request.args.get("exp", "") == "1"
     collection = request.args.get("collection", "all")
     compare    = request.args.get("compare", "off")          # off | shared | only | diff
     compare_other_raw = request.args.get("compare_other", "")
 
+    status_param = None if bstatus == "owned" else bstatus
     with db.connect() as c:
-        rows      = db.list_games(c, search=q)
+        rows      = db.list_games(c, search=q, status=status_param)
+        total_games_unfiltered = db.count_games(c, status="all")
         open_loans = {r["game_id"]: _row_to_dict(r)
                       for r in db.currently_checked_out(c)}
         play_cts   = db.play_counts(c)
@@ -201,6 +205,9 @@ def games():
                            tag_filter=tag_filter,
                            status=status,
                            coop=coop,
+                           bstatus=bstatus,
+                           bgg_status_labels=_bgg.STATUS_LABELS,
+                           bgg_status_flags=_bgg.STATUS_FLAGS,
                            show_exp=show_exp,
                            all_tags=all_tags,
                            collections=collections,
@@ -208,7 +215,8 @@ def games():
                            multi=multi,
                            active_collection=active_cid,
                            compare=compare,
-                           compare_other=other_cid)
+                           compare_other=other_cid,
+                           total_games_unfiltered=total_games_unfiltered)
 
 
 @app.route("/collections/claim", methods=["POST"])
@@ -354,6 +362,8 @@ def game_detail(bgg_id):
         # may be checked out here.
         my_id = _config.load().get("claimed_member_id")
         can_checkout_here = (not my_id) or db.user_can_checkout(c, my_id, bgg_id)
+        base_game = _row_to_dict(db.get_game(c, game["base_game_id"])) if game.get("base_game_id") else None
+        owned_expansions = [_row_to_dict(r) for r in db.list_expansions_of(c, bgg_id)]
 
     today = datetime.now().date().isoformat()
     if loan:
@@ -366,7 +376,11 @@ def game_detail(bgg_id):
                            stats=stats,
                            users=users,
                            can_checkout_here=can_checkout_here,
-                           today=today)
+                           today=today,
+                           base_game=base_game,
+                           owned_expansions=owned_expansions,
+                           bgg_status_labels=_bgg.STATUS_LABELS,
+                           bgg_status_flags=_bgg.STATUS_FLAGS)
 
 
 # ── Checkout ──────────────────────────────────────────────────────────────────
@@ -434,10 +448,15 @@ def update_game(bgg_id):
     tags       = request.form.get("tags", "").strip()
     my_comment = request.form.get("my_comment", "").strip() or None
     coop       = {"coop": 1, "competitive": 0}.get(request.form.get("is_cooperative", ""))
+    status     = request.form.get("bgg_status", "own")
+    if status not in _bgg.STATUS_FLAGS:
+        status = "own"
+    own = 1 if status == "own" else 0
     with db.connect() as c:
         c.execute(
-            "UPDATE games SET best_players=?, my_rating=?, my_comment=?, is_cooperative=? WHERE bgg_id=?",
-            (best_players, my_rating, my_comment, coop, bgg_id),
+            "UPDATE games SET best_players=?, my_rating=?, my_comment=?, is_cooperative=?, "
+            "bgg_status=?, own=? WHERE bgg_id=?",
+            (best_players, my_rating, my_comment, coop, status, own, bgg_id),
         )
         db.set_tags(c, bgg_id, tags)
         db.set_insert(c, bgg_id, bool(has_insert))
@@ -649,8 +668,10 @@ def api_search():
     if not q:
         return jsonify([])
     try:
-        tok     = _config.load().get("bgg_token", "")
-        results = _bgg.search_games(q, token=tok or None)
+        # BGG requires a Bearer token on all endpoints. The token is embedded
+        # at build time and always used — never a per-user setting (parity with
+        # the desktop and mobile apps).
+        results = _bgg.search_games(q, token=_bgg.BGG_APP_TOKEN or None)
         return jsonify([
             {"id": bgg_id, "name": name, "year": year}
             for bgg_id, name, year in results[:30]
@@ -662,9 +683,9 @@ def api_search():
 @app.route("/api/game/<int:bgg_id>")
 def api_game_details(bgg_id):
     """Fetch full game details from BGG (used by Add Game confirm step)."""
-    settings = _settings()
     try:
-        details = _bgg.fetch_game_details(bgg_id, token=settings.get("bgg_token", ""))
+        _things = _bgg.fetch_things([bgg_id], token=_bgg.BGG_APP_TOKEN or None)
+        details = _things[0] if _things else None
         if details is None:
             return jsonify({"error": "Not found"}), 404
         return jsonify({
@@ -692,9 +713,12 @@ def add_game():
     if not bgg_id:
         flash("No BGG ID provided.", "error")
         return redirect(url_for("games"))
-    settings = _settings()
+    status = request.form.get("status", "own")
+    if status not in _bgg.STATUS_FLAGS:
+        status = "own"
     try:
-        details = _bgg.fetch_game_details(bgg_id, token=settings.get("bgg_token", ""))
+        _things = _bgg.fetch_things([bgg_id], token=_bgg.BGG_APP_TOKEN or None)
+        details = _things[0] if _things else None
         if details is None:
             flash("Game not found on BGG.", "error")
             return redirect(url_for("games"))
@@ -721,14 +745,89 @@ def add_game():
             "publishers":    ", ".join(details.publishers) if details.publishers else None,
             "best_players":  details.best_players,
             "my_comment":    None,
-            "own":           1,
+            "own":           1 if status == "own" else 0,
+            "bgg_status":    status,
             "last_synced":   db.now_iso(),
             "is_expansion":  int(details.is_expansion),
             "is_cooperative": _bgg.derive_cooperative(details.mechanics),
+            "base_game_id":   details.base_game_id,
+            "base_game_name": details.base_game_name,
         }
         with db.connect() as c:
             db.upsert_game(c, row)
         flash(f'Added "{details.name}" to your library.', "success")
+    except Exception as e:
+        flash(f"Error adding game: {e}", "error")
+    return redirect(url_for("games"))
+
+
+@app.route("/games/add-manual", methods=["POST"])
+def add_game_manual():
+    """Save a game entered entirely by hand — no BGG lookup involved."""
+    name = request.form.get("name", "").strip()
+    if not name:
+        flash("Name is required.", "error")
+        return redirect(url_for("games"))
+    status = request.form.get("status", "own")
+    if status not in _bgg.STATUS_FLAGS:
+        status = "own"
+
+    def _i(field):
+        v = request.form.get(field, "").strip()
+        try:
+            return int(v) if v else None
+        except ValueError:
+            return None
+
+    def _f(field):
+        v = request.form.get(field, "").strip()
+        try:
+            return float(v) if v else None
+        except ValueError:
+            return None
+
+    def _s(field):
+        return request.form.get(field, "").strip() or None
+
+    coop_raw = request.form.get("is_cooperative", "")
+    is_cooperative = {"coop": 1, "competitive": 0}.get(coop_raw)
+
+    try:
+        with db.connect() as c:
+            bgg_id = db.next_manual_id(c)
+            row = {
+                "bgg_id":        bgg_id,
+                "name":          name,
+                "year":          _i("year"),
+                "image_url":     None,
+                "thumbnail_url": None,
+                "image_path":    None,
+                "min_players":   _i("min_players"),
+                "max_players":   _i("max_players"),
+                "min_playtime":  _i("min_playtime"),
+                "max_playtime":  _i("max_playtime"),
+                "playing_time":  _i("playing_time"),
+                "min_age":       _i("min_age"),
+                "weight":        _f("weight"),
+                "avg_rating":    None,
+                "my_rating":     None,
+                "description":   _s("description"),
+                "categories":    _s("categories"),
+                "mechanics":     _s("mechanics"),
+                "designers":     _s("designers"),
+                "publishers":    _s("publishers"),
+                "best_players":  _s("best_players"),
+                "my_comment":    None,
+                "own":           1 if status == "own" else 0,
+                "bgg_status":    status,
+                "last_synced":   db.now_iso(),
+                "is_expansion":  1 if request.form.get("is_expansion") == "1" else 0,
+                "is_cooperative": is_cooperative,
+                "base_game_id":   None,
+                "base_game_name": None,
+            }
+            db.upsert_game(c, row)
+        flash(f'Added "{name}" to your library.', "success")
     except Exception as e:
         flash(f"Error adding game: {e}", "error")
     return redirect(url_for("games"))
@@ -742,16 +841,19 @@ def _run_sync(owner_first: str = "", owner_last: str = "", claim_as_mine: bool =
     global _sync_status
     settings = _settings()
     username = settings.get("bgg_username", "")
-    token    = settings.get("bgg_token", "")
+    token    = _bgg.BGG_APP_TOKEN or ""
 
     def on_status(msg):
         _sync_status["message"] = msg
 
     try:
-        collection = _bgg.fetch_collection(username, token=token, on_status=on_status)
-        total = len(collection)
+        # import_from_username fetches /collection (all BGG statuses — own,
+        # wishlist, fortrade, etc.) then enriches every game via /thing
+        # (weight, categories, designers, best-at...) and returns GameDetails.
+        games = _bgg.import_from_username(username, token=token, on_status=on_status)
+        total = len(games)
         with db.connect() as c:
-            for i, g in enumerate(collection, 1):
+            for i, g in enumerate(games, 1):
                 if i == 1 or i % 10 == 0 or i == total:
                     _sync_status["message"] = f"Saving {i} of {total} games…"
                 row = {
@@ -777,10 +879,15 @@ def _run_sync(owner_first: str = "", owner_last: str = "", claim_as_mine: bool =
                     "publishers":   ", ".join(g.publishers) if g.publishers else None,
                     "best_players": g.best_players,
                     "my_comment":   g.my_comment,
-                    "own":          1,
+                    # BGG collection status, when known, determines real ownership;
+                    # unknown status defaults to owned (matches prior behavior).
+                    "own":          1 if g.bgg_status in (None, "own") else 0,
                     "last_synced":  db.now_iso(),
                     "is_expansion": int(g.is_expansion),
                     "is_cooperative": _bgg.derive_cooperative(g.mechanics),
+                    "base_game_id": g.base_game_id,
+                    "base_game_name": g.base_game_name,
+                    "bgg_status":   g.bgg_status,
                 }
                 existing = db.get_game(c, g.bgg_id)
                 skip = set()
@@ -790,10 +897,13 @@ def _run_sync(owner_first: str = "", owner_last: str = "", claim_as_mine: bool =
                     skip = db.get_manual_fields(c, g.bgg_id)
                 db.upsert_game(c, row, skip_fields=skip)
 
-            # Link the synced games to this user's collection (multi-collection)
+            # Link every synced game (owned, wishlist, for-trade, etc.) to this
+            # collection so "Clear Collection" removes all of them, and collection
+            # comparisons reflect the full BGG collection.
             if username:
                 cid = db.get_or_create_collection(c, username, username)
-                db.replace_collection_games(c, cid, [g.bgg_id for g in collection])
+                all_ids = [g.bgg_id for g in games]
+                db.replace_collection_games(c, cid, all_ids)
 
                 # Optionally add the importer as a member, claim the collection
                 # for them, and mark them as this device's owner ("me").
@@ -811,7 +921,7 @@ def _run_sync(owner_first: str = "", owner_last: str = "", claim_as_mine: bool =
                     s["claimed_member_id"] = uid
                     _config.save(s)
 
-        _sync_status["message"] = f"Sync complete — {len(collection)} games."
+        _sync_status["message"] = f"Sync complete — {len(games)} games."
     except Exception as e:
         _sync_status["error"]   = str(e)
         _sync_status["message"] = f"Sync failed: {e}"
@@ -877,14 +987,30 @@ def backup_export():
                ORDER BY loans.checked_out_at DESC""").fetchall()]
         customisations = [dict(r) for r in c.execute(
             """SELECT bgg_id, name, tags, is_favorite, has_insert,
-                      my_comment, my_rating, manual_fields
+                      my_comment, my_rating, best_players, is_cooperative,
+                      manual_fields, image_path, own, bgg_status
                FROM games
                WHERE tags IS NOT NULL OR is_favorite = 1 OR has_insert = 1
                   OR my_comment IS NOT NULL OR my_rating IS NOT NULL
+                  OR best_players IS NOT NULL OR is_cooperative IS NOT NULL
+                  OR image_path IS NOT NULL OR own = 0
+                  OR (bgg_status IS NOT NULL AND bgg_status != 'own')
                """).fetchall()]
 
+    # Embed any custom cover photo as base64 -- the raw image_path is a
+    # server-local absolute path that means nothing once restored elsewhere.
+    for cu in customisations:
+        path = cu.pop("image_path", None)
+        if path and os.path.isfile(path):
+            try:
+                with open(path, "rb") as imgf:
+                    cu["photo_base64"] = base64.b64encode(imgf.read()).decode("ascii")
+                cu["photo_ext"] = os.path.splitext(path)[1].lstrip(".").lower() or "jpg"
+            except OSError:
+                pass  # Photo file unreadable -- skip it, don't fail the whole export.
+
     payload = {
-        "version": 1,
+        "version": 3,
         "exported_at": db.now_iso(),
         "members": members,
         "plays": plays,
@@ -968,11 +1094,25 @@ def backup_import():
             if not db.get_game(c, cu.get("bgg_id")):
                 counts["skipped"] += 1
                 continue
+            image_path = None
+            if cu.get("photo_base64"):
+                try:
+                    ext = cu.get("photo_ext") or "jpg"
+                    IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+                    dest = IMAGES_DIR / f"{cu['bgg_id']}.{ext}"
+                    dest.write_bytes(base64.b64decode(cu["photo_base64"]))
+                    image_path = str(dest)
+                except (OSError, ValueError):
+                    pass  # Couldn't write the photo -- keep any existing one.
             c.execute(
                 "UPDATE games SET tags=?, is_favorite=?, has_insert=?, "
-                "my_comment=?, my_rating=?, manual_fields=? WHERE bgg_id=?",
+                "my_comment=?, my_rating=?, best_players=?, is_cooperative=?, "
+                "manual_fields=?, image_path=COALESCE(?, image_path), "
+                "own=COALESCE(?, own), bgg_status=COALESCE(?, bgg_status) WHERE bgg_id=?",
                 (cu.get("tags"), cu.get("is_favorite") or 0, cu.get("has_insert") or 0,
-                 cu.get("my_comment"), cu.get("my_rating"), cu.get("manual_fields"),
+                 cu.get("my_comment"), cu.get("my_rating"), cu.get("best_players"),
+                 cu.get("is_cooperative"), cu.get("manual_fields"), image_path,
+                 cu.get("own"), cu.get("bgg_status"),
                  cu["bgg_id"]),
             )
             counts["customisations"] += 1

@@ -109,6 +109,16 @@ MIGRATIONS = [
     "ALTER TABLE collections ADD COLUMN owner_user_id INTEGER REFERENCES users(id)",
     # 1 = cooperative, 0 = competitive, NULL = unset.
     "ALTER TABLE games ADD COLUMN is_cooperative INTEGER",
+    # BGG id/name of this game's base game, if it's an expansion. Purely
+    # BGG-derived (not user-editable), so always overwritten on sync.
+    "ALTER TABLE games ADD COLUMN base_game_id INTEGER",
+    "ALTER TABLE games ADD COLUMN base_game_name TEXT",
+    # BGG's collection status (own, wishlist, fortrade, etc. — see
+    # bgg.STATUS_FLAGS). NULL for games with no BGG collection data (e.g.
+    # manually added and never synced). The `own` column above stays the
+    # authoritative "is this really in my library" bit; this is a richer,
+    # informational label alongside it.
+    "ALTER TABLE games ADD COLUMN bgg_status TEXT",
 ]
 
 
@@ -158,12 +168,19 @@ def upsert_game(
         "playing_time", "min_age", "weight", "avg_rating", "my_rating",
         "description", "categories", "mechanics", "designers", "publishers",
         "best_players", "my_comment", "own", "last_synced", "is_expansion",
-        "is_cooperative",
+        "is_cooperative", "base_game_id", "base_game_name", "bgg_status",
     ]
     placeholders = ", ".join(["?"] * len(cols))
     # is_favorite / has_insert are always protected; caller may add more.
     protected = {"bgg_id"} | (skip_fields or set())
-    updates = ", ".join(f"{col}=excluded.{col}" for col in cols if col not in protected)
+    # bgg_status uses COALESCE so call sites that omit it (e.g. "Find on BGG…"
+    # in Log-a-Play) don't silently wipe an existing game's real status to NULL.
+    coalesced = {"bgg_status"}
+    updates = ", ".join(
+        f"{col}=COALESCE(excluded.{col}, {col})" if col in coalesced
+        else f"{col}=excluded.{col}"
+        for col in cols if col not in protected
+    )
     sql = (
         f"INSERT INTO games ({', '.join(cols)}) VALUES ({placeholders}) "
         f"ON CONFLICT(bgg_id) DO UPDATE SET {updates}"
@@ -223,22 +240,57 @@ def name_sort_key(name: str) -> str:
 
 
 def list_games(c: sqlite3.Connection, search: str = "",
-               owned_only: bool = True) -> list[sqlite3.Row]:
+               owned_only: bool = True,
+               status: Optional[str] = None) -> list[sqlite3.Row]:
     """Return games ordered by name.
 
     owned_only=True  (default) — only games in the user's collection (own=1).
     owned_only=False           — all games including play-log-only entries (own=0).
+
+    status: overrides owned_only when given.
+      None            — respect owned_only (default behavior, unchanged).
+      "all"           — every game regardless of own/bgg_status.
+      a bgg.STATUS_FLAGS value (e.g. "wishlist", "fortrade") — only games
+      currently tagged with that BGG collection status.
     """
-    own_clause = "own = 1" if owned_only else "1"
+    where = "own = 1" if owned_only else "1"
+    params: list = []
+    if status == "all":
+        where = "1"
+    elif status:
+        where = "bgg_status = ?"
+        params.append(status)
     if search:
         return c.execute(
-            f"SELECT * FROM games WHERE {own_clause} AND name LIKE ?"
+            f"SELECT * FROM games WHERE {where} AND name LIKE ?"
             f" ORDER BY {_NAME_SORT_KEY}",
-            (f"%{search}%",),
+            (*params, f"%{search}%"),
         ).fetchall()
     return c.execute(
-        f"SELECT * FROM games WHERE {own_clause} ORDER BY {_NAME_SORT_KEY}"
+        f"SELECT * FROM games WHERE {where} ORDER BY {_NAME_SORT_KEY}", params
     ).fetchall()
+
+
+def count_games(c: sqlite3.Connection, owned_only: bool = True,
+                 status: Optional[str] = None) -> int:
+    """Same WHERE-clause semantics as list_games(), but just the row count
+    (used for the games-view "N of M" footer without fetching every row)."""
+    where = "own = 1" if owned_only else "1"
+    params: list = []
+    if status == "all":
+        where = "1"
+    elif status:
+        where = "bgg_status = ?"
+        params.append(status)
+    return c.execute(f"SELECT COUNT(*) FROM games WHERE {where}", params).fetchone()[0]
+
+
+def next_manual_id(c: sqlite3.Connection) -> int:
+    """A synthetic bgg_id for a manually-added game with no real BGG match —
+    guaranteed to never collide with a real (always-positive) BGG id."""
+    r = c.execute("SELECT MIN(bgg_id) FROM games").fetchone()
+    lowest = r[0] if r[0] is not None else 0
+    return min(lowest, 0) - 1
 
 
 def get_game(c: sqlite3.Connection, bgg_id: int) -> Optional[sqlite3.Row]:
@@ -248,6 +300,14 @@ def get_game(c: sqlite3.Connection, bgg_id: int) -> Optional[sqlite3.Row]:
 def delete_game(c: sqlite3.Connection, bgg_id: int) -> None:
     """Remove a game and all its related loans/plays (CASCADE handles FK rows)."""
     c.execute("DELETE FROM games WHERE bgg_id = ?", (bgg_id,))
+
+
+def list_expansions_of(c: sqlite3.Connection, base_game_id: int) -> list[sqlite3.Row]:
+    """Games in the library that are expansions of the given base game."""
+    return c.execute(
+        f"SELECT * FROM games WHERE base_game_id = ? ORDER BY {_NAME_SORT_KEY}",
+        (base_game_id,),
+    ).fetchall()
 
 
 # ---------- collections ----------

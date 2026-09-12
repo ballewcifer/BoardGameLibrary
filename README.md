@@ -11,21 +11,25 @@ A self-hosted **board game library manager** — catalog your collection, **lend
 Both share the same local SQLite database and the `db.py` / `bgg.py` / `config.py` modules.
 
 ## Features
-- **BoardGameGeek sync** — import your collection by username (public, or private via login)
-- **Browse** — card and table views with filters (players, best-at, play time, complexity, status, tags, favorites) and sort
+- **BoardGameGeek sync** — import your collection by username (public, or private via login), including wishlist, for-trade, preordered and other BGG collection statuses, not just what you own. Read-only on Web and Mobile. On **Desktop**, an opt-in setting can also post plays you log here back to your BGG account (off by default; your BGG password is used once per post and never stored).
+- **Add games** via BGG search, or import a BGG collection export CSV (desktop)
+- **Cooperative / Competitive** game type — auto-detected from BGG mechanics, editable per game, and usable as a filter
+- **Expansions** automatically link to their base game — "Expansion for X" on the expansion, "Expansions You Own" on the base game
+- **Browse** — card and table views with filters (players, best-at, play time, complexity, status, tags, favorites, cooperative/competitive, BGG collection status) and sort
+- **"Surprise Me"** random game picker, filtered by players, time, complexity, and game type
 - **Lending** — check games out to named **members**, with due dates, overdue flags, and full loan history
-- **Multi-collection** — sync several BGG users and compare libraries: *shared by all*, *unique to one*, or *in A but not B* (desktop)
+- **Multi-collection** — sync several BGG users and compare libraries: *shared by all*, *unique to one*, or *in A but not B*
 - **Play log** — date, players, winner, duration, scores → win leaderboard + dashboard stats
-- **Add games** via BGG search; favorites, tags, expansion and 3D-insert badges
-- **Offline** — local SQLite, with backup export / import
+- Favorites, tags, custom cover photos, and 3D-insert badges
+- **Offline** — local SQLite, with backup export / import (including custom photos and per-game customizations)
 
 ## How it compares
 | Capability | BG Stats | BG Catalog | **Board Game Library** |
 |---|---|---|---|
-| Platforms | iOS, Android | iOS, Android | **Windows, macOS, LAN web, Android** |
-| BGG collection sync | ✅ | ✅* | ✅ |
+| Platforms | iOS, Android | iOS, Android | **Windows, macOS, LAN web, iOS, Android** |
+| BGG collection sync | ✅ | ✅* | ✅ (all statuses — owned, wishlist, for trade, etc.) |
 | Deep play stats (H-index, charts, scoring rules) | ✅✅ | basic | basic |
-| Ownership / wishlist statuses | partial | ✅✅ | favorites + tags |
+| Ownership / wishlist statuses | partial | ✅✅ | ✅ synced from BGG, plus favorites + tags |
 | **Lend / check-out to members** | — | — | ✅ **unique** |
 | **Compare multiple collections** | — | — | ✅ **unique** |
 | Social sharing (QR, victory images) | some | ✅✅ | — |

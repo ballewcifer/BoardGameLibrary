@@ -75,6 +75,37 @@ def _ssl_ctx() -> ssl.SSLContext:
     return ctx
 
 
+# BGG's collection status flags, in the order we resolve a single "primary"
+# status when more than one is set at once (e.g. a game can be own=1 AND
+# fortrade=1 simultaneously — "I own it but I'll trade it"). Owning it is
+# always the most useful single label; after that we favor the flags that
+# represent active intent over passive history ("prevowned").
+STATUS_FLAGS = ("own", "fortrade", "preordered", "wanttobuy", "wanttoplay", "wishlist", "prevowned", "want")
+
+# Human-readable labels for UI (filter dropdowns, badges) — keyed by the same
+# strings stored in bgg_status.
+STATUS_LABELS = {
+    "own": "Owned",
+    "fortrade": "For Trade",
+    "preordered": "Preordered",
+    "wanttobuy": "Want to Buy",
+    "wanttoplay": "Want to Play",
+    "wishlist": "Wishlist",
+    "prevowned": "Previously Owned",
+    "want": "Want",
+}
+
+
+def resolve_status(flags: dict) -> Optional[str]:
+    """Pick one status string from a dict of {flag_name: bool}, in STATUS_FLAGS
+    priority order. Returns None if no flag is set (e.g. a manually-added game
+    with no BGG collection data)."""
+    for key in STATUS_FLAGS:
+        if flags.get(key):
+            return key
+    return None
+
+
 @dataclass
 class CollectionEntry:
     bgg_id: int
@@ -85,6 +116,7 @@ class CollectionEntry:
     my_rating: Optional[float]
     my_comment: Optional[str]
     own: bool
+    bgg_status: Optional[str] = None
     # Parsed from <stats> when stats=1 is included in the request
     min_players: Optional[int] = None
     max_players: Optional[int] = None
@@ -117,6 +149,9 @@ class GameDetails:
     my_rating: Optional[float] = None
     my_comment: Optional[str] = None
     is_expansion: bool = False
+    base_game_id: Optional[int] = None
+    base_game_name: Optional[str] = None
+    bgg_status: Optional[str] = None
 
 
 def derive_cooperative(mechanics: list[str]) -> Optional[int]:
@@ -143,8 +178,13 @@ def _http_get(
     BGG) AND the user's session cookies (from a prior _bgg_login call) so that
     private collections are accessible without requiring the user to make their
     collection public.
+
+    Use the plain app USER_AGENT here, NOT BROWSER_UA: BGG's WAF now returns 403
+    to a spoofed desktop-browser UA on the xmlapi2 endpoints (search/thing/
+    collection), while an honest app identifier is accepted. BROWSER_UA stays in
+    use only for the HTML page-scraping fallbacks, where BGG still wants it.
     """
-    headers = {"User-Agent": BROWSER_UA}
+    headers = {"User-Agent": USER_AGENT}
     if token:
         headers["Authorization"] = f"Bearer {token}"
     req = urllib.request.Request(url, headers=headers)
@@ -162,7 +202,8 @@ def _http_get(
             # sufficient — let the caller decide whether to retry.
             if not token:
                 raise PermissionError(
-                    "BGG requires an API token — add yours in File → Settings → BGG API token."
+                    "BGG requires an API token, but this build has none embedded. "
+                    "Please reinstall the latest version of the app."
                 ) from e
             raise PermissionError(
                 "Your collection is private. Add your BGG password in File → Settings\n"
@@ -243,7 +284,9 @@ def fetch_collection(
         my_rating = rating_el.get("value") if rating_el is not None else None
         comment_el = item.find("comment")
         status_el = item.find("status")
-        own = status_el is not None and status_el.get("own") == "1"
+        flags = {f: (status_el is not None and status_el.get(f) == "1") for f in STATUS_FLAGS}
+        own = flags["own"]
+        bgg_status = resolve_status(flags)
 
         # Parse player counts / playtime from <stats> (present when stats=1)
         min_players = max_players = min_playtime = max_playtime = None
@@ -266,6 +309,7 @@ def fetch_collection(
             my_rating=_f(my_rating) if my_rating not in ("N/A", None) else None,
             my_comment=_unescape((comment_el.text or "").strip()) if comment_el is not None and comment_el.text else None,
             own=own,
+            bgg_status=bgg_status,
             min_players=min_players,
             max_players=max_players,
             min_playtime=min_playtime,
@@ -282,7 +326,8 @@ def import_from_username(
     on_status: Optional[Callable[[str], None]] = None,
     opener: Optional[urllib.request.OpenerDirector] = None,
 ) -> list[GameDetails]:
-    """Import an owned collection by BGG username.
+    """Import a BGG username's full collection (all statuses — owned, wishlist,
+    for trade, etc; see STATUS_FLAGS), tagging each game with its bgg_status.
 
     Pass *opener* from _bgg_login() to access private collections without
     requiring the user to make their collection public (BG Stats approach).
@@ -292,7 +337,8 @@ def import_from_username(
     """
     if on_status:
         on_status(f"Fetching collection for {username}…")
-    entries = fetch_collection(username, token=token, on_status=on_status, opener=opener)
+    entries = fetch_collection(username, token=token, on_status=on_status,
+                                opener=opener, own_only=False)
     if not entries:
         return []
 
@@ -312,6 +358,7 @@ def import_from_username(
             avg_rating=e.avg_rating,
             my_rating=e.my_rating,
             my_comment=e.my_comment,
+            bgg_status=e.bgg_status,
         )
 
     # Enrich with /thing details (weight, categories, designers, best-at, etc.).
@@ -329,6 +376,7 @@ def import_from_username(
             d.thumbnail_url = d.thumbnail_url or existing.thumbnail_url
             d.my_rating     = existing.my_rating
             d.my_comment    = existing.my_comment
+            d.bgg_status    = existing.bgg_status
             result[d.bgg_id] = d
     except PermissionError:
         if on_status:
@@ -375,6 +423,8 @@ def _parse_thing(item: ET.Element) -> GameDetails:
     mechanics: list[str] = []
     designers: list[str] = []
     publishers: list[str] = []
+    base_game_id: Optional[int] = None
+    base_game_name: Optional[str] = None
     for link in item.findall("link"):
         ltype = link.get("type", "")
         value = _unescape(link.get("value", "")) or ""
@@ -386,6 +436,17 @@ def _parse_thing(item: ET.Element) -> GameDetails:
             designers.append(value)
         elif ltype == "boardgamepublisher":
             publishers.append(value)
+        elif ltype == "boardgameexpansion" and link.get("inbound") == "true" and base_game_id is None:
+            # BGG marks the reverse relationship on an expansion's own /thing
+            # page with inbound="true" — this item IS an expansion of that
+            # base game. Unverified against live BGG data (network access to
+            # BGG is blocked in this dev environment); based on BGG's
+            # documented XML API v2 behavior. Double-check against a real
+            # synced expansion.
+            bid = link.get("id")
+            if bid:
+                base_game_id = _i(bid)
+                base_game_name = value
 
     best_players = _best_players_from_poll(item)
 
@@ -410,6 +471,8 @@ def _parse_thing(item: ET.Element) -> GameDetails:
         publishers=publishers,
         best_players=best_players,
         is_expansion=is_expansion,
+        base_game_id=base_game_id,
+        base_game_name=base_game_name,
     )
 
 
@@ -746,6 +809,8 @@ def import_collection_csv(csv_path: Path) -> list[GameDetails]:
             )
             details.my_rating = _f(_pick(row, "rating"))
             details.my_comment = _pick(row, "comment")
+            # BGG's CSV export has one 0/1 column per status flag (own, fortrade, etc.)
+            details.bgg_status = resolve_status({f: row.get(f) == "1" for f in STATUS_FLAGS})
             games.append(details)
     return games
 
@@ -941,6 +1006,20 @@ def fetch_game_details_from_page(bgg_id: int, *, fallback_name: str = "") -> Opt
         g_designers  = _names("boardgamedesigner")
         g_publishers = _names("boardgamepublisher")
 
+        # Base game this is an expansion of, if any (mirrors _parse_thing's
+        # XML "inbound" link handling — see the comment there. Field names in
+        # this page-scraped JSON blob are unverified from this environment).
+        g_base_game_id: Optional[int] = None
+        g_base_game_name: Optional[str] = None
+        for x in links.get("boardgameexpansion", []):
+            if x.get("inbound") and x.get("id"):
+                try:
+                    g_base_game_id = int(x["id"])
+                except (TypeError, ValueError):
+                    g_base_game_id = None
+                g_base_game_name = _unescape(x.get("name", "")) or ""
+                break
+
         # ── best-players from poll ────────────────────────────────────────────
         best_list = (item.get("polls") or {}).get("userplayers", {}).get("best", [])
         parts: list[str] = []
@@ -999,6 +1078,8 @@ def fetch_game_details_from_page(bgg_id: int, *, fallback_name: str = "") -> Opt
             best_players=g_best_players,
             image_url=g_image_url,
             is_expansion=is_expansion,
+            base_game_id=g_base_game_id,
+            base_game_name=g_base_game_name,
         )
     except Exception:
         return None
