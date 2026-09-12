@@ -870,7 +870,8 @@ class App(tk.Tk):
         menubar.add_cascade(label="Library", menu=lib_menu)
         lib_menu.add_command(label="Sync from BGG…", command=self.on_import_from_bgg)
         lib_menu.add_separator()
-        lib_menu.add_command(label="Add Game…", command=self.on_add_game)
+        lib_menu.add_command(label="Add from BGG…", command=self.on_add_game)
+        lib_menu.add_command(label="Add Game Manually…", command=self.on_add_game_manual)
         lib_menu.add_command(label="Pick a Random Game…", command=self.on_random_game)
 
         # ── View ──────────────────────────────────────────────────────────────
@@ -975,6 +976,7 @@ class App(tk.Tk):
         search_row.pack(fill="x")
         search_entry = ttk.Entry(search_row, textvariable=self.search_var)
         search_entry.pack(side="left", fill="x", expand=True)
+        self.search_entry = search_entry
         ttk.Button(search_row, text="Clear", style="Quiet.TButton",
                    command=lambda: self.search_var.set("")).pack(side="left", padx=(SP["xs"], 0))
 
@@ -982,7 +984,9 @@ class App(tk.Tk):
         # previously reachable only via Library → Add Game…; mobile and web
         # both surface it as a standing button, so the desktop toolbar
         # should too rather than relying on the menu bar alone).
-        ttk.Button(bar, text="+ Add Game", command=self.on_add_game
+        ttk.Button(bar, text="+ Add Manually", command=self.on_add_game_manual
+                   ).pack(side="right", padx=(0, SP["md"]))
+        ttk.Button(bar, text="+ Add from BGG", command=self.on_add_game
                    ).pack(side="right", padx=(0, SP["md"]))
 
         # VIEW dropdown
@@ -1703,6 +1707,10 @@ class App(tk.Tk):
             self._compare_cb.pack(side="right")
             ttk.Label(self._collection_bar, text="Compare:",
                       style="Filter.TLabel").pack(side="right", padx=(self.SP["md"], self.SP["xs"]))
+            ttk.Label(self._collection_bar,
+                      text="Compare collections to see which games are shared, or unique to one.",
+                      foreground=C_INK_500, font=("Segoe UI", 8)
+                      ).pack(side="right", padx=(self.SP["md"], self.SP["xs"]))
 
         if not multi:
             return
@@ -2019,6 +2027,7 @@ class App(tk.Tk):
         with db.connect() as c:
             games = db.list_games(c, self.search_var.get().strip(), status=status_param)
             total_count = db.count_games(c, status=status_param)
+            self._total_games_unfiltered = db.count_games(c, status="all")
             open_loans = {
                 row["game_id"]: row
                 for row in c.execute(
@@ -2040,6 +2049,14 @@ class App(tk.Tk):
             _mine = self.settings.get("claimed_member_id")
             self._my_collection_ids = (
                 db.owned_collection_ids(c, _mine) if _mine else None)
+
+        # Grey out the search field when the library has no games at all —
+        # re-evaluated on every refresh, not just at startup.
+        if hasattr(self, "search_entry"):
+            if self._total_games_unfiltered == 0:
+                self.search_entry.state(["disabled"])
+            else:
+                self.search_entry.state(["!disabled"])
 
         # Refresh tag dropdown (preserve selection if tag still exists)
         cur_tag = self.tag_filter_var.get()
@@ -2869,6 +2886,9 @@ class App(tk.Tk):
 
         ttk.Label(frame, text="Friends", style="Section.TLabel").pack(anchor="w")
         ttk.Separator(frame, orient="horizontal").pack(fill="x", pady=(SP["xs"], SP["md"]))
+
+        ttk.Label(frame, text="Adding friends lets you track plays and loan out games to them.",
+                  foreground=C_INK_500, font=("Segoe UI", 8)).pack(anchor="w", pady=(0, SP["xs"]))
 
         # Add-member form: labelled inputs, one primary + one ghost action
         form = ttk.Frame(frame)
@@ -3868,7 +3888,7 @@ class App(tk.Tk):
         """
         username = self.settings.get("bgg_username", "").strip()
         password = _kr_get_password()
-        tok      = bgg.BGG_APP_TOKEN or self.settings.get("bgg_token", "").strip()
+        tok      = bgg.BGG_APP_TOKEN.strip()
 
         # Always show the Sync dialog (pre-filled) so credentials can be entered
         # or updated right in the sync flow — parity with the mobile app.
@@ -4184,7 +4204,7 @@ class App(tk.Tk):
             self._post_status(f"BGG sync error: {exc}")
 
     def on_sync_api(self) -> None:
-        token = bgg.BGG_APP_TOKEN or self.settings.get("bgg_token", "")
+        token = bgg.BGG_APP_TOKEN
         username = self.settings.get("bgg_username", "")
         if not token:
             messagebox.showinfo(
@@ -4464,6 +4484,11 @@ class App(tk.Tk):
         dlg.resizable(False, False)
         dlg.configure(bg=C_BG)
 
+        ttk.Label(dlg, text="Search BoardGameGeek to add a game with its full details "
+                  "filled in automatically.",
+                  foreground=C_INK_500, font=("Segoe UI", 8),
+                  padding=(12, 8, 12, 0)).pack(anchor="w")
+
         # ── search row ────────────────────────────────────────────────────────
         top = ttk.Frame(dlg, padding=(12, 12, 12, 4))
         top.pack(fill="x")
@@ -4510,7 +4535,7 @@ class App(tk.Tk):
 
             def _bg():
                 try:
-                    tok = bgg.BGG_APP_TOKEN or self.settings.get("bgg_token", "")
+                    tok = bgg.BGG_APP_TOKEN
                     found = bgg.search_games(q, token=tok)
                 except Exception as exc:
                     self.after(0, lambda: status_var.set(f"Search failed: {exc}"))
@@ -4564,7 +4589,7 @@ class App(tk.Tk):
         wait.grab_set()
         wait.update()
 
-        tok = (bgg.BGG_APP_TOKEN or self.settings.get("bgg_token", "")).strip() or None
+        tok = (bgg.BGG_APP_TOKEN).strip() or None
 
         def _bg():
             details = None
@@ -4613,12 +4638,20 @@ class App(tk.Tk):
         )
         self._open_game_edit_dialog(details, is_new=False)
 
+    def on_add_game_manual(self) -> None:
+        """Open the shared game-edit dialog with no BGG data pre-filled, skipping
+        the BGG search step entirely — for games not on BoardGameGeek."""
+        self._open_game_edit_dialog(bgg.GameDetails(bgg_id=None, name=""),
+                                    is_new=True, is_manual=True)
+
     def _open_game_edit_dialog(self, details: Optional[bgg.GameDetails], *,
-                               is_new: bool) -> None:
+                               is_new: bool, is_manual: bool = False) -> None:
         """Editable form pre-filled from a GameDetails object.
 
-        is_new=True  → saves as a new game (or replaces if BGG ID already exists).
-        is_new=False → updates an existing game, preserving image_path.
+        is_new=True    → saves as a new game (or replaces if BGG ID already exists).
+        is_new=False   → updates an existing game, preserving image_path.
+        is_manual=True → opened via "Add Manually" (blank `details`, no BGG search);
+                          shows a caption explaining the manual-entry flow.
         """
         if details is None:
             messagebox.showerror("Error", "No game data received from BGG.")
@@ -4633,7 +4666,17 @@ class App(tk.Tk):
         lpad = {"padx": (12, 4), "pady": 3, "sticky": "e"}
         rpad = {"padx": (4, 12), "pady": 3, "sticky": "we"}
 
+        # When opened via "Add Manually" a caption occupies row 0, pushing every
+        # other row down by one (grid rows must be non-negative).
+        _roff = 1 if is_manual else 0
+        if is_manual:
+            ttk.Label(dlg, text="Enter a game's details yourself — useful for games "
+                      "not on BoardGameGeek.",
+                      foreground=C_INK_500, font=("Segoe UI", 8),
+                      ).grid(row=0, column=0, columnspan=2, padx=12, pady=(10, 0), sticky="w")
+
         def row_entry(r, label, value, width=34):
+            r += _roff
             ttk.Label(dlg, text=label, font=("Segoe UI", 9, "bold")).grid(
                 row=r, column=0, **lpad)
             var = tk.StringVar(value=str(value) if value is not None else "")
@@ -4659,7 +4702,7 @@ class App(tk.Tk):
         comment_var = row_entry(8, "Comment",           d.my_comment)
 
         # Tags row — uses existing tags from DB when editing
-        ttk.Label(dlg, text="Tags", font=("Segoe UI", 9, "bold")).grid(row=9, column=0, **lpad)
+        ttk.Label(dlg, text="Tags", font=("Segoe UI", 9, "bold")).grid(row=9 + _roff, column=0, **lpad)
         existing_tags = ""
         if not is_new:
             with db.connect() as c:
@@ -4670,16 +4713,16 @@ class App(tk.Tk):
             _existing_tag_list = ["Any"] + db.all_tags(c)
         tags_var = tk.StringVar(value=existing_tags)
         _AutocompleteEntry(dlg, _existing_tag_list, textvariable=tags_var,
-                           width=34).grid(row=9, column=1, **rpad)
+                           width=34).grid(row=9 + _roff, column=1, **rpad)
         ttk.Label(dlg, text="Comma-separated, e.g. Party, Family, Filler",
                   foreground=C_INK_500, font=("Segoe UI", 8),
-                  ).grid(row=10, column=1, sticky="w", padx=(4, 12), pady=(0, 2))
+                  ).grid(row=10 + _roff, column=1, sticky="w", padx=(4, 12), pady=(0, 2))
 
         ttk.Label(dlg, text="Description",
-                  font=("Segoe UI", 9, "bold")).grid(row=11, column=0, **lpad)
+                  font=("Segoe UI", 9, "bold")).grid(row=11 + _roff, column=0, **lpad)
         desc_box = tk.Text(dlg, width=38, height=5, font=("Segoe UI", 9),
                            wrap="word", relief="solid", bd=1)
-        desc_box.grid(row=11, column=1, padx=(4, 12), pady=3, sticky="we")
+        desc_box.grid(row=11 + _roff, column=1, padx=(4, 12), pady=3, sticky="we")
         if d.description:
             desc_box.insert("1.0", d.description)
 
@@ -4691,9 +4734,9 @@ class App(tk.Tk):
                     _current_insert = bool(_gi["has_insert"])
         insert_var = tk.BooleanVar(value=_current_insert)
         ttk.Label(dlg, text="3D Insert",
-                  font=("Segoe UI", 9, "bold")).grid(row=12, column=0, **lpad)
+                  font=("Segoe UI", 9, "bold")).grid(row=12 + _roff, column=0, **lpad)
         ttk.Checkbutton(dlg, text="Has 3D printed insert",
-                        variable=insert_var).grid(row=12, column=1, sticky="w",
+                        variable=insert_var).grid(row=12 + _roff, column=1, sticky="w",
                                                    padx=(4, 12), pady=3)
 
         # Cooperative/competitive — auto-derived from BGG mechanics for a new
@@ -4708,10 +4751,10 @@ class App(tk.Tk):
                 _current_coop = _gi["is_cooperative"] if _gi else None
         coop_var = tk.StringVar(value=_COOP_LABELS[_current_coop])
         ttk.Label(dlg, text="Type",
-                  font=("Segoe UI", 9, "bold")).grid(row=13, column=0, **lpad)
+                  font=("Segoe UI", 9, "bold")).grid(row=13 + _roff, column=0, **lpad)
         ttk.Combobox(dlg, textvariable=coop_var, state="readonly", width=16,
                      values=["Unset", "Cooperative", "Competitive"]
-                     ).grid(row=13, column=1, sticky="w", padx=(4, 12), pady=3)
+                     ).grid(row=13 + _roff, column=1, sticky="w", padx=(4, 12), pady=3)
 
         # Collection status — normally set by BGG sync, but editable here for
         # manually-added games (or to override until the next sync overwrites it).
@@ -4727,15 +4770,15 @@ class App(tk.Tk):
                 _gi["bgg_status"] if _gi else None, "Owned")
         status_var = tk.StringVar(value=_current_status_label)
         ttk.Label(dlg, text="Collection",
-                  font=("Segoe UI", 9, "bold")).grid(row=14, column=0, **lpad)
+                  font=("Segoe UI", 9, "bold")).grid(row=14 + _roff, column=0, **lpad)
         ttk.Combobox(dlg, textvariable=status_var, state="readonly", width=16,
                      values=_STATUS_LABEL_LIST
-                     ).grid(row=14, column=1, sticky="w", padx=(4, 12), pady=3)
+                     ).grid(row=14 + _roff, column=1, sticky="w", padx=(4, 12), pady=3)
 
         err_var = tk.StringVar()
         ttk.Label(dlg, textvariable=err_var, foreground=C_DR_TEXT,
                   font=("Segoe UI", 8)).grid(
-            row=15, column=0, columnspan=2, padx=12, sticky="w")
+            row=15 + _roff, column=0, columnspan=2, padx=12, sticky="w")
 
         # --- lock-status row (editing an existing game only) ---
         _FIELD_DISPLAY = {
@@ -4749,7 +4792,7 @@ class App(tk.Tk):
         }
         lock_lbl_var = tk.StringVar()
         lock_frame = ttk.Frame(dlg)
-        lock_frame.grid(row=16, column=0, columnspan=2,
+        lock_frame.grid(row=16 + _roff, column=0, columnspan=2,
                         padx=12, pady=(0, 2), sticky="w")
         ttk.Label(lock_frame, textvariable=lock_lbl_var,
                   foreground=C_INK_600, font=("Segoe UI", 8)).pack(side="left")
@@ -4803,9 +4846,7 @@ class App(tk.Tk):
                     return
             else:
                 with db.connect() as c:
-                    r = c.execute("SELECT MIN(bgg_id) FROM games").fetchone()
-                    lowest = r[0] if r[0] is not None else 0
-                bgg_id = min(lowest, 0) - 1
+                    bgg_id = db.next_manual_id(c)
 
             pt_val = _i(time_var)
 
@@ -4906,7 +4947,7 @@ class App(tk.Tk):
                 ).start()
 
         btn_row = ttk.Frame(dlg, padding=(12, 4, 12, 12))
-        btn_row.grid(row=17, column=0, columnspan=2, sticky="e")
+        btn_row.grid(row=17 + _roff, column=0, columnspan=2, sticky="e")
         ttk.Button(btn_row, text="Cancel", command=dlg.destroy).pack(side="left", padx=(0, 6))
         ttk.Button(btn_row, text="Save Game" if is_new else "Save Changes",
                    command=save).pack(side="left")
@@ -5064,15 +5105,14 @@ class App(tk.Tk):
                     skip = db.get_manual_fields(c, g.bgg_id)
                 db.upsert_game(c, row, skip_fields=skip)
 
-            # Link these games to their collection (one collection per synced BGG
-            # username); the collection's membership becomes exactly the games
-            # actually owned — wishlist/for-trade/etc. entries are saved above so
-            # they're browsable, but don't count toward collection comparisons.
+            # Link every synced game (owned, wishlist, for-trade, etc.) to this
+            # collection so "Clear Collection" removes all of them, and collection
+            # comparisons reflect the full BGG collection.
             if collection_username:
                 cid = db.get_or_create_collection(
                     c, collection_username, collection_name or collection_username)
-                owned_ids = [g.bgg_id for g in games if g.bgg_status in (None, "own")]
-                db.replace_collection_games(c, cid, owned_ids)
+                all_ids = [g.bgg_id for g in games]
+                db.replace_collection_games(c, cid, all_ids)
 
     # Largest card cover is 260 px tall; store covers a bit bigger so they look
     # crisp at the Large size, but cap to keep image files small on disk.
@@ -5610,7 +5650,7 @@ class App(tk.Tk):
                 "Search BGG", "Game name to search on BGG:", initialvalue=q, parent=dialog)
             if not q:
                 return
-            tok = bgg.BGG_APP_TOKEN or self.settings.get("bgg_token", "")
+            tok = bgg.BGG_APP_TOKEN
             try:
                 results = bgg.search_games(q, token=tok)
             except Exception as exc:
@@ -6202,7 +6242,7 @@ class App(tk.Tk):
         ):
             return
         self.status(f"Importing BGG plays for {username}…")
-        token = bgg.BGG_APP_TOKEN or self.settings.get("bgg_token", "")
+        token = bgg.BGG_APP_TOKEN
         threading.Thread(
             target=self._import_bgg_plays_bg,
             args=(username, token),

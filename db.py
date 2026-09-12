@@ -173,7 +173,14 @@ def upsert_game(
     placeholders = ", ".join(["?"] * len(cols))
     # is_favorite / has_insert are always protected; caller may add more.
     protected = {"bgg_id"} | (skip_fields or set())
-    updates = ", ".join(f"{col}=excluded.{col}" for col in cols if col not in protected)
+    # bgg_status uses COALESCE so call sites that omit it (e.g. "Find on BGG…"
+    # in Log-a-Play) don't silently wipe an existing game's real status to NULL.
+    coalesced = {"bgg_status"}
+    updates = ", ".join(
+        f"{col}=COALESCE(excluded.{col}, {col})" if col in coalesced
+        else f"{col}=excluded.{col}"
+        for col in cols if col not in protected
+    )
     sql = (
         f"INSERT INTO games ({', '.join(cols)}) VALUES ({placeholders}) "
         f"ON CONFLICT(bgg_id) DO UPDATE SET {updates}"
@@ -276,6 +283,14 @@ def count_games(c: sqlite3.Connection, owned_only: bool = True,
         where = "bgg_status = ?"
         params.append(status)
     return c.execute(f"SELECT COUNT(*) FROM games WHERE {where}", params).fetchone()[0]
+
+
+def next_manual_id(c: sqlite3.Connection) -> int:
+    """A synthetic bgg_id for a manually-added game with no real BGG match —
+    guaranteed to never collide with a real (always-positive) BGG id."""
+    r = c.execute("SELECT MIN(bgg_id) FROM games").fetchone()
+    lowest = r[0] if r[0] is not None else 0
+    return min(lowest, 0) - 1
 
 
 def get_game(c: sqlite3.Connection, bgg_id: int) -> Optional[sqlite3.Row]:

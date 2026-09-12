@@ -178,8 +178,13 @@ def _http_get(
     BGG) AND the user's session cookies (from a prior _bgg_login call) so that
     private collections are accessible without requiring the user to make their
     collection public.
+
+    Use the plain app USER_AGENT here, NOT BROWSER_UA: BGG's WAF now returns 403
+    to a spoofed desktop-browser UA on the xmlapi2 endpoints (search/thing/
+    collection), while an honest app identifier is accepted. BROWSER_UA stays in
+    use only for the HTML page-scraping fallbacks, where BGG still wants it.
     """
-    headers = {"User-Agent": BROWSER_UA}
+    headers = {"User-Agent": USER_AGENT}
     if token:
         headers["Authorization"] = f"Bearer {token}"
     req = urllib.request.Request(url, headers=headers)
@@ -197,7 +202,8 @@ def _http_get(
             # sufficient — let the caller decide whether to retry.
             if not token:
                 raise PermissionError(
-                    "BGG requires an API token — add yours in File → Settings → BGG API token."
+                    "BGG requires an API token, but this build has none embedded. "
+                    "Please reinstall the latest version of the app."
                 ) from e
             raise PermissionError(
                 "Your collection is private. Add your BGG password in File → Settings\n"

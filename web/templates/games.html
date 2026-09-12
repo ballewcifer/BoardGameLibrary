@@ -7,7 +7,10 @@
 <!-- Search & filter bar -->
 <div class="filter-bar">
   <form method="get" action="/games" class="filter-form">
-    <input type="search" name="q" value="{{ q }}" placeholder="Search games…" class="search-input" aria-label="Search games">
+    <input type="search" name="q" value="{{ q }}"
+           placeholder="{{ 'Add a game to search' if total_games_unfiltered == 0 else 'Search games…' }}"
+           class="search-input" aria-label="Search games"
+           {% if total_games_unfiltered == 0 %}disabled style="opacity:.5"{% endif %}>
 
     <select name="status" class="filter-select" aria-label="Filter by availability">
       <option value="all"       {% if status=='all'       %}selected{% endif %}>All</option>
@@ -45,7 +48,8 @@
   </form>
 
   <button class="btn btn-secondary btn-sm" onclick="openModal('modal-random')" aria-label="Pick a random game">🎲 Surprise Me</button>
-  <button class="btn btn-secondary btn-sm" onclick="openModal('modal-add-game')" aria-label="Add game from BGG">+ Add Game</button>
+  <button class="btn btn-secondary btn-sm" onclick="openModal('modal-add-game')" aria-label="Add game from BGG">+ Add from BGG</button>
+  <button class="btn btn-secondary btn-sm" onclick="openModal('modal-add-game-manual')" aria-label="Add game manually">+ Add Manually</button>
   <button id="select-mode-toggle" class="btn btn-secondary btn-sm" onclick="toggleSelectMode()" aria-label="Select multiple games">☑ Select</button>
 </div>
 
@@ -77,6 +81,7 @@
     {% if show_exp %}<input type="hidden" name="exp" value="1">{% endif %}
     {% if coop and coop != 'any' %}<input type="hidden" name="coop" value="{{ coop }}">{% endif %}
     {% if active_collection is not none %}<input type="hidden" name="collection" value="{{ active_collection }}">{% endif %}
+    <p class="muted" style="font-size:.8rem;margin:0 6px 0 0;display:inline">Compare collections to see which games are shared, or unique to one.</p>
     <select name="compare" class="filter-select" onchange="this.form.submit()" aria-label="Compare collections">
       <option value="off"    {% if compare=='off'    %}selected{% endif %}>Compare: Off</option>
       <option value="shared" {% if compare=='shared' %}selected{% endif %}>Shared by all</option>
@@ -261,10 +266,11 @@ function bulkSubmit(hasInsert) {
 <div id="modal-add-game" class="modal-backdrop" hidden>
   <div class="modal">
     <div class="modal-header">
-      <h3>Add Game from BGG</h3>
+      <h3>Add from BGG</h3>
       <button class="modal-close" onclick="closeModal('modal-add-game')">✕</button>
     </div>
     <div class="modal-body">
+      <p class="muted" style="font-size:.8rem;margin-top:0">Search BoardGameGeek to add a game with its full details filled in automatically.</p>
       <div class="search-row">
         <input type="text" id="bgg-search-input" placeholder="Search BoardGameGeek…" class="search-input">
         <button class="btn btn-primary" onclick="bggSearch()">Search</button>
@@ -275,12 +281,94 @@ function bulkSubmit(hasInsert) {
       <form id="add-game-form" method="post" action="/games/add" hidden>
         <input type="hidden" name="bgg_id" id="add-bgg-id">
         <div id="add-game-preview" class="game-preview"></div>
+        <label class="form-label mt-sm" for="add-game-status">Collection</label>
+        <select id="add-game-status" name="status" class="form-control">
+          {% for f in bgg_status_flags %}
+            <option value="{{ f }}" {% if f == 'own' %}selected{% endif %}>{{ bgg_status_labels[f] }}</option>
+          {% endfor %}
+        </select>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" onclick="document.getElementById('add-game-form').hidden=true">Back</button>
           <button type="submit" class="btn btn-primary">Add to Library</button>
         </div>
       </form>
     </div>
+  </div>
+</div>
+
+<!-- ── Add Game Manually modal ───────────────────────────────────────────── -->
+<div id="modal-add-game-manual" class="modal-backdrop" hidden>
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Add Manually</h3>
+      <button class="modal-close" onclick="closeModal('modal-add-game-manual')">✕</button>
+    </div>
+    <form method="post" action="/games/add-manual">
+      <div class="modal-body">
+        <p class="muted" style="font-size:.8rem;margin-top:0">Enter a game's details yourself — useful for games not on BoardGameGeek.</p>
+
+        <label class="form-label" for="am-name">Name *</label>
+        <input type="text" id="am-name" name="name" class="form-control" required>
+
+        <label class="form-label mt-sm" for="am-year">Year</label>
+        <input type="number" id="am-year" name="year" class="form-control">
+
+        <label class="form-label mt-sm" for="am-minp">Min players</label>
+        <input type="number" id="am-minp" name="min_players" class="form-control" min="1">
+        <label class="form-label mt-sm" for="am-maxp">Max players</label>
+        <input type="number" id="am-maxp" name="max_players" class="form-control" min="1">
+
+        <label class="form-label mt-sm" for="am-minpt">Min playtime (min)</label>
+        <input type="number" id="am-minpt" name="min_playtime" class="form-control" min="0">
+        <label class="form-label mt-sm" for="am-maxpt">Max playtime (min)</label>
+        <input type="number" id="am-maxpt" name="max_playtime" class="form-control" min="0">
+        <label class="form-label mt-sm" for="am-pt">Playing time (min)</label>
+        <input type="number" id="am-pt" name="playing_time" class="form-control" min="0">
+
+        <label class="form-label mt-sm" for="am-minage">Min age</label>
+        <input type="number" id="am-minage" name="min_age" class="form-control" min="0">
+        <label class="form-label mt-sm" for="am-weight">Weight / complexity (1–5)</label>
+        <input type="number" id="am-weight" name="weight" class="form-control" min="1" max="5" step="0.01">
+
+        <label class="form-label mt-sm" for="am-desc">Description</label>
+        <textarea id="am-desc" name="description" class="form-control" rows="3"></textarea>
+
+        <label class="form-label mt-sm" for="am-categories">Categories (comma-separated)</label>
+        <input type="text" id="am-categories" name="categories" class="form-control" placeholder="Party, Family">
+        <label class="form-label mt-sm" for="am-mechanics">Mechanics (comma-separated)</label>
+        <input type="text" id="am-mechanics" name="mechanics" class="form-control" placeholder="Drafting, Set Collection">
+        <label class="form-label mt-sm" for="am-designers">Designers (comma-separated)</label>
+        <input type="text" id="am-designers" name="designers" class="form-control">
+        <label class="form-label mt-sm" for="am-publishers">Publishers (comma-separated)</label>
+        <input type="text" id="am-publishers" name="publishers" class="form-control">
+
+        <label class="form-label mt-sm" for="am-best">Best players</label>
+        <input type="text" id="am-best" name="best_players" class="form-control" placeholder="e.g. 4">
+
+        <label class="form-label mt-sm" for="am-coop">Cooperative?</label>
+        <select id="am-coop" name="is_cooperative" class="form-control">
+          <option value="unset" selected>Unset</option>
+          <option value="coop">🤝 Cooperative</option>
+          <option value="competitive">⚔️ Competitive</option>
+        </select>
+
+        <label class="form-label mt-sm" style="display:flex;align-items:center;gap:8px">
+          <input type="checkbox" name="is_expansion" value="1">
+          Is this an expansion?
+        </label>
+
+        <label class="form-label mt-sm" for="am-status">Collection</label>
+        <select id="am-status" name="status" class="form-control">
+          {% for f in bgg_status_flags %}
+            <option value="{{ f }}" {% if f == 'own' %}selected{% endif %}>{{ bgg_status_labels[f] }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-add-game-manual')">Cancel</button>
+        <button type="submit" class="btn btn-primary">Add to Library</button>
+      </div>
+    </form>
   </div>
 </div>
 
