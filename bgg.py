@@ -95,6 +95,22 @@ STATUS_LABELS = {
     "want": "Want",
 }
 
+# Badge colors for each non-"own" status, so they visually stand apart from
+# each other and from the Available/Out/Overdue loan badge (green/amber/red)
+# an owned game gets instead. Same palette as the mobile app (lib/bgg.ts) for
+# parity. "own" is included only for completeness; it's never used for a
+# badge — owned games use the loan-status badge system instead.
+STATUS_COLORS = {
+    "own":        {"bg": "#E6F4EA", "text": "#1E6E32"},
+    "wishlist":   {"bg": "#F3E8FF", "text": "#6D28D9"},  # purple
+    "fortrade":   {"bg": "#CCFBF1", "text": "#0F766E"},  # teal
+    "preordered": {"bg": "#E0E7FF", "text": "#4338CA"},  # indigo
+    "wanttobuy":  {"bg": "#FCE7F3", "text": "#BE185D"},  # pink
+    "wanttoplay": {"bg": "#CFFAFE", "text": "#0E7490"},  # cyan
+    "prevowned":  {"bg": "#F1F5F9", "text": "#475569"},  # slate
+    "want":       {"bg": "#FFEDD5", "text": "#C2410C"},  # orange
+}
+
 
 def resolve_status(flags: dict) -> Optional[str]:
     """Pick one status string from a dict of {flag_name: bool}, in STATUS_FLAGS

@@ -26,7 +26,6 @@
     {% if game.designers %}<div class="muted">By {{ game.designers }}</div>{% endif %}
     {% if game.best_players %}<div class="muted">★ Best at {{ game.best_players }} players</div>{% endif %}
     {% if game.has_insert %}<div class="muted">📦 Has 3D printed insert</div>{% endif %}
-    {% if game.bgg_status and game.bgg_status != 'own' %}<div class="muted">{{ bgg_status_labels[game.bgg_status] }}</div>{% endif %}
     {% if game.base_game_id %}
       <div class="muted">
         {% if base_game %}
@@ -50,7 +49,11 @@
 </section>
 {% endif %}
 
-<!-- Status banner -->
+<!-- Status banner — owned games get the loan-based Available/Checked Out
+     banner and a Check In/Out action; every other BGG status (Wishlist,
+     For Trade, ...) gets its own colored banner instead, so the different
+     statuses stand apart at a glance. -->
+{% if game.own == 1 %}
 <div class="status-banner {% if loan %}status-out{% if loan.overdue %} status-overdue{% endif %}{% else %}status-in{% endif %}">
   {% if loan %}
     {% if loan.overdue %}⚠ OVERDUE{% else %}Checked Out{% endif %}
@@ -68,6 +71,11 @@
     {% endif %}
   {% endif %}
 </div>
+{% elif game.bgg_status and game.bgg_status in bgg_status_colors %}
+<div class="status-banner" style="background:{{ bgg_status_colors[game.bgg_status].bg }};color:{{ bgg_status_colors[game.bgg_status].text }}">
+  {{ bgg_status_labels.get(game.bgg_status, game.bgg_status) }}
+</div>
+{% endif %}
 
 <!-- Quick-action row -->
 <div class="action-row">
@@ -229,7 +237,7 @@
         <label class="form-label mt-sm" for="eg-status">Collection</label>
         <select id="eg-status" name="bgg_status" class="form-control">
           {% for f in bgg_status_flags %}
-            <option value="{{ f }}" {% if (game.bgg_status or 'own')==f %}selected{% endif %}>{{ bgg_status_labels[f] }}</option>
+            <option value="{{ f }}" {% if (game.bgg_status or 'own')==f %}selected{% endif %} style="background:{{ bgg_status_colors[f].bg }};color:{{ bgg_status_colors[f].text }}">{{ bgg_status_labels[f] }}</option>
           {% endfor %}
         </select>
       </div>

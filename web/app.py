@@ -170,7 +170,8 @@ def games():
             tags = [t.strip() for t in (g["tags"] or "").split(",") if t.strip()]
             if tag_filter not in tags:
                 continue
-        if status == "available" and g["bgg_id"] in open_loans:
+        # Only owned games are ever loanable, so only they can be "Available".
+        if status == "available" and (g["own"] != 1 or g["bgg_id"] in open_loans):
             continue
         if status == "out" and g["bgg_id"] not in open_loans:
             continue
@@ -208,6 +209,7 @@ def games():
                            bstatus=bstatus,
                            bgg_status_labels=_bgg.STATUS_LABELS,
                            bgg_status_flags=_bgg.STATUS_FLAGS,
+                           bgg_status_colors=_bgg.STATUS_COLORS,
                            show_exp=show_exp,
                            all_tags=all_tags,
                            collections=collections,
@@ -380,7 +382,8 @@ def game_detail(bgg_id):
                            base_game=base_game,
                            owned_expansions=owned_expansions,
                            bgg_status_labels=_bgg.STATUS_LABELS,
-                           bgg_status_flags=_bgg.STATUS_FLAGS)
+                           bgg_status_flags=_bgg.STATUS_FLAGS,
+                           bgg_status_colors=_bgg.STATUS_COLORS)
 
 
 # ── Checkout ──────────────────────────────────────────────────────────────────
@@ -395,6 +398,10 @@ def checkout(bgg_id):
         return redirect(url_for("game_detail", bgg_id=bgg_id))
     try:
         with db.connect() as c:
+            game = db.get_game(c, bgg_id)
+            if not game or game["own"] != 1:
+                flash("Only games you own can be checked out.", "error")
+                return redirect(url_for("game_detail", bgg_id=bgg_id))
             # New name, not a current friend — auto-create them, same as
             # logging a play with a new player name does.
             db.ensure_players_as_members(c, name)

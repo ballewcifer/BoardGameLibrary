@@ -40,7 +40,9 @@
       <option value="owned" {% if bstatus=='owned' %}selected{% endif %}>Owned</option>
       <option value="all"   {% if bstatus=='all'   %}selected{% endif %}>All statuses</option>
       {% for f in bgg_status_flags if f != 'own' %}
-        <option value="{{ f }}" {% if bstatus==f %}selected{% endif %}>{{ bgg_status_labels[f] }}</option>
+        {# Each status gets its own option color (supported by most modern
+           browsers for the open dropdown list), matching the badges. #}
+        <option value="{{ f }}" {% if bstatus==f %}selected{% endif %} style="background:{{ bgg_status_colors[f].bg }};color:{{ bgg_status_colors[f].text }}">{{ bgg_status_labels[f] }}</option>
       {% endfor %}
     </select>
 
@@ -145,10 +147,17 @@
     </div>
 
     <div class="game-card-footer">
-      {% if g.loan %}
-        <span class="badge badge-out">Out: {{ g.loan.first_name }}</span>
-      {% else %}
-        <span class="badge badge-in">Available</span>
+      {# Only owned games are ever loanable, so only they get an Available/
+         Out tag; every other BGG status gets its own colored tag instead,
+         so the different statuses stand apart. #}
+      {% if g.own == 1 %}
+        {% if g.loan %}
+          <span class="badge badge-out">Out: {{ g.loan.first_name }}</span>
+        {% else %}
+          <span class="badge badge-in">Available</span>
+        {% endif %}
+      {% elif g.bgg_status and g.bgg_status in bgg_status_colors %}
+        <span class="badge" style="background:{{ bgg_status_colors[g.bgg_status].bg }};color:{{ bgg_status_colors[g.bgg_status].text }}">{{ bgg_status_labels.get(g.bgg_status, g.bgg_status) }}</span>
       {% endif %}
     </div>
   </a>
@@ -284,7 +293,7 @@ function bulkSubmit(hasInsert) {
         <label class="form-label mt-sm" for="add-game-status">Collection</label>
         <select id="add-game-status" name="status" class="form-control">
           {% for f in bgg_status_flags %}
-            <option value="{{ f }}" {% if f == 'own' %}selected{% endif %}>{{ bgg_status_labels[f] }}</option>
+            <option value="{{ f }}" {% if f == 'own' %}selected{% endif %} style="background:{{ bgg_status_colors[f].bg }};color:{{ bgg_status_colors[f].text }}">{{ bgg_status_labels[f] }}</option>
           {% endfor %}
         </select>
         <div class="modal-footer">
@@ -360,7 +369,7 @@ function bulkSubmit(hasInsert) {
         <label class="form-label mt-sm" for="am-status">Collection</label>
         <select id="am-status" name="status" class="form-control">
           {% for f in bgg_status_flags %}
-            <option value="{{ f }}" {% if f == 'own' %}selected{% endif %}>{{ bgg_status_labels[f] }}</option>
+            <option value="{{ f }}" {% if f == 'own' %}selected{% endif %} style="background:{{ bgg_status_colors[f].bg }};color:{{ bgg_status_colors[f].text }}">{{ bgg_status_labels[f] }}</option>
           {% endfor %}
         </select>
       </div>

@@ -1083,11 +1083,54 @@ class App(tk.Tk):
             values=["Any", "Cooperative", "Competitive"],
         )).bind("<<ComboboxSelected>>", lambda *_: self.refresh_games())
 
+        # A colored tk.Menu (via Menubutton) rather than a plain ttk.Combobox
+        # — a ttk.Combobox's dropdown can't be colored per item, but
+        # tk.Menu's add_command can, so every status stands apart here the
+        # same way it does in the badges elsewhere. "All" isn't a real BGG
+        # status (it's a meta-filter showing every status at once), so it
+        # keeps the plain default button look instead of a status color.
         self.collection_status_var = tk.StringVar(value="Owned")
-        fgroup("COLLECTION", lambda p: ttk.Combobox(
-            p, textvariable=self.collection_status_var, width=14, state="readonly",
-            values=_COLLECTION_STATUS_LABELS,
-        )).bind("<<ComboboxSelected>>", lambda *_: self.refresh_games())
+
+        def _make_collection_filter(p):
+            btn = tk.Menubutton(
+                p, textvariable=self.collection_status_var, relief="raised",
+                bd=1, width=12, anchor="w", padx=6, font=("Segoe UI", 9),
+            )
+            _default_bg, _default_fg = btn.cget("bg"), btn.cget("fg")
+            menu = tk.Menu(btn, tearoff=0)
+
+            def _colors_for(label: str):
+                if label == "All":
+                    return None
+                flag = _COLLECTION_STATUS_LABEL_TO_FLAG.get(label, "own")
+                return bgg.STATUS_COLORS.get(flag, bgg.STATUS_COLORS["own"])
+
+            def _apply_color(*_args) -> None:
+                c = _colors_for(self.collection_status_var.get())
+                if c:
+                    btn.configure(bg=c["bg"], fg=c["text"],
+                                   activebackground=c["bg"], activeforeground=c["text"])
+                else:
+                    btn.configure(bg=_default_bg, fg=_default_fg,
+                                   activebackground=_default_bg, activeforeground=_default_fg)
+
+            def _pick(label: str) -> None:
+                self.collection_status_var.set(label)
+                self.refresh_games()
+
+            for lbl in _COLLECTION_STATUS_LABELS:
+                c = _colors_for(lbl)
+                kwargs = {"background": c["bg"], "foreground": c["text"]} if c else {}
+                menu.add_command(label=lbl, command=lambda l=lbl: _pick(l), **kwargs)
+            btn.configure(menu=menu)
+            # Re-color whenever the variable changes for ANY reason — not
+            # just a pick from this menu, but also the "reset filters" /
+            # active-filter-chip removal paths that set it directly.
+            self.collection_status_var.trace_add("write", _apply_color)
+            _apply_color()
+            return btn
+
+        fgroup("COLLECTION", _make_collection_filter)
 
         reset_frame = ttk.Frame(fbar, style="Filter.TFrame")
         reset_frame.pack(side="left", padx=(SP["xs"], SP["lg"]), anchor="s")
@@ -1542,6 +1585,12 @@ class App(tk.Tk):
         self.games_tree.tag_configure("out",       background=C_WN_BG)
         self.games_tree.tag_configure("favorite",  foreground=C_GOLD)
         self.games_tree.tag_configure("expansion", background="#f3e5f5")
+        # One row-tint tag per non-"own" BGG status — a Treeview can't color
+        # individual cells, so the whole row is tinted instead. Applied last
+        # (see _refresh_games_table) so it takes priority over "expansion".
+        for _status, _colors in bgg.STATUS_COLORS.items():
+            if _status != "own":
+                self.games_tree.tag_configure(f"status_{_status}", background=_colors["bg"])
         # Per-game actions live on the row right-click menu (no bulk toolbar).
 
     def _set_view(self, mode: str) -> None:
@@ -1984,7 +2033,8 @@ class App(tk.Tk):
                     continue
 
             # --- availability / favorites filter ---
-            if status_val == "Available" and g["bgg_id"] in open_loans:
+            # Only owned games are ever loanable, so only they can be "Available".
+            if status_val == "Available" and (g["own"] != 1 or g["bgg_id"] in open_loans):
                 continue
             if status_val == "Checked out" and g["bgg_id"] not in open_loans:
                 continue
@@ -2350,6 +2400,11 @@ class App(tk.Tk):
                 tags.append("favorite")
             if g["is_expansion"]:
                 tags.append("expansion")
+            # Non-owned statuses get their own row tint (added last so it
+            # takes priority over "expansion") — owned games keep the plain
+            # row background, relying on the "out" tag when checked out.
+            if g["own"] != 1 and g["bgg_status"] and g["bgg_status"] in bgg.STATUS_COLORS:
+                tags.append(f"status_{g['bgg_status']}")
 
             exp_prefix = "↳ " if g["is_expansion"] else ""
             self.games_tree.insert(
@@ -2365,7 +2420,12 @@ class App(tk.Tk):
                     f"{g['weight']:.1f}" if g["weight"] else "—",
                     f"{g['avg_rating']:.1f}" if g["avg_rating"] else "—",
                     g["best_players"] or "—",
-                    f"Out: {loan['first_name']} {loan['last_name']}" if loan else "Available",
+                    # Only owned games are ever loanable, so only they get an
+                    # Out/Available status; other BGG statuses (Wishlist, For
+                    # Trade, ...) show their status instead, with the row
+                    # tinted per-status above so they stand apart.
+                    (f"Out: {loan['first_name']} {loan['last_name']}" if loan else "Available")
+                    if g["own"] == 1 else bgg.STATUS_LABELS.get(g["bgg_status"], "—"),
                     n_plays if n_plays else "—",
                 ),
             )
@@ -2511,9 +2571,10 @@ class App(tk.Tk):
             ).fetchone()
 
         menu = tk.Menu(self, tearoff=0)
+        # Only owned games are ever loanable — no Check In/Out for others.
         if loan:
             menu.add_command(label="Check In",  command=lambda: self.on_check_in(game))
-        else:
+        elif game["own"] == 1:
             menu.add_command(label="Check Out", command=lambda: self.on_check_out(game))
         menu.add_command(label="Log Play…",    command=lambda: self.on_log_play(game))
         menu.add_separator()
@@ -2558,15 +2619,26 @@ class App(tk.Tk):
         n_plays   = play_counts.get(bgg_id, 0)
         due       = loan["due_date"] if loan else None
 
-        # ── status badge (text + dot + colour) ─────────────────────────────────
-        if out_to:
-            overdue = bool(due and due < datetime.now().strftime("%Y-%m-%d"))
-            if overdue:
-                badge_txt, badge_bg, badge_fg = "● Overdue", C_DR_BG, C_DR_TEXT
+        # ── status badge (text + dot + colour) ──────────────────────────────
+        # Only owned games are ever loanable, so only they get an Available/
+        # Checked out/Overdue badge; every other BGG status (Wishlist, For
+        # Trade, ...) gets its own colored badge instead, so the different
+        # statuses stand apart at a glance.
+        if game["own"] == 1:
+            if out_to:
+                overdue = bool(due and due < datetime.now().strftime("%Y-%m-%d"))
+                if overdue:
+                    badge_txt, badge_bg, badge_fg = "● Overdue", C_DR_BG, C_DR_TEXT
+                else:
+                    badge_txt, badge_bg, badge_fg = "● Checked out", C_WN_BG, C_WN_TEXT
             else:
-                badge_txt, badge_bg, badge_fg = "● Checked out", C_WN_BG, C_WN_TEXT
+                badge_txt, badge_bg, badge_fg = "● Available", C_OK_BG, C_OK_TEXT
+        elif game["bgg_status"] and game["bgg_status"] in bgg.STATUS_COLORS:
+            _sc = bgg.STATUS_COLORS[game["bgg_status"]]
+            badge_txt = bgg.STATUS_LABELS.get(game["bgg_status"], game["bgg_status"])
+            badge_bg, badge_fg = _sc["bg"], _sc["text"]
         else:
-            badge_txt, badge_bg, badge_fg = "● Available", C_OK_BG, C_OK_TEXT
+            badge_txt, badge_bg, badge_fg = "", C_SURFACE, C_INK_500
 
         overdue = bool(out_to and due and due < datetime.now().strftime("%Y-%m-%d"))
 
@@ -2705,7 +2777,10 @@ class App(tk.Tk):
 
         # Primary button — full width. When a collection has been claimed as
         # "mine", only games from my collection can be checked out, so the
-        # Check Out button is hidden for games in other collections.
+        # Check Out button is hidden for games in other collections. Only
+        # owned games are ever loanable at all, so non-owned games (Wishlist,
+        # For Trade, ...) get no Check In/Out button or "Not in your
+        # collection" label here — nothing loan-related applies to them.
         my_ids = getattr(self, "_my_collection_ids", None)
         can_checkout = (my_ids is None) or bool(
             self._gc_map.get(bgg_id, set()) & my_ids)
@@ -2713,6 +2788,8 @@ class App(tk.Tk):
             ttk.Button(body, text="Check In",
                        command=lambda g=game: self.on_check_in(g)
                        ).pack(fill="x", pady=(0, SP["xs"]))
+        elif game["own"] != 1:
+            pass
         elif can_checkout:
             ttk.Button(body, text="Check Out",
                        command=lambda g=game: self.on_check_out(g)
@@ -2833,9 +2910,10 @@ class App(tk.Tk):
             ).fetchone()
 
         menu = tk.Menu(self, tearoff=0)
+        # Only owned games are ever loanable — no Check In/Out for others.
         if loan:
             menu.add_command(label="Check In",  command=lambda: self.on_check_in(game))
-        else:
+        elif game["own"] == 1:
             menu.add_command(label="Check Out", command=lambda: self.on_check_out(game))
         menu.add_command(label="Log Play…",     command=lambda: self.on_log_play(game))
         menu.add_separator()
@@ -4757,10 +4835,15 @@ class App(tk.Tk):
                      ).grid(row=13 + _roff, column=1, sticky="w", padx=(4, 12), pady=3)
 
         # Collection status — normally set by BGG sync, but editable here for
-        # manually-added games (or to override until the next sync overwrites it).
+        # manually-added games (or to override until the next sync overwrites
+        # it). Uses a colored tk.Menu (via Menubutton) rather than a plain
+        # ttk.Combobox — a ttk.Combobox's dropdown can't be colored per item,
+        # but tk.Menu's add_command can, so every status stands apart here
+        # the same way it does in the badges elsewhere.
         _STATUS_LABEL_LIST = ["Owned"] + [
             bgg.STATUS_LABELS[f] for f in bgg.STATUS_FLAGS if f != "own"
         ]
+        _label_to_flag = {bgg.STATUS_LABELS[f]: f for f in bgg.STATUS_FLAGS}
         if is_new:
             _current_status_label = "Owned"
         else:
@@ -4771,9 +4854,31 @@ class App(tk.Tk):
         status_var = tk.StringVar(value=_current_status_label)
         ttk.Label(dlg, text="Collection",
                   font=("Segoe UI", 9, "bold")).grid(row=14 + _roff, column=0, **lpad)
-        ttk.Combobox(dlg, textvariable=status_var, state="readonly", width=16,
-                     values=_STATUS_LABEL_LIST
-                     ).grid(row=14 + _roff, column=1, sticky="w", padx=(4, 12), pady=3)
+
+        def _status_colors_for(label: str) -> dict:
+            return bgg.STATUS_COLORS.get(_label_to_flag.get(label, "own"), bgg.STATUS_COLORS["own"])
+
+        status_btn = tk.Menubutton(
+            dlg, textvariable=status_var, relief="raised", bd=1, width=14,
+            anchor="w", padx=6, font=("Segoe UI", 9),
+        )
+        status_menu = tk.Menu(status_btn, tearoff=0)
+
+        def _pick_status(label: str) -> None:
+            status_var.set(label)
+            sc = _status_colors_for(label)
+            status_btn.configure(bg=sc["bg"], fg=sc["text"],
+                                  activebackground=sc["bg"], activeforeground=sc["text"])
+
+        for _lbl in _STATUS_LABEL_LIST:
+            _sc = _status_colors_for(_lbl)
+            status_menu.add_command(
+                label=_lbl, background=_sc["bg"], foreground=_sc["text"],
+                command=lambda l=_lbl: _pick_status(l),
+            )
+        status_btn.configure(menu=status_menu)
+        _pick_status(_current_status_label)
+        status_btn.grid(row=14 + _roff, column=1, sticky="w", padx=(4, 12), pady=3)
 
         err_var = tk.StringVar()
         ttk.Label(dlg, textvariable=err_var, foreground=C_DR_TEXT,
@@ -5169,6 +5274,9 @@ class App(tk.Tk):
     # ---------- check in / out ----------
 
     def on_check_out(self, game) -> None:
+        if game["own"] != 1:
+            messagebox.showerror("Not owned", "Only games you own can be checked out.")
+            return
         with db.connect() as c:
             all_users = db.list_users(c)
             allowed = db.members_allowed_to_checkout(c, game["bgg_id"])
@@ -6031,6 +6139,12 @@ class App(tk.Tk):
                                  wraplength=320, justify="left", bg=C_BG)
                 link.grid(row=i, column=1, sticky="w")
                 link.bind("<Button-1>", lambda e, bg_row=base_game_row: self.show_details(bg_row))
+            elif k == "Collection" and game["bgg_status"] in bgg.STATUS_COLORS:
+                # Colored to match the badges elsewhere, instead of plain text.
+                _sc = bgg.STATUS_COLORS[game["bgg_status"]]
+                tk.Label(grid, text=v, bg=_sc["bg"], fg=_sc["text"],
+                         font=("Segoe UI", 9, "bold"), padx=6, pady=1
+                         ).grid(row=i, column=1, sticky="w")
             else:
                 ttk.Label(grid, text=v, wraplength=320, justify="left").grid(
                     row=i, column=1, sticky="w")
