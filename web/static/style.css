@@ -218,6 +218,28 @@ img { max-width: 100%; display: block; }
 .filter-check { font-size: .85rem; display: flex; align-items: center; gap: 4px; }
 .result-count { margin-bottom: 6px; }
 
+/* Collection-status multi-select checklist (native <details>, no JS needed
+   for the core submission — plain checkboxes sharing one name). */
+.bstatus-details { position: relative; }
+.bstatus-summary {
+  cursor: pointer; list-style: none; display: inline-block; user-select: none;
+}
+.bstatus-summary::-webkit-details-marker { display: none; }
+.bstatus-summary::after { content: ' \25BE'; }
+.bstatus-menu {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 20;
+  background: var(--white); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 6px; min-width: 170px; max-height: 260px; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.bstatus-option {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 8px; border-radius: 6px; font-size: .85rem;
+  cursor: pointer; white-space: nowrap;
+}
+.bstatus-option:hover { filter: brightness(0.96); }
+
 /* ── Page header ──────────────────────────────────────────────────────────── */
 .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .page-title  { font-size: 1.2rem; font-weight: 700; }

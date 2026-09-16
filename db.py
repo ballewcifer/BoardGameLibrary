@@ -239,27 +239,43 @@ def name_sort_key(name: str) -> str:
     return name.lower()
 
 
+def _status_where(owned_only: bool, status) -> tuple[str, list]:
+    """Shared WHERE-clause builder for list_games()/count_games().
+
+    status accepts a single value (back-compat) or a list for a multi-select
+    filter (e.g. ["wishlist", "fortrade"] — match any of them).
+    None/empty      — respect owned_only (default behavior, unchanged).
+    "all"           — every game regardless of own/bgg_status; overrides
+                      every other value if present alongside them.
+    "owned"         — own = 1 (the authoritative ownership flag — works even
+                      for legacy rows with no bgg_status set), combinable
+                      with real statuses in the same list.
+    a bgg.STATUS_FLAGS value (e.g. "wishlist") — bgg_status = that value.
+    """
+    statuses = [] if not status else ([status] if isinstance(status, str) else list(status))
+    if not statuses:
+        return ("own = 1" if owned_only else "1"), []
+    if "all" in statuses:
+        return "1", []
+    conditions: list[str] = []
+    params: list = []
+    if "owned" in statuses:
+        conditions.append("own = 1")
+    flags = [s for s in statuses if s not in ("owned", "all")]
+    if flags:
+        placeholders = ",".join("?" * len(flags))
+        conditions.append(f"bgg_status IN ({placeholders})")
+        params.extend(flags)
+    if not conditions:
+        return ("own = 1" if owned_only else "1"), []
+    return " OR ".join(conditions), params
+
+
 def list_games(c: sqlite3.Connection, search: str = "",
                owned_only: bool = True,
-               status: Optional[str] = None) -> list[sqlite3.Row]:
-    """Return games ordered by name.
-
-    owned_only=True  (default) — only games in the user's collection (own=1).
-    owned_only=False           — all games including play-log-only entries (own=0).
-
-    status: overrides owned_only when given.
-      None            — respect owned_only (default behavior, unchanged).
-      "all"           — every game regardless of own/bgg_status.
-      a bgg.STATUS_FLAGS value (e.g. "wishlist", "fortrade") — only games
-      currently tagged with that BGG collection status.
-    """
-    where = "own = 1" if owned_only else "1"
-    params: list = []
-    if status == "all":
-        where = "1"
-    elif status:
-        where = "bgg_status = ?"
-        params.append(status)
+               status=None) -> list[sqlite3.Row]:
+    """Return games ordered by name. See _status_where() for `status`'s shape."""
+    where, params = _status_where(owned_only, status)
     if search:
         return c.execute(
             f"SELECT * FROM games WHERE {where} AND name LIKE ?"
@@ -272,16 +288,10 @@ def list_games(c: sqlite3.Connection, search: str = "",
 
 
 def count_games(c: sqlite3.Connection, owned_only: bool = True,
-                 status: Optional[str] = None) -> int:
+                 status=None) -> int:
     """Same WHERE-clause semantics as list_games(), but just the row count
     (used for the games-view "N of M" footer without fetching every row)."""
-    where = "own = 1" if owned_only else "1"
-    params: list = []
-    if status == "all":
-        where = "1"
-    elif status:
-        where = "bgg_status = ?"
-        params.append(status)
+    where, params = _status_where(owned_only, status)
     return c.execute(f"SELECT COUNT(*) FROM games WHERE {where}", params).fetchone()[0]
 
 

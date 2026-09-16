@@ -119,15 +119,18 @@ def games():
     tag_filter = request.args.get("tag", "")
     status     = request.args.get("status", "all")   # all | available | out | favs
     coop       = request.args.get("coop", "any")     # any | coop | competitive
-    bstatus    = request.args.get("bstatus", "owned")   # owned | all | a bgg.STATUS_FLAGS value
+    # Multi-select: any combination of "owned" + a bgg.STATUS_FLAGS value, or
+    # just ["all"]. Repeated query params (?bstatus=wishlist&bstatus=fortrade)
+    # carry the selection; db.list_games()/count_games() combine them (see
+    # db._status_where()).
+    bstatuses  = request.args.getlist("bstatus") or ["owned"]
     show_exp   = request.args.get("exp", "") == "1"
     collection = request.args.get("collection", "all")
     compare    = request.args.get("compare", "off")          # off | shared | only | diff
     compare_other_raw = request.args.get("compare_other", "")
 
-    status_param = None if bstatus == "owned" else bstatus
     with db.connect() as c:
-        rows      = db.list_games(c, search=q, status=status_param)
+        rows      = db.list_games(c, search=q, status=bstatuses)
         total_games_unfiltered = db.count_games(c, status="all")
         open_loans = {r["game_id"]: _row_to_dict(r)
                       for r in db.currently_checked_out(c)}
@@ -206,7 +209,7 @@ def games():
                            tag_filter=tag_filter,
                            status=status,
                            coop=coop,
-                           bstatus=bstatus,
+                           bstatuses=bstatuses,
                            bgg_status_labels=_bgg.STATUS_LABELS,
                            bgg_status_flags=_bgg.STATUS_FLAGS,
                            bgg_status_colors=_bgg.STATUS_COLORS,

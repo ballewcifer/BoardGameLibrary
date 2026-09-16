@@ -182,13 +182,22 @@ _COLLECTION_STATUS_LABELS = ["Owned", "All"] + [
 _COLLECTION_STATUS_LABEL_TO_FLAG = {v: k for k, v in bgg.STATUS_LABELS.items()}
 
 
-def _collection_status_param(label: str) -> Optional[str]:
-    """Map a _COLLECTION_STATUS_LABELS selection to db.list_games()'s `status` kwarg."""
-    if label == "Owned":
+def _collection_status_params(labels) -> Optional[list[str]]:
+    """Map a set of _COLLECTION_STATUS_LABELS selections to db.list_games()'s
+    `status` kwarg (a list — see db._status_where() for the combining rules)."""
+    if not labels or labels == {"Owned"}:
         return None   # respects owned_only=True, unchanged default behavior
-    if label == "All":
-        return "all"
-    return _COLLECTION_STATUS_LABEL_TO_FLAG.get(label)
+    out = []
+    for label in labels:
+        if label == "Owned":
+            out.append("owned")
+        elif label == "All":
+            out.append("all")
+        else:
+            flag = _COLLECTION_STATUS_LABEL_TO_FLAG.get(label)
+            if flag:
+                out.append(flag)
+    return out or None
 
 # ── Design system tokens (design-tokens.json) ────────────────────────────────
 # Brand / navy
@@ -1083,53 +1092,36 @@ class App(tk.Tk):
             values=["Any", "Cooperative", "Competitive"],
         )).bind("<<ComboboxSelected>>", lambda *_: self.refresh_games())
 
-        # A colored tk.Menu (via Menubutton) rather than a plain ttk.Combobox
-        # — a ttk.Combobox's dropdown can't be colored per item, but
-        # tk.Menu's add_command can, so every status stands apart here the
-        # same way it does in the badges elsewhere. "All" isn't a real BGG
-        # status (it's a meta-filter showing every status at once), so it
-        # keeps the plain default button look instead of a status color.
-        self.collection_status_var = tk.StringVar(value="Owned")
+        # Multi-select: any combination of "Owned" + the real BGG statuses,
+        # or just {"All"}. A plain set, not a Tk variable — every mutation
+        # path (the popup's checkboxes, an active-filter-chip removal, the
+        # full reset) calls refresh_games() directly afterward, which also
+        # keeps this button's own text/color in sync via _update_collection_
+        # filter_button(), the same way it already refreshes the chips row.
+        self.collection_status_labels: set[str] = {"Owned"}
+
+        def _collection_status_colors(label: str):
+            if label == "All":
+                return None
+            flag = _COLLECTION_STATUS_LABEL_TO_FLAG.get(label, "own")
+            return bgg.STATUS_COLORS.get(flag, bgg.STATUS_COLORS["own"])
 
         def _make_collection_filter(p):
-            btn = tk.Menubutton(
-                p, textvariable=self.collection_status_var, relief="raised",
-                bd=1, width=12, anchor="w", padx=6, font=("Segoe UI", 9),
+            # A plain button, not a Menubutton/Combobox — clicking it opens
+            # our own popup (a real checklist that stays open across
+            # multiple toggles) rather than a tk.Menu or ttk.Combobox
+            # dropdown, both of which close/collapse after a single pick.
+            btn = tk.Button(
+                p, text="Owned", relief="raised", bd=1, width=12,
+                anchor="w", padx=6, font=("Segoe UI", 9),
+                command=lambda: self._open_collection_status_picker(btn),
             )
-            _default_bg, _default_fg = btn.cget("bg"), btn.cget("fg")
-            menu = tk.Menu(btn, tearoff=0)
-
-            def _colors_for(label: str):
-                if label == "All":
-                    return None
-                flag = _COLLECTION_STATUS_LABEL_TO_FLAG.get(label, "own")
-                return bgg.STATUS_COLORS.get(flag, bgg.STATUS_COLORS["own"])
-
-            def _apply_color(*_args) -> None:
-                c = _colors_for(self.collection_status_var.get())
-                if c:
-                    btn.configure(bg=c["bg"], fg=c["text"],
-                                   activebackground=c["bg"], activeforeground=c["text"])
-                else:
-                    btn.configure(bg=_default_bg, fg=_default_fg,
-                                   activebackground=_default_bg, activeforeground=_default_fg)
-
-            def _pick(label: str) -> None:
-                self.collection_status_var.set(label)
-                self.refresh_games()
-
-            for lbl in _COLLECTION_STATUS_LABELS:
-                c = _colors_for(lbl)
-                kwargs = {"background": c["bg"], "foreground": c["text"]} if c else {}
-                menu.add_command(label=lbl, command=lambda l=lbl: _pick(l), **kwargs)
-            btn.configure(menu=menu)
-            # Re-color whenever the variable changes for ANY reason — not
-            # just a pick from this menu, but also the "reset filters" /
-            # active-filter-chip removal paths that set it directly.
-            self.collection_status_var.trace_add("write", _apply_color)
-            _apply_color()
+            self._collection_filter_btn = btn
+            self._collection_filter_default_colors = (btn.cget("bg"), btn.cget("fg"))
+            self._update_collection_filter_button()
             return btn
 
+        self._collection_status_colors_for = _collection_status_colors
         fgroup("COLLECTION", _make_collection_filter)
 
         reset_frame = ttk.Frame(fbar, style="Filter.TFrame")
@@ -1189,9 +1181,11 @@ class App(tk.Tk):
         if self.tag_filter_var.get() != "Any":
             v = self.tag_filter_var.get()
             active.append(("Tag", v, lambda _v=v: self.tag_filter_var.set("Any")))
-        if self.collection_status_var.get() != "Owned":
-            v = self.collection_status_var.get()
-            active.append(("Collection", v, lambda _v=v: self.collection_status_var.set("Owned")))
+        if self.collection_status_labels != {"Owned"}:
+            v = (next(iter(self.collection_status_labels))
+                 if len(self.collection_status_labels) == 1
+                 else f"{len(self.collection_status_labels)} selected")
+            active.append(("Collection", v, self._reset_collection_filter))
 
         # Never re-pack the frame — it's already in the correct position above
         # the card grid. Just populate or clear its children.
@@ -1216,6 +1210,89 @@ class App(tk.Tk):
                       relief="flat", bd=0, padx=self.SP["sm"], pady=1,
                       cursor="hand2",
                       command=_make_dismiss(clear_fn)).pack(side="left")
+
+    def _reset_collection_filter(self) -> None:
+        self.collection_status_labels.clear()
+        self.collection_status_labels.add("Owned")
+
+    def _update_collection_filter_button(self) -> None:
+        """Keep the COLLECTION filter button's text/color in sync with
+        self.collection_status_labels — called from refresh_games() so every
+        mutation path (the popup, an active-filter-chip removal, the full
+        reset) picks it up, not just a direct pick from the popup itself."""
+        btn = getattr(self, "_collection_filter_btn", None)
+        if btn is None:
+            return
+        labels = self.collection_status_labels
+        if len(labels) == 1:
+            text = next(iter(labels))
+        else:
+            text = f"{len(labels)} selected"
+        btn.configure(text=text)
+        color = (self._collection_status_colors_for(next(iter(labels)))
+                 if len(labels) == 1 else None)
+        if color:
+            btn.configure(bg=color["bg"], fg=color["text"],
+                           activebackground=color["bg"], activeforeground=color["text"])
+        else:
+            _bg, _fg = self._collection_filter_default_colors
+            btn.configure(bg=_bg, fg=_fg, activebackground=_bg, activeforeground=_fg)
+
+    def _open_collection_status_picker(self, anchor_widget) -> None:
+        """Popup checklist for the COLLECTION filter — stays open across
+        multiple toggles (unlike a tk.Menu, which closes after each pick),
+        with each status colored the same way as its badge elsewhere."""
+        win = tk.Toplevel(self)
+        win.title("Filter by Collection Status")
+        win.transient(self)
+        win.resizable(False, False)
+        win.configure(bg=C_BG)
+        x = anchor_widget.winfo_rootx()
+        y = anchor_widget.winfo_rooty() + anchor_widget.winfo_height()
+        win.geometry(f"+{x}+{y}")
+
+        frame = ttk.Frame(win, padding=12)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(frame, text="Select any combination",
+                  font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(0, 6))
+
+        vars_by_label: dict[str, tk.BooleanVar] = {}
+
+        def _on_toggle(label: str) -> None:
+            checked = vars_by_label[label].get()
+            if label == "All":
+                if checked:
+                    self.collection_status_labels.clear()
+                    self.collection_status_labels.add("All")
+                    for lbl, v in vars_by_label.items():
+                        v.set(lbl == "All")
+            else:
+                self.collection_status_labels.discard("All")
+                vars_by_label["All"].set(False)
+                if checked:
+                    self.collection_status_labels.add(label)
+                else:
+                    self.collection_status_labels.discard(label)
+                if not self.collection_status_labels:
+                    self._reset_collection_filter()
+                    vars_by_label["Owned"].set(True)
+            self.refresh_games()
+
+        for lbl in _COLLECTION_STATUS_LABELS:
+            v = tk.BooleanVar(value=lbl in self.collection_status_labels)
+            vars_by_label[lbl] = v
+            c = self._collection_status_colors_for(lbl)
+            cb = tk.Checkbutton(
+                frame, text=lbl, variable=v, anchor="w",
+                font=("Segoe UI", 9), command=lambda l=lbl: _on_toggle(l),
+            )
+            if c:
+                cb.configure(bg=c["bg"], fg=c["text"], selectcolor=c["bg"],
+                              activebackground=c["bg"], activeforeground=c["text"])
+            cb.pack(anchor="w", fill="x", pady=1)
+
+        ttk.Button(frame, text="Done", command=win.destroy).pack(anchor="e", pady=(8, 0))
+        win.grab_set()
 
     def _build_tabs(self) -> None:
         self.nb = ttk.Notebook(self)
@@ -1924,7 +2001,7 @@ class App(tk.Tk):
         self.status_filter_var.set("Any")
         self.tag_filter_var.set("Any")
         self.coop_filter_var.set("Any")
-        self.collection_status_var.set("Owned")
+        self._reset_collection_filter()
         self._active_collection = None
         self._compare_mode = "off"
         self._compare_other = None
@@ -2073,7 +2150,7 @@ class App(tk.Tk):
                                  else self.games_canvas.yview()[0])
             except Exception:
                 _prev_scroll = 0.0
-        status_param = _collection_status_param(self.collection_status_var.get())
+        status_param = _collection_status_params(self.collection_status_labels)
         with db.connect() as c:
             games = db.list_games(c, self.search_var.get().strip(), status=status_param)
             total_count = db.count_games(c, status=status_param)
@@ -2117,6 +2194,7 @@ class App(tk.Tk):
         self._refresh_collection_bar()
         games = self._apply_filters(list(games), open_loans)
         self._refresh_chips()
+        self._update_collection_filter_button()
 
         # Apply sort (card view and table view both respect this)
         sort_key = getattr(self, '_sort_var', None)
@@ -2152,7 +2230,7 @@ class App(tk.Tk):
                                       self.status_filter_var.get(),
                                       self.tag_filter_var.get(),
                                       self.coop_filter_var.get()])
-            or self.collection_status_var.get() != "Owned"
+            or self.collection_status_labels != {"Owned"}
             or self.exact_players_var.get()
             or bool(self.search_var.get())
             or (len(self._collections) >= 2

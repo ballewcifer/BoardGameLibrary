@@ -36,15 +36,28 @@
 
     <label class="filter-check"><input type="checkbox" name="exp" value="1" {% if show_exp %}checked{% endif %}> Expansions</label>
 
-    <select name="bstatus" class="filter-select" aria-label="Filter by BGG collection status">
-      <option value="owned" {% if bstatus=='owned' %}selected{% endif %}>Owned</option>
-      <option value="all"   {% if bstatus=='all'   %}selected{% endif %}>All statuses</option>
-      {% for f in bgg_status_flags if f != 'own' %}
-        {# Each status gets its own option color (supported by most modern
-           browsers for the open dropdown list), matching the badges. #}
-        <option value="{{ f }}" {% if bstatus==f %}selected{% endif %} style="background:{{ bgg_status_colors[f].bg }};color:{{ bgg_status_colors[f].text }}">{{ bgg_status_labels[f] }}</option>
-      {% endfor %}
-    </select>
+    {# Multi-select checklist — plain checkboxes sharing name="bstatus" submit
+       as repeated params with no JS required; the small script below only
+       adds the "All"/other-status mutual-exclusivity UX and a live summary
+       label, matching the desktop app's equivalent popup. #}
+    <details class="bstatus-details">
+      <summary class="filter-select bstatus-summary" id="bstatus-summary">
+        {{ 'Owned' if bstatuses == ['owned'] else (bstatuses[0] if bstatuses|length == 1 else bstatuses|length ~ ' selected') }}
+      </summary>
+      <div class="bstatus-menu" aria-label="Filter by BGG collection status">
+        <label class="bstatus-option">
+          <input type="checkbox" name="bstatus" value="owned" {% if 'owned' in bstatuses %}checked{% endif %}> Owned
+        </label>
+        <label class="bstatus-option">
+          <input type="checkbox" name="bstatus" value="all" {% if 'all' in bstatuses %}checked{% endif %}> All statuses
+        </label>
+        {% for f in bgg_status_flags if f != 'own' %}
+          <label class="bstatus-option" style="background:{{ bgg_status_colors[f].bg }};color:{{ bgg_status_colors[f].text }}">
+            <input type="checkbox" name="bstatus" value="{{ f }}" {% if f in bstatuses %}checked{% endif %}> {{ bgg_status_labels[f] }}
+          </label>
+        {% endfor %}
+      </div>
+    </details>
 
     <button type="submit" class="btn btn-primary btn-sm">Filter</button>
   </form>
@@ -54,6 +67,39 @@
   <button class="btn btn-secondary btn-sm" onclick="openModal('modal-add-game-manual')" aria-label="Add game manually">+ Add Manually</button>
   <button id="select-mode-toggle" class="btn btn-secondary btn-sm" onclick="toggleSelectMode()" aria-label="Select multiple games">☑ Select</button>
 </div>
+
+<script>
+// Collection-status checklist: "All" is exclusive with every other option —
+// checking it clears the rest, checking anything else clears it — and the
+// <summary> label reflects the current selection, matching the desktop
+// app's equivalent popup. Submission itself needs none of this; plain
+// checkboxes sharing name="bstatus" already submit as repeated params.
+(function () {
+  const menu = document.querySelector('.bstatus-menu');
+  const summary = document.getElementById('bstatus-summary');
+  if (!menu || !summary) return;
+  const boxes = Array.from(menu.querySelectorAll('input[type=checkbox]'));
+  const allBox = boxes.find(b => b.value === 'all');
+
+  function updateSummary() {
+    const checked = boxes.filter(b => b.checked);
+    if (checked.length === 0) { allBox && (allBox.checked = false); boxes.find(b => b.value === 'owned').checked = true; }
+    const now = boxes.filter(b => b.checked);
+    const labels = now.map(b => b.parentElement.textContent.trim());
+    summary.textContent = now.length === 1 ? labels[0] : `${now.length} selected`;
+  }
+
+  boxes.forEach(box => box.addEventListener('change', () => {
+    if (box.value === 'all' && box.checked) {
+      boxes.forEach(b => { if (b !== box) b.checked = false; });
+    } else if (box.checked && allBox) {
+      allBox.checked = false;
+    }
+    updateSummary();
+  }));
+  updateSummary();
+})();
+</script>
 
 <!-- Bulk-edit action bar (shown while in select mode) -->
 <div id="bulk-bar" class="bulk-bar" hidden>
@@ -70,10 +116,10 @@
 <div class="collection-bar">
   <span class="collection-label">Library:</span>
   <a class="collection-tab {% if active_collection is none %}active{% endif %}"
-     href="{{ url_for('games', q=q, status=status, tag=tag_filter, exp=('1' if show_exp else none), coop=coop, bstatus=bstatus) }}">All</a>
+     href="{{ url_for('games', q=q, status=status, tag=tag_filter, exp=('1' if show_exp else none), coop=coop, bstatus=bstatuses) }}">All</a>
   {% for col in collections %}
   <a class="collection-tab {% if active_collection == col.id %}active{% endif %}"
-     href="{{ url_for('games', q=q, status=status, tag=tag_filter, exp=('1' if show_exp else none), coop=coop, bstatus=bstatus, collection=col.id) }}">{{ col.name }} ({{ col.game_count }}){% if col.owner_name %} 👤 {{ col.owner_name }}{% endif %}</a>
+     href="{{ url_for('games', q=q, status=status, tag=tag_filter, exp=('1' if show_exp else none), coop=coop, bstatus=bstatuses, collection=col.id) }}">{{ col.name }} ({{ col.game_count }}){% if col.owner_name %} 👤 {{ col.owner_name }}{% endif %}</a>
   {% endfor %}
 
   <form method="get" action="/games" class="compare-form">
