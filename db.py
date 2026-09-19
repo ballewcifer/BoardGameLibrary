@@ -1,6 +1,8 @@
 """SQLite storage for the board game library."""
 from __future__ import annotations
 
+import base64
+import os
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime
@@ -119,6 +121,8 @@ MIGRATIONS = [
     # authoritative "is this really in my library" bit; this is a richer,
     # informational label alongside it.
     "ALTER TABLE games ADD COLUMN bgg_status TEXT",
+    # Optional BGG username on a friend (reference only — parity with mobile).
+    "ALTER TABLE users ADD COLUMN bgg_username TEXT",
 ]
 
 
@@ -426,6 +430,63 @@ def members_allowed_to_checkout(c: sqlite3.Connection, game_id: int) -> set:
     return allowed
 
 
+def game_in_username_collection(c: sqlite3.Connection, bgg_username: str,
+                                game_id: int) -> bool:
+    """True if *game_id* belongs to the collection synced under *bgg_username*.
+
+    Backs the device-level "claim my synced collection" check (settings key
+    ``claimed_bgg_username``), which is independent of the Friend-keyed
+    claim_collection()/user_can_checkout() above (that one assigns a
+    collection to a specific Friend). If the collection no longer exists there
+    is nothing to restrict against, so it returns True — same as mobile.
+    """
+    row = c.execute(
+        "SELECT id FROM collections WHERE bgg_username = ?", (bgg_username,)
+    ).fetchone()
+    if row is None:
+        return True
+    hit = c.execute(
+        "SELECT 1 FROM game_collections WHERE game_id = ? AND collection_id = ? LIMIT 1",
+        (game_id, row[0]),
+    ).fetchone()
+    return hit is not None
+
+
+def migrate_claimed_member(c: sqlite3.Connection, settings: dict) -> bool:
+    """One-time settings migration: the old ``claimed_member_id`` (a Friend id)
+    becomes ``claimed_bgg_username`` (a string).
+
+    The username is taken from the collection(s) that member owned, when
+    exactly one of them has a BGG username. The old key is always dropped so
+    it is never read again. Returns True when *settings* changed (the caller
+    should persist it).
+    """
+    if "claimed_member_id" not in settings:
+        return False
+    mid = settings.pop("claimed_member_id")
+    if mid and not settings.get("claimed_bgg_username"):
+        names = []
+        for cid in owned_collection_ids(c, mid):
+            row = c.execute(
+                "SELECT bgg_username FROM collections WHERE id = ?", (cid,)
+            ).fetchone()
+            if row and row[0]:
+                names.append(row[0])
+        if len(names) == 1:
+            settings["claimed_bgg_username"] = names[0]
+    return True
+
+
+def reset_claim_if_cleared(settings: dict, cleared_usernames) -> bool:
+    """Drop ``claimed_bgg_username`` if its collection was just cleared, so a
+    new collection can be claimed. Returns True when *settings* changed."""
+    claimed = settings.get("claimed_bgg_username")
+    if claimed and claimed in set(cleared_usernames or []):
+        settings.pop("claimed_bgg_username", None)
+        return True
+    return False
+
+
 def clear_collections(c: sqlite3.Connection, collection_ids: list[int]) -> list[int]:
     """Delete the given collections and any games left orphaned by the removal.
 
@@ -520,12 +581,53 @@ def ensure_collection_migration(
 
 # ---------- users ----------
 
-def add_user(c: sqlite3.Connection, first_name: str, last_name: str) -> int:
+def add_user(c: sqlite3.Connection, first_name: str, last_name: str,
+             bgg_username: Optional[str] = None) -> int:
     cur = c.execute(
-        "INSERT INTO users (first_name, last_name, created_at) VALUES (?, ?, ?)",
-        (first_name.strip(), last_name.strip(), now_iso()),
+        "INSERT INTO users (first_name, last_name, bgg_username, created_at) "
+        "VALUES (?, ?, ?, ?)",
+        (first_name.strip(), last_name.strip(),
+         (bgg_username or "").strip() or None, now_iso()),
     )
     return cur.lastrowid
+
+
+def update_user(c: sqlite3.Connection, user_id: int, first_name: str,
+                last_name: str, bgg_username: Optional[str] = None) -> None:
+    c.execute(
+        "UPDATE users SET first_name = ?, last_name = ?, bgg_username = ? WHERE id = ?",
+        (first_name.strip(), last_name.strip(),
+         (bgg_username or "").strip() or None, user_id),
+    )
+
+
+def find_user_by_name(c: sqlite3.Connection, first_name: str, last_name: str,
+                      exclude_id: Optional[int] = None) -> Optional[sqlite3.Row]:
+    """The friend whose "First Last" matches (case-insensitive), or None.
+    *exclude_id* skips one friend — used when editing so a friend never
+    collides with themselves."""
+    full = f"{first_name} {last_name}".strip().casefold()
+    for u in list_users(c):
+        if exclude_id is not None and u["id"] == exclude_id:
+            continue
+        if f"{u['first_name']} {u['last_name']}".strip().casefold() == full:
+            return u
+    return None
+
+
+def validate_friend(c: sqlite3.Connection, first_name: str, last_name: str,
+                    exclude_id: Optional[int] = None) -> Optional[str]:
+    """Shared Add/Edit Friend validation (matches mobile's FriendFormModal):
+    both names are required and must not duplicate an existing friend.
+    Returns an error message, or None when the names are acceptable."""
+    f, l = (first_name or "").strip(), (last_name or "").strip()
+    if not f or not l:
+        return "Both first and last name are required."
+    dupe = find_user_by_name(c, f, l, exclude_id)
+    if dupe is not None:
+        return (f"{dupe['first_name']} {dupe['last_name']} is already in "
+                f"your friends list.")
+    return None
 
 
 def list_users(c: sqlite3.Connection) -> list[sqlite3.Row]:
@@ -735,7 +837,8 @@ def currently_checked_out(c: sqlite3.Connection) -> list[sqlite3.Row]:
     """Return all open loans with game name, borrower, checkout date, and due date."""
     return c.execute(
         """
-        SELECT loans.id, loans.checked_out_at, loans.due_date,
+        SELECT loans.id, loans.game_id, loans.user_id,
+               loans.checked_out_at, loans.due_date,
                games.name AS game_name, games.bgg_id,
                users.first_name, users.last_name
         FROM loans
@@ -816,6 +919,294 @@ def game_play_stats(c: sqlite3.Connection, bgg_id: int) -> dict:
         "avg_duration": avg_duration,
         "win_counts":   win_counts,
     }
+
+
+# ---------- JSON backup (shared with the mobile app) ----------
+#
+# The mobile app's Export/Import Backup (lib/backupCore.ts) and desktop's
+# "Export for Mobile" / JSON import speak the same file. Version 5 carries the
+# WHOLE library: `members` (with bgg_username), `games` (full rows, minus the
+# device-local image_path), `collections`, `game_collections`, `plays`,
+# `loans` and `customisations`. Pre-v5 files carried only `manual_games`
+# (negative-id games). Custom cover photos are embedded as base64 on the
+# customisations — the raw image_path is never exported.
+
+BACKUP_VERSION = 5
+
+
+def collect_backup_tables(c: sqlite3.Connection) -> dict:
+    """Everything in a backup that comes straight from the database.
+
+    The customisations still carry ``image_path`` so the caller can embed the
+    photo (see embed_customisation_photos()), which then drops it.
+    """
+    members = [dict(r) for r in c.execute("SELECT * FROM users ORDER BY id")]
+
+    # Full rows for every game. image_path is device-local, so it's dropped —
+    # custom cover photos travel with the customisations below.
+    games = [dict(r) for r in c.execute("SELECT * FROM games ORDER BY bgg_id")]
+    for g in games:
+        g.pop("image_path", None)
+
+    collections = [dict(r) for r in c.execute("SELECT * FROM collections ORDER BY id")]
+    game_collections = [dict(r) for r in c.execute(
+        "SELECT game_id, collection_id FROM game_collections")]
+
+    plays = [dict(r) for r in c.execute(
+        """SELECT plays.*, games.name AS game_name
+           FROM plays
+           LEFT JOIN games ON games.bgg_id = plays.game_id
+           ORDER BY plays.played_at DESC""")]
+
+    loans = [dict(r) for r in c.execute(
+        """SELECT loans.*, games.name AS game_name,
+                  users.first_name, users.last_name
+           FROM loans
+           LEFT JOIN games ON games.bgg_id = loans.game_id
+           LEFT JOIN users ON users.id = loans.user_id
+           ORDER BY loans.checked_out_at DESC""")]
+
+    customisations = [dict(r) for r in c.execute(
+        """SELECT bgg_id, name, tags, is_favorite, has_insert,
+                  my_comment, my_rating, best_players, is_cooperative,
+                  manual_fields, image_path, own, bgg_status
+           FROM games
+           WHERE tags IS NOT NULL OR is_favorite = 1 OR has_insert = 1
+              OR my_comment IS NOT NULL OR my_rating IS NOT NULL
+              OR best_players IS NOT NULL OR is_cooperative IS NOT NULL
+              OR image_path IS NOT NULL OR own = 0
+              OR (bgg_status IS NOT NULL AND bgg_status != 'own')""")]
+
+    return {
+        "members": members,
+        "games": games,
+        "collections": collections,
+        "game_collections": game_collections,
+        "plays": plays,
+        "loans": loans,
+        "customisations": customisations,
+    }
+
+
+def embed_customisation_photos(customisations: list) -> None:
+    """Replace each customisation's local ``image_path`` with an embedded
+    base64 ``photo_base64`` / ``photo_ext`` (in place). The path itself means
+    nothing on another machine, so it is always removed."""
+    for cu in customisations:
+        path = cu.pop("image_path", None)
+        if path and os.path.isfile(path):
+            try:
+                with open(path, "rb") as imgf:
+                    cu["photo_base64"] = base64.b64encode(imgf.read()).decode("ascii")
+                cu["photo_ext"] = os.path.splitext(path)[1].lstrip(".").lower() or "jpg"
+            except OSError:
+                pass  # Photo file unreadable -- skip it, don't fail the whole export.
+
+
+def build_backup_payload(c: sqlite3.Connection) -> dict:
+    """The full, ready-to-serialise version-5 backup document."""
+    tables = collect_backup_tables(c)
+    embed_customisation_photos(tables["customisations"])
+    return {"version": BACKUP_VERSION, "exported_at": now_iso(), **tables}
+
+
+def is_backup_payload(data) -> bool:
+    """Loose sanity check that parsed JSON looks like a BGL backup (mobile
+    requires `version` and `members`; an empty members list is fine)."""
+    return (isinstance(data, dict) and bool(data.get("version"))
+            and (data.get("members") is not None
+                 or isinstance(data.get("games"), list)))
+
+
+def restore_backup_tables(c: sqlite3.Connection, data: dict,
+                          images_dir: Optional[Path] = None) -> dict:
+    """Merge a parsed backup into the database (port of mobile's
+    backupCore.restoreTables). Never overwrites a game row that is already
+    here (a fresh BGG sync is newer); it only fills in missing games, then
+    re-applies the user's own data on top. Safe to run repeatedly.
+
+    Order: games, members (old id -> new id), collections (+ membership),
+    plays, loans, customisations. Returns counts: games, collections, members,
+    plays, loans, customisations, skipped (already here / not importable) and
+    no_game (plays / loans / customisations whose game isn't in this library).
+
+    images_dir: where embedded custom cover photos are written; None skips them.
+    """
+    counts = {"games": 0, "collections": 0, "members": 0, "plays": 0, "loans": 0,
+              "customisations": 0, "skipped": 0, "no_game": 0}
+
+    def game_exists(gid) -> bool:
+        return gid is not None and c.execute(
+            "SELECT 1 FROM games WHERE bgg_id = ?", (gid,)).fetchone() is not None
+
+    # ── Games ────────────────────────────────────────────────────────────────
+    # First, so everything below can find them. Columns come from the live
+    # schema, so a backup from a different app version still imports the fields
+    # both sides know about. Pre-v5 backups only carried manually added games
+    # (negative bgg_id), under `manual_games`.
+    game_cols = {row[1] for row in c.execute("PRAGMA table_info(games)")}
+    incoming = data.get("games") if isinstance(data.get("games"), list)         else (data.get("manual_games") or [])
+    for g in incoming:
+        gid = g.get("bgg_id")
+        if not isinstance(gid, int) or isinstance(gid, bool) or not g.get("name"):
+            counts["skipped"] += 1
+            continue
+        if game_exists(gid):
+            continue   # already here — not a skip, nothing lost
+        cols = [k for k in g if k in game_cols and k != "image_path"]
+        c.execute(
+            f"INSERT INTO games ({', '.join(cols)}) "
+            f"VALUES ({', '.join('?' * len(cols))})",
+            [g[k] for k in cols],
+        )
+        counts["games"] += 1
+
+    # ── Members — map old ids -> local ids so loans/collections resolve ──────
+    user_id_map: dict = {}
+    for m in data.get("members") or []:
+        row = c.execute(
+            "SELECT id FROM users WHERE first_name = ? AND last_name = ?",
+            (m.get("first_name"), m.get("last_name")),
+        ).fetchone()
+        if row:
+            user_id_map[m.get("id")] = row[0]
+            counts["skipped"] += 1
+        else:
+            cur = c.execute(
+                "INSERT INTO users (first_name, last_name, bgg_username, created_at) "
+                "VALUES (?, ?, ?, ?)",
+                ((m.get("first_name") or "").strip(), (m.get("last_name") or "").strip(),
+                 m.get("bgg_username") or None, m.get("created_at") or now_iso()),
+            )
+            user_id_map[m.get("id")] = cur.lastrowid
+            counts["members"] += 1
+
+    # ── Collections and which games are in them ──────────────────────────────
+    coll_id_map: dict = {}
+    for col in data.get("collections") or []:
+        if col.get("bgg_username"):
+            existing = c.execute("SELECT id FROM collections WHERE bgg_username = ?",
+                                 (col["bgg_username"],)).fetchone()
+        else:
+            existing = c.execute(
+                "SELECT id FROM collections WHERE name = ? AND bgg_username IS NULL",
+                (col.get("name"),)).fetchone()
+        if existing:
+            coll_id_map[col.get("id")] = existing[0]
+        else:
+            owner = col.get("owner_user_id")
+            cur = c.execute(
+                "INSERT INTO collections (name, bgg_username, created_at, last_synced, "
+                "owner_user_id) VALUES (?, ?, ?, ?, ?)",
+                (col.get("name") or col.get("bgg_username") or "Collection",
+                 col.get("bgg_username") or None, col.get("created_at") or now_iso(),
+                 col.get("last_synced"),
+                 user_id_map.get(owner) if owner is not None else None),
+            )
+            coll_id_map[col.get("id")] = cur.lastrowid
+            counts["collections"] += 1
+    for gc in data.get("game_collections") or []:
+        cid = coll_id_map.get(gc.get("collection_id"))
+        if cid is None or not game_exists(gc.get("game_id")):
+            continue
+        c.execute("INSERT OR IGNORE INTO game_collections (game_id, collection_id) "
+                  "VALUES (?, ?)", (gc["game_id"], cid))
+
+    # ── Plays ────────────────────────────────────────────────────────────────
+    for p in data.get("plays") or []:
+        if c.execute("SELECT 1 FROM plays WHERE game_id = ? AND played_at = ?",
+                     (p.get("game_id"), p.get("played_at"))).fetchone():
+            counts["skipped"] += 1
+            continue
+        if not game_exists(p.get("game_id")):
+            counts["no_game"] += 1
+            continue
+        log_play(
+            c, p["game_id"], p["played_at"],
+            p.get("player_names") or "", p.get("winner") or "", p.get("notes") or "",
+            duration_minutes=p.get("duration_minutes"), scores=p.get("scores"),
+        )
+        counts["plays"] += 1
+
+    # ── Loans ────────────────────────────────────────────────────────────────
+    for l in data.get("loans") or []:
+        if c.execute("SELECT 1 FROM loans WHERE game_id = ? AND checked_out_at = ?",
+                     (l.get("game_id"), l.get("checked_out_at"))).fetchone():
+            counts["skipped"] += 1
+            continue
+        if not game_exists(l.get("game_id")):
+            counts["no_game"] += 1
+            continue
+        uid = user_id_map.get(l.get("user_id"), l.get("user_id"))
+        if uid is None or c.execute("SELECT 1 FROM users WHERE id = ?", (uid,)).fetchone() is None:
+            # Borrower isn't in the file's member list — fall back to the name
+            # carried on the loan row, else there's nobody to attach it to.
+            match = find_user_by_name(c, l.get("first_name") or "", l.get("last_name") or "")
+            if match is None:
+                counts["skipped"] += 1
+                continue
+            uid = match["id"]
+        c.execute(
+            "INSERT INTO loans (game_id, user_id, checked_out_at, returned_at, due_date, notes) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (l["game_id"], uid, l["checked_out_at"],
+             l.get("returned_at"), l.get("due_date"), l.get("notes")),
+        )
+        counts["loans"] += 1
+
+    # ── Game customisations ──────────────────────────────────────────────────
+    for cu in data.get("customisations") or []:
+        if not game_exists(cu.get("bgg_id")):
+            counts["no_game"] += 1
+            continue
+        image_path = None
+        if cu.get("photo_base64") and images_dir is not None:
+            try:
+                ext = cu.get("photo_ext") or "jpg"
+                images_dir.mkdir(parents=True, exist_ok=True)
+                dest = images_dir / f"{cu['bgg_id']}.{ext}"
+                dest.write_bytes(base64.b64decode(cu["photo_base64"]))
+                image_path = str(dest)
+            except (OSError, ValueError):
+                pass  # Couldn't write the photo -- keep any existing one.
+        c.execute(
+            "UPDATE games SET tags=?, is_favorite=?, has_insert=?, "
+            "my_comment=?, my_rating=?, best_players=?, is_cooperative=?, "
+            "manual_fields=?, image_path=COALESCE(?, image_path), "
+            "own=COALESCE(?, own), bgg_status=COALESCE(?, bgg_status) WHERE bgg_id=?",
+            (cu.get("tags"), cu.get("is_favorite") or 0, cu.get("has_insert") or 0,
+             cu.get("my_comment"), cu.get("my_rating"), cu.get("best_players"),
+             cu.get("is_cooperative"), cu.get("manual_fields"), image_path,
+             cu.get("own"), cu.get("bgg_status"), cu["bgg_id"]),
+        )
+        counts["customisations"] += 1
+
+    return counts
+
+
+def summarize_import(counts: dict, sep: str = "\n") -> str:
+    """Result text for the "Import complete" message (mirrors mobile's
+    summarizeImport). *sep* joins the lines — "\n" for a dialog, ", " for a
+    one-line flash message."""
+    lines = [
+        f"Games: +{counts['games']}",
+        f"Collections: +{counts['collections']}",
+        f"Friends: +{counts['members']}",
+        f"Plays: +{counts['plays']}",
+        f"Loans: +{counts['loans']}",
+        f"Game details applied: {counts['customisations']}",
+        f"Already here / skipped: {counts['skipped']}",
+    ]
+    n = counts["no_game"]
+    if n > 0:
+        lines.append(
+            f"{n} play, loan or detail record{'s' if n != 1 else ''} "
+            f"belong{'s' if n == 1 else ''} to games that are not in this "
+            "library, so they were not imported. If this backup was made "
+            "before backups included the game list, Sync with BoardGameGeek "
+            "and then import it again."
+        )
+    return sep.join(lines)
 
 
 if __name__ == "__main__":

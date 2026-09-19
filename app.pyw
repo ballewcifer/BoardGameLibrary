@@ -174,9 +174,10 @@ def _open_url(url: str) -> None:
         pass
 
 # ── Collection status filter (BGG's own/wishlist/fortrade/etc. flags) ────────
-# "Owned" is the default view (matches pre-existing behavior — own=1 only).
-# "All" shows every status. The rest map 1:1 to bgg.STATUS_FLAGS via their label.
-_COLLECTION_STATUS_LABELS = ["Owned", "All"] + [
+# "All" is the default view so newly synced wishlist / for-trade items aren't
+# hidden (matches the mobile app). "Owned" narrows to own=1 only. The rest map
+# 1:1 to bgg.STATUS_FLAGS via their label.
+_COLLECTION_STATUS_LABELS = ["All", "Owned"] + [
     bgg.STATUS_LABELS[f] for f in bgg.STATUS_FLAGS if f != "own"
 ]
 _COLLECTION_STATUS_LABEL_TO_FLAG = {v: k for k, v in bgg.STATUS_LABELS.items()}
@@ -185,8 +186,8 @@ _COLLECTION_STATUS_LABEL_TO_FLAG = {v: k for k, v in bgg.STATUS_LABELS.items()}
 def _collection_status_params(labels) -> Optional[list[str]]:
     """Map a set of _COLLECTION_STATUS_LABELS selections to db.list_games()'s
     `status` kwarg (a list — see db._status_where() for the combining rules)."""
-    if not labels or labels == {"Owned"}:
-        return None   # respects owned_only=True, unchanged default behavior
+    if not labels:
+        return None   # no selection — db.list_games() falls back to owned_only=True
     out = []
     for label in labels:
         if label == "Owned":
@@ -265,17 +266,62 @@ THEMES: dict = {
                           "blue600": "#0072B2", "blue700": "#005B8F", "blue800": "#00466E", "blue050": "#E1F0F8"},
 }
 
+# Per-theme extras (identical values on web + mobile): header/tab-strip/status bars use the
+# theme's own mid-tone, four dashboard card colours from a neighbouring-hue family, an accent
+# stripe under the header, and a canvas/border tint from the theme hue.
+THEME_EXTRA: dict = {
+    "Classic Navy": {"hdr": "#1B4B79", "ftr": "#1B4B79", "cards": ("#1B4B79", "#5B55CD", "#226F72", "#8D3EC6"),
+                    "stripe": "#6C5AE2", "bg": "#F3F6F9", "line100": "#EAEDF0", "line200": "#D6DBE1"},
+    "Ocean": {"hdr": "#12527E", "ftr": "#12527E", "cards": ("#12527E", "#4D5ACB", "#21726A", "#7F46C9"),
+             "stripe": "#5A5CE2", "bg": "#F3F7F9", "line100": "#EAEEF0", "line200": "#D6DCE1"},
+    "Teal": {"hdr": "#155E67", "ftr": "#155E67", "cards": ("#155E67", "#3467B2", "#217352", "#6455CE"),
+            "stripe": "#5A86E2", "bg": "#F3F8F9", "line100": "#EAF0F0", "line200": "#D6E0E1"},
+    "Forest": {"hdr": "#1C5E39", "ftr": "#1C5E39", "cards": ("#1C5E39", "#2E706B", "#357430", "#3B6A91"),
+              "stripe": "#5AE1E2", "bg": "#F3F9F6", "line100": "#EAF0ED", "line200": "#D6E1DA"},
+    "Slate": {"hdr": "#384857", "ftr": "#384857", "cards": ("#384857", "#5E5CB2", "#346E6F", "#8250AA"),
+             "stripe": "#685AE2", "bg": "#F3F6F9", "line100": "#EAEDF0", "line200": "#D6DBE1"},
+    "Indigo": {"hdr": "#33398E", "ftr": "#33398E", "cards": ("#33398E", "#7952AD", "#416B8B", "#954899"),
+              "stripe": "#9F5AE2", "bg": "#F3F4F9", "line100": "#EAEAF0", "line200": "#D6D6E1"},
+    "Purple": {"hdr": "#52247B", "ftr": "#52247B", "cards": ("#52247B", "#9A449C", "#5C5EB8", "#A34775"),
+              "stripe": "#E25ADA", "bg": "#F6F3F9", "line100": "#EDEAF0", "line200": "#DBD6E1"},
+    "Burgundy": {"hdr": "#73243E", "ftr": "#73243E", "cards": ("#73243E", "#99523D", "#A4428D", "#75642F"),
+                "stripe": "#E2855A", "bg": "#F9F3F5", "line100": "#F0EAEC", "line200": "#E1D6D9"},
+    "Crimson": {"hdr": "#7D202B", "ftr": "#7D202B", "cards": ("#7D202B", "#915A36", "#A73E7D", "#6C6728"),
+               "stripe": "#E29C5A", "bg": "#F9F3F4", "line100": "#F0EAEB", "line200": "#E1D6D7"},
+    "Bronze": {"hdr": "#74561E", "ftr": "#74561E", "cards": ("#74561E", "#636C2D", "#9E4F42", "#44702F"),
+              "stripe": "#C4E25A", "bg": "#F9F7F3", "line100": "#F0EEEA", "line200": "#E1DDD6"},
+    "High Contrast": {"hdr": "#333333", "ftr": "#333333", "cards": ("#000000", "#1C5F4D", "#5F1C48", "#824517"),
+                     "stripe": "#FFD54F", "bg": "#F5F5F5", "line100": "#E6E6E6", "line200": "#BDBDBD"},
+    "Colour-blind Safe": {"hdr": "#00638C", "ftr": "#00638C", "cards": ("#004C6B", "#26826A", "#D02597", "#5F391C"),
+                         "stripe": "#5A62E2", "bg": "#F3F7F9", "line100": "#EAEEF0", "line200": "#D6DDE1"},
+}
+
+C_HDR = "#1B4B79"; C_FTR = "#1B4B79"; C_STRIPE = "#6C5AE2"
+C_CARDS = ("#1B4B79", "#5B55CD", "#226F72", "#8D3EC6")
+
+
+def _mix(hex_a: str, hex_b: str, t: float) -> str:
+    """Blend hex_a toward hex_b by t (0..1)."""
+    a = [int(hex_a[i:i + 2], 16) for i in (1, 3, 5)]
+    b = [int(hex_b[i:i + 2], 16) for i in (1, 3, 5)]
+    return "#%02X%02X%02X" % tuple(round(x + (y - x) * t) for x, y in zip(a, b))
+
 
 def apply_theme(name: str) -> None:
     """Override the brand-colour globals with the named theme (default Classic Navy)."""
     global C_NAVY_900, C_NAVY_800, C_NAVY_700
     global C_BLUE_600, C_BLUE_700, C_BLUE_800, C_BLUE_050
     global C_NAVY, C_BLUE, C_SKY
+    global C_HDR, C_FTR, C_STRIPE, C_CARDS, C_BG, C_LINE_100, C_LINE_200, C_PALE
     t = THEMES.get(name) or THEMES["Classic Navy"]
     C_NAVY_900, C_NAVY_800, C_NAVY_700 = t["navy900"], t["navy800"], t["navy700"]
     C_BLUE_600, C_BLUE_700, C_BLUE_800, C_BLUE_050 = (
         t["blue600"], t["blue700"], t["blue800"], t["blue050"])
     C_NAVY, C_BLUE, C_SKY = C_NAVY_900, C_BLUE_600, C_BLUE_050
+    x = THEME_EXTRA.get(name) or THEME_EXTRA["Classic Navy"]
+    C_HDR, C_FTR, C_STRIPE, C_CARDS = x["hdr"], x["ftr"], x["stripe"], x["cards"]
+    C_BG, C_LINE_100, C_LINE_200 = x["bg"], x["line100"], x["line200"]
+    C_PALE = C_LINE_100
 
 
 _ORDINALS = {
@@ -544,6 +590,10 @@ class App(tk.Tk):
                 default_username=self.settings.get("bgg_username", ""),
                 default_name=self.settings.get("bgg_username", "") or "My Collection",
             )
+            # One-time: the old claimed_member_id (a Friend) becomes
+            # claimed_bgg_username (the BGG username of the claimed collection).
+            if db.migrate_claimed_member(c, self.settings):
+                config.save(self.settings)
         self._image_cache:    dict[str, ImageTk.PhotoImage] = {}
         self._gradient_cache: dict[int, ImageTk.PhotoImage] = {}  # palette_idx → gradient
         self._placeholder_img: Optional[ImageTk.PhotoImage] = None
@@ -569,7 +619,7 @@ class App(tk.Tk):
         self._compare_other: Optional[int] = None
         self._collections: list = []                    # cached collection rows
         self._gc_map: dict = {}                          # {game_id: {collection_id,...}}
-        self._my_collection_ids = None                   # collections owned by "me" (None = no claim)
+        self._claimed_collection_id = None               # collection id of claimed_bgg_username (None = no claim)
         self._collection_sig = None                     # rebuild guard for the tab bar
 
         apply_theme(self.settings.get("ui_theme", "Classic Navy"))
@@ -765,16 +815,16 @@ class App(tk.Tk):
             background=[("active", "#a01e18")])
 
         # ── Notebook tabs (navy-800 strip) ─────────────────────────────────────
-        s.configure("TNotebook", background=C_NAVY_800, borderwidth=0,
+        s.configure("TNotebook", background=C_FTR, borderwidth=0,
                     tabmargins=[2, 6, 2, 0])
         s.configure("TNotebook.Tab",
-            background=C_NAVY_800, foreground="#C7D6E6",
+            background=C_FTR, foreground="#DCE6F0",
             font=("Segoe UI", 9),
             padding=[self.SP["sm"], self.SP["xs"] + 2],
             focuscolor="")
         s.map("TNotebook.Tab",
-            background=[("selected", C_BG), ("active", "#1E4A73")],
-            foreground=[("selected", C_NAVY_900), ("active", C_SURFACE)],
+            background=[("selected", C_BG), ("active", _mix(C_FTR, "#FFFFFF", 0.14))],
+            foreground=[("selected", C_HDR), ("active", C_SURFACE)],
             font=[("selected", self.FONTS["control"])],
             padding=[("selected", [self.SP["xl"], self.SP["sm"] + 1])],
             expand=[("selected", [1, 3, 1, 0])])
@@ -808,7 +858,7 @@ class App(tk.Tk):
             foreground=C_INK_900, rowheight=32, borderwidth=0,
             font=self.FONTS["body"])
         s.configure("Treeview.Heading",
-            background=C_NAVY_900, foreground=C_SURFACE,
+            background=C_HDR, foreground=C_SURFACE,
             font=self.FONTS["label"], relief="flat", padding=[self.SP["sm"], 6])
         s.map("Treeview.Heading", background=[("active", C_NAVY_800)])
         s.map("Treeview",
@@ -836,14 +886,14 @@ class App(tk.Tk):
                     font=self.FONTS["body"])
 
         # ── Status bar (navy-900) ──────────────────────────────────────────────
-        s.configure("Status.TFrame", background=C_NAVY_900)
-        s.configure("Status.TLabel", background=C_NAVY_900, foreground=C_SURFACE,
+        s.configure("Status.TFrame", background=C_FTR)
+        s.configure("Status.TLabel", background=C_FTR, foreground=C_SURFACE,
                     font=self.FONTS["body"])
         # Determinate progress bar shown in the status strip during long tasks.
         s.configure("Status.Horizontal.TProgressbar",
-                    troughcolor=C_NAVY_800, background=C_BLUE_600,
-                    bordercolor=C_NAVY_800, lightcolor=C_BLUE_600,
-                    darkcolor=C_BLUE_600, thickness=10)
+                    troughcolor=_mix(C_FTR, "#000000", 0.25), background=C_STRIPE,
+                    bordercolor=_mix(C_FTR, "#000000", 0.25), lightcolor=C_STRIPE,
+                    darkcolor=C_STRIPE, thickness=10)
 
     # ---------- layout ----------
 
@@ -905,28 +955,52 @@ class App(tk.Tk):
         """Switch the UI colour theme live and remember the choice."""
         self.settings["ui_theme"] = name
         config.save(self.settings)
+        old_tints = [C_BG, C_LINE_100, C_LINE_200]
         apply_theme(name)
+        old_tints = dict(zip(old_tints, [C_BG, C_LINE_100, C_LINE_200]))
         if hasattr(self, "_theme_var"):
             self._theme_var.set(name)
         # ttk styles repaint all styled widgets; reconfigure the tk header band
         # and repaint the cards/chips/dashboard with the new colours.
         self._apply_style()
         if hasattr(self, "_hdr"):
-            self._hdr.configure(bg=C_NAVY_900)
-            self._hdr_inner.configure(bg=C_NAVY_900)
-            self._hdr_logo.configure(bg=C_NAVY_900)
-            self._hdr_title.configure(bg=C_NAVY_900)
+            self._hdr.configure(bg=C_HDR)
+            self._hdr_inner.configure(bg=C_HDR)
+            self._hdr_logo.configure(bg=C_HDR)
+            self._hdr_title.configure(bg=C_HDR)
+            self._hdr_stripe.configure(bg=C_STRIPE)
+        self._recolor_tk(old_tints)
         self._collection_sig = None      # force the collection tab bar to recolour
         self.refresh_games()
         self.refresh_dashboard()
         self.status(f"Theme: {name}")
 
+    def _recolor_tk(self, mapping: dict) -> None:
+        """Remap the old canvas/hairline tints to the new theme's on every existing tk widget
+        (ttk widgets follow _apply_style; plain tk ones keep the colour they were built with)."""
+        mapping = {o.upper(): n for o, n in mapping.items() if o.upper() != n.upper()}
+        self.configure(bg=C_BG)
+        if not mapping:
+            return
+
+        def walk(w):
+            for opt in ("bg", "highlightbackground"):
+                try:
+                    new = mapping.get(str(w.cget(opt)).upper())
+                    if new:
+                        w.configure(**{opt: new})
+                except tk.TclError:
+                    pass
+            for c in w.winfo_children():
+                walk(c)
+        walk(self)
+
     def _build_header(self) -> None:
-        """Navy-900 app bar: white logo chip + title on its own band (kept compact)."""
-        self._hdr = tk.Frame(self, bg=C_NAVY_900)
+        """Theme-coloured app bar: white logo chip + title on its own band (kept compact)."""
+        self._hdr = tk.Frame(self, bg=C_HDR)
         self._hdr.pack(side="top", fill="x")
 
-        self._hdr_inner = tk.Frame(self._hdr, bg=C_NAVY_900)
+        self._hdr_inner = tk.Frame(self._hdr, bg=C_HDR)
         self._hdr_inner.pack(side="left", padx=self.SP["lg"], pady=self.SP["xs"])
 
         # Logo chip — the actual program icon in a white square (falls back to a
@@ -935,24 +1009,25 @@ class App(tk.Tk):
             _logo_im = Image.open(_resource_path("icon.ico")).convert("RGBA").resize((28, 28), Image.LANCZOS)
             self._hdr_logo_img = ImageTk.PhotoImage(_logo_im)
             self._hdr_logo = tk.Label(self._hdr_inner, image=self._hdr_logo_img,
-                                      bg=C_NAVY_900, bd=0, padx=0, pady=0)
+                                      bg=C_HDR, bd=0, padx=0, pady=0)
         except Exception:
             self._hdr_logo = tk.Label(
                 self._hdr_inner, text="\U0001f3b2",
-                bg=C_NAVY_900, fg=C_SURFACE,
+                bg=C_HDR, fg=C_SURFACE,
                 font=("Segoe UI", 14, "bold"), padx=2, pady=1,
             )
         self._hdr_logo.pack(side="left", padx=(0, self.SP["sm"]))
 
         self._hdr_title = tk.Label(
             self._hdr_inner, text="Board Game Library",
-            bg=C_NAVY_900, fg=C_SURFACE,
+            bg=C_HDR, fg=C_SURFACE,
             font=("Segoe UI", 15, "bold"),
         )
         self._hdr_title.pack(side="left")
 
-        # Hairline under the app bar (line_200 over the navy/grey seam)
-        tk.Frame(self, bg=C_LINE_200, height=1).pack(side="top", fill="x")
+        # Accent stripe under the app bar
+        self._hdr_stripe = tk.Frame(self, bg=C_STRIPE, height=4)
+        self._hdr_stripe.pack(side="top", fill="x")
 
     def _build_toolbar(self, parent=None) -> None:
         """Toolbar (search + segmented view toggle), filter bar, and chips row.
@@ -1093,12 +1168,12 @@ class App(tk.Tk):
         )).bind("<<ComboboxSelected>>", lambda *_: self.refresh_games())
 
         # Multi-select: any combination of "Owned" + the real BGG statuses,
-        # or just {"All"}. A plain set, not a Tk variable — every mutation
+        # or just {"All"} (the default). A plain set, not a Tk variable — every mutation
         # path (the popup's checkboxes, an active-filter-chip removal, the
         # full reset) calls refresh_games() directly afterward, which also
         # keeps this button's own text/color in sync via _update_collection_
         # filter_button(), the same way it already refreshes the chips row.
-        self.collection_status_labels: set[str] = {"Owned"}
+        self.collection_status_labels: set[str] = {"All"}
 
         def _collection_status_colors(label: str):
             if label == "All":
@@ -1112,7 +1187,7 @@ class App(tk.Tk):
             # multiple toggles) rather than a tk.Menu or ttk.Combobox
             # dropdown, both of which close/collapse after a single pick.
             btn = tk.Button(
-                p, text="Owned", relief="raised", bd=1, width=12,
+                p, text="All", relief="raised", bd=1, width=12,
                 anchor="w", padx=6, font=("Segoe UI", 9),
                 command=lambda: self._open_collection_status_picker(btn),
             )
@@ -1181,7 +1256,7 @@ class App(tk.Tk):
         if self.tag_filter_var.get() != "Any":
             v = self.tag_filter_var.get()
             active.append(("Tag", v, lambda _v=v: self.tag_filter_var.set("Any")))
-        if self.collection_status_labels != {"Owned"}:
+        if self.collection_status_labels != {"All"}:
             v = (next(iter(self.collection_status_labels))
                  if len(self.collection_status_labels) == 1
                  else f"{len(self.collection_status_labels)} selected")
@@ -1213,7 +1288,7 @@ class App(tk.Tk):
 
     def _reset_collection_filter(self) -> None:
         self.collection_status_labels.clear()
-        self.collection_status_labels.add("Owned")
+        self.collection_status_labels.add("All")
 
     def _update_collection_filter_button(self) -> None:
         """Keep the COLLECTION filter button's text/color in sync with
@@ -1266,6 +1341,10 @@ class App(tk.Tk):
                     self.collection_status_labels.add("All")
                     for lbl, v in vars_by_label.items():
                         v.set(lbl == "All")
+                else:
+                    # "All" is exclusive and is the fallback — unchecking it
+                    # leaves nothing else selected, so it just stays on.
+                    vars_by_label["All"].set(True)
             else:
                 self.collection_status_labels.discard("All")
                 vars_by_label["All"].set(False)
@@ -1275,7 +1354,7 @@ class App(tk.Tk):
                     self.collection_status_labels.discard(label)
                 if not self.collection_status_labels:
                     self._reset_collection_filter()
-                    vars_by_label["Owned"].set(True)
+                    vars_by_label["All"].set(True)
             self.refresh_games()
 
         for lbl in _COLLECTION_STATUS_LABELS:
@@ -1457,8 +1536,9 @@ class App(tk.Tk):
                       background=C_BG).pack(anchor="w", pady=(self.SP["lg"], self.SP["xs"]))
             ttk.Separator(parent, orient="horizontal").pack(fill="x", pady=(0, self.SP["sm"]))
 
-        def stat_card(parent, label, value, color=C_NAVY_900, tab=None):
-            # Solid coloured stat tile (navy / green / purple / red per token map)
+        def stat_card(parent, label, value, color=None, tab=None):
+            # Solid coloured stat tile (theme card colours)
+            color = color or C_CARDS[0]
             f = tk.Frame(parent, bg=color, padx=self.SP["lg"], pady=self.SP["md"],
                          highlightbackground=color, highlightthickness=1,
                          cursor="hand2" if tab else "")
@@ -1479,12 +1559,10 @@ class App(tk.Tk):
         # ── stat cards row ────────────────────────────────────────────────────
         cards_row = tk.Frame(inner, bg=C_BG)
         cards_row.pack(fill="x", pady=(0, self.SP["xs"]))
-        stat_card(cards_row, "Games",       summary["total_games"],   C_NAVY_900, tab=self.games_tab)
-        stat_card(cards_row, "Total Plays", summary["total_plays"],   C_OK_SOLID, tab=self.plays_tab)
-        stat_card(cards_row, "Friends",     summary["total_members"], "#4A148C",  tab=self.members_tab)
-        stat_card(cards_row, "Checked Out", summary["checked_out"],
-                  C_DR_SOLID if summary["checked_out"] else C_INK_600,
-                  tab=self.history_tab)
+        stat_card(cards_row, "Games",       summary["total_games"],   C_CARDS[0], tab=self.games_tab)
+        stat_card(cards_row, "Total Plays", summary["total_plays"],   C_CARDS[1], tab=self.plays_tab)
+        stat_card(cards_row, "Friends",     summary["total_members"], C_CARDS[2], tab=self.members_tab)
+        stat_card(cards_row, "Checked Out", summary["checked_out"],   C_CARDS[3], tab=self.history_tab)
 
         # ── currently checked out ────────────────────────────────────────────
         section(inner, "Currently Checked Out")
@@ -2171,11 +2249,12 @@ class App(tk.Tk):
             # drops its tab automatically.
             self._collections = [r for r in db.list_collections(c) if r["game_count"] > 0]
             self._gc_map = db.game_collection_map(c)
-            # Collections owned by "me" (the device owner who claimed during
-            # import). None → no claim, so check-out is offered for every game.
-            _mine = self.settings.get("claimed_member_id")
-            self._my_collection_ids = (
-                db.owned_collection_ids(c, _mine) if _mine else None)
+            # The collection this device claimed as "mine", by BGG username.
+            # None → no claim (or that collection is gone), so check-out is
+            # offered for every game.
+            _claimed = self.settings.get("claimed_bgg_username")
+            self._claimed_collection_id = (
+                db.collection_id_for_username(c, _claimed) if _claimed else None)
 
         # Grey out the search field when the library has no games at all —
         # re-evaluated on every refresh, not just at startup.
@@ -2230,7 +2309,7 @@ class App(tk.Tk):
                                       self.status_filter_var.get(),
                                       self.tag_filter_var.get(),
                                       self.coop_filter_var.get()])
-            or self.collection_status_labels != {"Owned"}
+            or self.collection_status_labels != {"All"}
             or self.exact_players_var.get()
             or bool(self.search_var.get())
             or (len(self._collections) >= 2
@@ -2859,9 +2938,9 @@ class App(tk.Tk):
         # owned games are ever loanable at all, so non-owned games (Wishlist,
         # For Trade, ...) get no Check In/Out button or "Not in your
         # collection" label here — nothing loan-related applies to them.
-        my_ids = getattr(self, "_my_collection_ids", None)
-        can_checkout = (my_ids is None) or bool(
-            self._gc_map.get(bgg_id, set()) & my_ids)
+        claimed_cid = getattr(self, "_claimed_collection_id", None)
+        can_checkout = (claimed_cid is None) or (
+            claimed_cid in self._gc_map.get(bgg_id, set()))
         if out_to:
             ttk.Button(body, text="Check In",
                        command=lambda g=game: self.on_check_in(g)
@@ -3059,25 +3138,41 @@ class App(tk.Tk):
         last_entry = ttk.Entry(form, textvariable=self.last_name_var, width=18)
         last_entry.pack(side="left", padx=(0, SP["md"]))
         last_entry.bind("<Return>", lambda *_: self.on_add_member())
+        ttk.Label(form, text="BGG username (optional)", style="Filter.TLabel").pack(side="left", padx=(0, SP["xs"]))
+        self.bgg_user_var = tk.StringVar()
+        bgg_entry = ttk.Entry(form, textvariable=self.bgg_user_var, width=18)
+        bgg_entry.pack(side="left", padx=(0, SP["md"]))
+        bgg_entry.bind("<Return>", lambda *_: self.on_add_member())
         ttk.Button(form, text="Add friend", command=self.on_add_member).pack(side="left")
-        ttk.Button(form, text="Remove selected", style="Ghost.TButton",
+
+        # Actions on the selected row sit on their own line so the add form
+        # above never outgrows the window's minimum width.
+        row_actions = ttk.Frame(frame)
+        row_actions.pack(fill="x", pady=(SP["sm"], 0))
+        ttk.Button(row_actions, text="Edit selected", style="Ghost.TButton",
+                   command=self.on_edit_member).pack(side="left")
+        ttk.Button(row_actions, text="Remove selected", style="Ghost.TButton",
                    command=self.on_delete_member).pack(side="left", padx=(SP["sm"], 0))
 
-        cols = ("name", "out", "since")
-        self._members_headings = {"name": "Name", "out": "Currently out", "since": "Friend since"}
+        cols = ("name", "bgg", "out", "since")
+        self._members_headings = {"name": "Name", "bgg": "BGG username",
+                                  "out": "Currently out", "since": "Friend since"}
         self.members_tree = ttk.Treeview(frame, columns=cols, show="headings")
         self.members_tree.heading("name", text="Name")
+        self.members_tree.heading("bgg", text="BGG username")
         self.members_tree.heading("out", text="Currently out")
         self.members_tree.heading("since", text="Friend since")
         self._make_sortable(self.members_tree, self._members_headings)
         self.members_tree.column("name", width=240)
+        self.members_tree.column("bgg", width=180)
         self.members_tree.column("out", width=120, anchor="center")
         self.members_tree.column("since", width=160, anchor="center")
         self.members_tree.pack(fill="both", expand=True, pady=(SP["md"], 0))
         self.members_tree.bind("<Double-1>", self._on_member_double_click)
         self.members_tree.bind("<Return>",   self._on_member_return)
 
-        ttk.Label(frame, text="Double-click a friend to see their checkout history.",
+        ttk.Label(frame, text="Double-click a friend to see their checkout history, "
+                              "or select one and choose Edit selected to change their details.",
                   style="Muted.TLabel").pack(anchor="w", pady=(SP["xs"], 0))
 
     def refresh_members(self) -> None:
@@ -3097,12 +3192,14 @@ class App(tk.Tk):
                 "",
                 "end",
                 iid=iid,
-                values=(f"{u['first_name']} {u['last_name']}", counts.get(u["id"], 0), fmt_date(u["created_at"])),
+                values=(f"{u['first_name']} {u['last_name']}", u["bgg_username"] or "",
+                        counts.get(u["id"], 0), fmt_date(u["created_at"])),
             )
             # Sort "Name" by last name (then first), and "Member since" by its
             # real ISO timestamp — both differ from what's actually displayed.
             self._tv_rawdata[id(self.members_tree)][iid] = {
                 "name": (u["last_name"].lower(), u["first_name"].lower()),
+                "bgg": (u["bgg_username"] or "").lower(),
                 "since": u["created_at"] or "",
             }
         self._reapply_sort(self.members_tree, self._members_headings)
@@ -3110,15 +3207,76 @@ class App(tk.Tk):
     def on_add_member(self) -> None:
         first = self.first_name_var.get().strip()
         last = self.last_name_var.get().strip()
-        if not first or not last:
-            messagebox.showerror("Missing info", "Both first and last name are required.")
-            return
+        bgg = self.bgg_user_var.get().strip()
         with db.connect() as c:
-            db.add_user(c, first, last)
+            error = db.validate_friend(c, first, last)
+            if not error:
+                db.add_user(c, first, last, bgg)
+        if error:
+            messagebox.showerror("Can't add friend", error)
+            return
         self.first_name_var.set("")
         self.last_name_var.set("")
+        self.bgg_user_var.set("")
         self.refresh_members()
         self.status(f"Added {first} {last}.")
+
+    def on_edit_member(self) -> None:
+        """Edit the selected friend's first name, last name and BGG username."""
+        sel = self.members_tree.selection()
+        if not sel:
+            messagebox.showinfo("Edit friend", "Select a friend to edit first.")
+            return
+        with db.connect() as c:
+            user = c.execute("SELECT * FROM users WHERE id = ?", (int(sel[0]),)).fetchone()
+        if not user:
+            return
+
+        win = tk.Toplevel(self)
+        win.title("Edit Friend")
+        win.transient(self)
+        win.resizable(False, False)
+        win.configure(bg=C_BG)
+
+        frame = ttk.Frame(win, padding=16)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(frame, text="Update this friend's details.",
+                  foreground=C_INK_500, font=("Segoe UI", 8)).grid(
+                      row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        first_var = tk.StringVar(value=user["first_name"])
+        last_var = tk.StringVar(value=user["last_name"])
+        bgg_var = tk.StringVar(value=user["bgg_username"] or "")
+        first_entry = None
+        for row, (label, var) in enumerate([("First name", first_var),
+                                            ("Last name", last_var),
+                                            ("BGG username (optional)", bgg_var)], start=1):
+            ttk.Label(frame, text=label).grid(row=row, column=0, sticky="w", pady=4, padx=(0, 10))
+            entry = ttk.Entry(frame, textvariable=var, width=28)
+            entry.grid(row=row, column=1, sticky="we", pady=4)
+            entry.bind("<Return>", lambda *_: save())
+            if first_entry is None:
+                first_entry = entry
+
+        def save() -> None:
+            first, last, bgg = first_var.get().strip(), last_var.get().strip(), bgg_var.get().strip()
+            with db.connect() as c:
+                error = db.validate_friend(c, first, last, exclude_id=user["id"])
+                if not error:
+                    db.update_user(c, user["id"], first, last, bgg)
+            if error:
+                messagebox.showerror("Can't save friend", error, parent=win)
+                return
+            win.destroy()
+            self.refresh_all()
+            self.status(f"Updated {first} {last}.")
+
+        btn_row = ttk.Frame(frame)
+        btn_row.grid(row=4, column=0, columnspan=2, sticky="e", pady=(12, 0))
+        ttk.Button(btn_row, text="Cancel", command=win.destroy).pack(side="left", padx=(0, 6))
+        ttk.Button(btn_row, text="Save", command=save).pack(side="left")
+        win.bind("<Escape>", lambda *_: win.destroy())
+        first_entry.focus_set()
+        win.grab_set()
 
     def on_delete_member(self) -> None:
         sel = self.members_tree.selection()
@@ -3730,16 +3888,10 @@ class App(tk.Tk):
                 except OSError:
                     pass
 
-    def _reset_claim_if_orphaned(self) -> None:
-        """Drop the device-owner claim if that member no longer owns any
-        collection (e.g. it was just cleared), so a new collection can be claimed."""
-        mid = self.settings.get("claimed_member_id")
-        if not mid:
-            return
-        with db.connect() as c:
-            still_owns = db.owned_collection_ids(c, mid)
-        if not still_owns:
-            self.settings.pop("claimed_member_id", None)
+    def _reset_claim_if_cleared(self, cleared_usernames: list) -> None:
+        """Drop the claimed-collection setting if that collection was just
+        cleared, so a new collection can be claimed."""
+        if db.reset_claim_if_cleared(self.settings, cleared_usernames):
             config.save(self.settings)
 
     def _forget_bgg_username_if_cleared(self, cleared_usernames: list) -> None:
@@ -3764,7 +3916,7 @@ class App(tk.Tk):
         with db.connect() as c:
             deleted = db.clear_collections(c, [col["id"]])
         self._drop_images(deleted)
-        self._reset_claim_if_orphaned()
+        self._reset_claim_if_cleared([col["bgg_username"]])
         self._forget_bgg_username_if_cleared([col["bgg_username"]])
         self._image_cache.clear()
         self._gradient_cache.clear()
@@ -3796,6 +3948,7 @@ class App(tk.Tk):
                 "SELECT bgg_username FROM collections WHERE bgg_username IS NOT NULL")]
             c.execute("DELETE FROM collections")
         self._drop_images(deleted)
+        self._reset_claim_if_cleared(cleared_usernames)
         self._forget_bgg_username_if_cleared(cleared_usernames)
         self._image_cache.clear()
         self._gradient_cache.clear()
@@ -3866,7 +4019,7 @@ class App(tk.Tk):
                         p.unlink()
                     except OSError:
                         pass
-            self._reset_claim_if_orphaned()
+            self._reset_claim_if_cleared(cleared_usernames)
             self._forget_bgg_username_if_cleared(cleared_usernames)
             self._image_cache.clear()
             self._gradient_cache.clear()
@@ -4079,29 +4232,28 @@ class App(tk.Tk):
             bg=C_BG, fg="#888", font=("Segoe UI", 8), padx=16, justify="left",
         ).pack(anchor="w", pady=(0, 8))
 
-        # Claim this collection as your own — disabled once you've claimed one.
-        already_claimed = bool(self.settings.get("claimed_member_id"))
-        _state = "disabled" if already_claimed else "normal"
+        # Claim this collection as your own — the checkbox alone is enough (no
+        # name, no Friend created); the claim is keyed by the BGG username being
+        # synced. Once one is claimed, the dialog just says which.
+        claimed = self.settings.get("claimed_bgg_username") or ""
         claim_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(dialog, text="Claim this collection as my own",
-                        variable=claim_var, state=_state).pack(
-                            anchor="w", padx=16, pady=(2, 0))
-        _name_row = ttk.Frame(dialog)
-        _name_row.pack(padx=16, pady=(2, 2), anchor="w")
-        first_var = tk.StringVar()
-        last_var  = tk.StringVar()
-        ttk.Entry(_name_row, textvariable=first_var, width=15,
-                  state=_state).pack(side="left")
-        ttk.Entry(_name_row, textvariable=last_var, width=16,
-                  state=_state).pack(side="left", padx=(6, 0))
-        tk.Label(
-            dialog,
-            text=("You've already claimed a collection."
-                  if already_claimed else
-                  "Adds you as a member and restricts check-outs so only you can\n"
-                  "borrow games from this collection."),
-            bg=C_BG, fg="#888", font=("Segoe UI", 8), padx=16, justify="left",
-        ).pack(anchor="w", pady=(0, 8))
+        if claimed:
+            tk.Label(
+                dialog,
+                text=f"You've already claimed \"{claimed}\" as your own collection.",
+                bg=C_BG, fg="#888", font=("Segoe UI", 8), padx=16, justify="left",
+            ).pack(anchor="w", pady=(2, 8))
+        else:
+            ttk.Checkbutton(dialog, text="Claim this collection as my own",
+                            variable=claim_var).pack(anchor="w", padx=16, pady=(2, 0))
+            tk.Label(
+                dialog,
+                text="Marks this synced collection as yours, so check-outs are only\n"
+                     "offered for games from it. Doesn't add a friend — that only\n"
+                     "happens when you add one directly or type a new name while\n"
+                     "checking out or logging a play.",
+                bg=C_BG, fg="#888", font=("Segoe UI", 8), padx=16, justify="left",
+            ).pack(anchor="w", pady=(0, 8))
 
         btn_frame = ttk.Frame(dialog)
         btn_frame.pack(padx=16, pady=(4, 14), fill="x")
@@ -4113,15 +4265,7 @@ class App(tk.Tk):
             if not uname:
                 messagebox.showerror("Username required", "Enter your BGG username.", parent=dialog)
                 return
-            owner_first = first_var.get().strip()
-            owner_last  = last_var.get().strip()
             claim = claim_var.get()
-            if claim and not (owner_first or owner_last):
-                messagebox.showerror(
-                    "Name required",
-                    "Enter your name to claim this collection as your own.",
-                    parent=dialog)
-                return
             self.settings["bgg_username"] = uname
             self.settings.pop("bgg_password", None)
             config.save(self.settings)
@@ -4133,9 +4277,7 @@ class App(tk.Tk):
             threading.Thread(
                 target=self._import_from_username_bg,
                 args=(uname, tok, pwd or None),
-                kwargs={"owner_first": owner_first if claim else "",
-                        "owner_last":  owner_last if claim else "",
-                        "claim_as_mine": claim},
+                kwargs={"claim_as_mine": claim},
                 daemon=True,
             ).start()
 
@@ -4149,7 +4291,6 @@ class App(tk.Tk):
 
     def _import_from_username_bg(self, username: str, token: str,
                                    password: Optional[str] = None,
-                                   owner_first: str = "", owner_last: str = "",
                                    claim_as_mine: bool = False) -> None:
         try:
             opener = None
@@ -4192,24 +4333,13 @@ class App(tk.Tk):
 
             self._save_games_to_db(games, collection_username=username)
 
-            # Optionally add the importer as a member, claim this collection for
-            # them, and mark them as this device's owner ("me") so the UI only
-            # offers check-outs from their own collection.
-            if claim_as_mine and (owner_first or owner_last):
-                with db.connect() as c:
-                    cid = db.collection_id_for_username(c, username)
-                    if cid:
-                        existing = next(
-                            (u for u in db.list_users(c)
-                             if u["first_name"].strip().lower() == owner_first.lower()
-                             and u["last_name"].strip().lower() == owner_last.lower()),
-                            None,
-                        )
-                        uid = existing["id"] if existing else db.add_user(
-                            c, owner_first, owner_last)
-                        db.claim_collection(c, cid, uid)
-                        self.settings["claimed_member_id"] = uid
-                        config.save(self.settings)
+            # Optionally claim this collection as this device's own, so the UI
+            # only offers check-outs for games in it. The BGG username being
+            # synced is the identity — no name is asked for and no Friend is
+            # created. An existing claim is kept.
+            if claim_as_mine and not self.settings.get("claimed_bgg_username"):
+                self.settings["claimed_bgg_username"] = username
+                config.save(self.settings)
 
             # Refresh everything (dashboard tiles, games, members, history,
             # plays) — not just the games grid — so the stat counts update too.
@@ -5355,6 +5485,19 @@ class App(tk.Tk):
         if game["own"] != 1:
             messagebox.showerror("Not owned", "Only games you own can be checked out.")
             return
+        # This device has claimed its synced collection as "mine": only games
+        # in that collection may be checked out here (whichever entry point —
+        # card button, right-click menu, double-click — got us here).
+        claimed = self.settings.get("claimed_bgg_username")
+        if claimed:
+            with db.connect() as c:
+                in_claimed = db.game_in_username_collection(c, claimed, game["bgg_id"])
+            if not in_claimed:
+                messagebox.showinfo(
+                    "Not in your collection",
+                    f"\"{game['name']}\" isn't in your claimed collection "
+                    f"(\"{claimed}\"), so it can't be checked out here.")
+                return
         with db.connect() as c:
             all_users = db.list_users(c)
             allowed = db.members_allowed_to_checkout(c, game["bgg_id"])
@@ -6678,6 +6821,9 @@ class App(tk.Tk):
                     self._placeholder_img = None
                     self.settings = config.load()
                     db.init_db()          # apply any pending migrations
+                    with db.connect() as c:   # backup from an older version: claimed_member_id
+                        if db.migrate_claimed_member(c, self.settings):
+                            config.save(self.settings)
                     self.refresh_all()
                     self.status("Library imported successfully.")
                     messagebox.showinfo(
@@ -6698,8 +6844,10 @@ class App(tk.Tk):
 
     def _import_json_backup(self, src_path: str) -> None:
         """Merge-import a JSON backup (from Export for Mobile, or the mobile
-        app's own export) — adds new members/plays/loans/customisations
-        without touching existing data. Mirrors mobile's importBackup()."""
+        app's own export). Adds whatever is missing — games, friends,
+        collections and their membership, plays, loans, game notes/ratings —
+        without touching existing data. Mirrors mobile's importBackup(); the
+        merge itself is shared with the web app (db.restore_backup_tables)."""
         import json as _json
 
         try:
@@ -6709,7 +6857,7 @@ class App(tk.Tk):
             messagebox.showerror("Invalid file", f"Could not read the file:\n{exc}")
             return
 
-        if not data.get("version") or not data.get("members"):
+        if not db.is_backup_payload(data):
             messagebox.showerror(
                 "Invalid file",
                 "This doesn't appear to be a Board Game Library backup.",
@@ -6718,113 +6866,24 @@ class App(tk.Tk):
 
         if not messagebox.askyesno(
             "Import Backup",
-            "This will ADD any members, plays, loans and game notes/ratings from "
-            "this file that don't already exist locally.\n\n"
+            "This will ADD any games, friends, collections, plays, loans and game "
+            "notes/ratings from this file that don't already exist locally.\n\n"
             "Existing data is not changed or removed. Continue?",
         ):
             return
 
         def _bg():
-            counts = {"members": 0, "plays": 0, "loans": 0, "customisations": 0, "skipped": 0}
             try:
                 with db.connect() as c:
-                    # ── Members — map old ids -> local ids so loans/plays resolve ──
-                    user_id_map: dict[int, int] = {}
-                    for m in data.get("members") or []:
-                        row = c.execute(
-                            "SELECT id FROM users WHERE first_name = ? AND last_name = ?",
-                            (m.get("first_name"), m.get("last_name")),
-                        ).fetchone()
-                        if row:
-                            user_id_map[m["id"]] = row["id"]
-                            counts["skipped"] += 1
-                        else:
-                            new_id = db.add_user(c, m.get("first_name") or "", m.get("last_name") or "")
-                            user_id_map[m["id"]] = new_id
-                            counts["members"] += 1
-
-                    # ── Plays ────────────────────────────────────────────────────
-                    for p in data.get("plays") or []:
-                        exists = c.execute(
-                            "SELECT id FROM plays WHERE game_id = ? AND played_at = ?",
-                            (p.get("game_id"), p.get("played_at")),
-                        ).fetchone()
-                        if exists:
-                            counts["skipped"] += 1
-                            continue
-                        if not db.get_game(c, p.get("game_id")):
-                            counts["skipped"] += 1
-                            continue
-                        db.log_play(
-                            c, p["game_id"], p["played_at"],
-                            p.get("player_names") or "", p.get("winner") or "",
-                            p.get("notes") or "",
-                            duration_minutes=p.get("duration_minutes"),
-                            scores=p.get("scores"),
-                        )
-                        counts["plays"] += 1
-
-                    # ── Loans ────────────────────────────────────────────────────
-                    for l in data.get("loans") or []:
-                        mapped_user_id = user_id_map.get(l.get("user_id"), l.get("user_id"))
-                        exists = c.execute(
-                            "SELECT id FROM loans WHERE game_id = ? AND checked_out_at = ?",
-                            (l.get("game_id"), l.get("checked_out_at")),
-                        ).fetchone()
-                        if exists:
-                            counts["skipped"] += 1
-                            continue
-                        if not db.get_game(c, l.get("game_id")):
-                            counts["skipped"] += 1
-                            continue
-                        c.execute(
-                            "INSERT INTO loans (game_id, user_id, checked_out_at, returned_at, due_date, notes) "
-                            "VALUES (?, ?, ?, ?, ?, ?)",
-                            (l["game_id"], mapped_user_id, l["checked_out_at"],
-                             l.get("returned_at"), l.get("due_date"), l.get("notes")),
-                        )
-                        counts["loans"] += 1
-
-                    # ── Game customisations ─────────────────────────────────────
-                    import base64 as _base64
-                    for cu in data.get("customisations") or []:
-                        if not db.get_game(c, cu.get("bgg_id")):
-                            counts["skipped"] += 1
-                            continue
-                        image_path = None
-                        if cu.get("photo_base64"):
-                            try:
-                                ext = cu.get("photo_ext") or "jpg"
-                                dest = IMAGES_DIR / f"{cu['bgg_id']}.{ext}"
-                                IMAGES_DIR.mkdir(parents=True, exist_ok=True)
-                                dest.write_bytes(_base64.b64decode(cu["photo_base64"]))
-                                image_path = str(dest)
-                            except (OSError, ValueError):
-                                pass  # Couldn't write the photo -- keep any existing one.
-                        c.execute(
-                            "UPDATE games SET tags=?, is_favorite=?, has_insert=?, "
-                            "my_comment=?, my_rating=?, best_players=?, is_cooperative=?, "
-                            "manual_fields=?, image_path=COALESCE(?, image_path), "
-                            "own=COALESCE(?, own), bgg_status=COALESCE(?, bgg_status) WHERE bgg_id=?",
-                            (cu.get("tags"), cu.get("is_favorite") or 0, cu.get("has_insert") or 0,
-                             cu.get("my_comment"), cu.get("my_rating"), cu.get("best_players"),
-                             cu.get("is_cooperative"), cu.get("manual_fields"), image_path,
-                             cu.get("own"), cu.get("bgg_status"),
-                             cu["bgg_id"]),
-                        )
-                        counts["customisations"] += 1
+                    counts = db.restore_backup_tables(c, data, images_dir=IMAGES_DIR)
 
                 def _finish():
+                    self._image_cache.clear()
+                    self._placeholder_img = None
+                    self._collection_sig = None
                     self.refresh_all()
                     self.status("Backup imported.")
-                    messagebox.showinfo(
-                        "Import complete",
-                        f"Members: +{counts['members']}\n"
-                        f"Plays: +{counts['plays']}\n"
-                        f"Loans: +{counts['loans']}\n"
-                        f"Customisations: {counts['customisations']}\n"
-                        f"Skipped (already existed): {counts['skipped']}",
-                    )
+                    messagebox.showinfo("Import complete", db.summarize_import(counts))
 
                 self.after(0, _finish)
             except Exception as exc:
@@ -6838,8 +6897,10 @@ class App(tk.Tk):
         threading.Thread(target=_bg, daemon=True).start()
 
     def on_export_for_mobile(self) -> None:
-        """Export members, plays, loans and customisations as a JSON file
-        that can be imported on the mobile app via Dashboard → Import Backup."""
+        """Export the whole library (games, collections, friends, plays, loans
+        and per-game customisations) as a version-5 JSON file that can be
+        imported on the mobile app via Dashboard → Import Backup. Device-local
+        image paths are never written; custom cover photos are embedded."""
         import json as _json
 
         default_name = f"bgl-backup-{datetime.now():%Y-%m-%d}.json"
@@ -6853,69 +6914,22 @@ class App(tk.Tk):
             return
 
         with db.connect() as c:
-            members = [dict(r) for r in c.execute(
-                "SELECT * FROM users ORDER BY id").fetchall()]
-
-            plays = [dict(r) for r in c.execute(
-                """SELECT plays.*, games.name AS game_name
-                   FROM plays
-                   LEFT JOIN games ON games.bgg_id = plays.game_id
-                   ORDER BY plays.played_at DESC""").fetchall()]
-
-            loans = [dict(r) for r in c.execute(
-                """SELECT loans.*, games.name AS game_name,
-                          users.first_name, users.last_name
-                   FROM loans
-                   LEFT JOIN games ON games.bgg_id = loans.game_id
-                   LEFT JOIN users ON users.id = loans.user_id
-                   ORDER BY loans.checked_out_at DESC""").fetchall()]
-
-            customisations = [dict(r) for r in c.execute(
-                """SELECT bgg_id, name, tags, is_favorite, has_insert,
-                          my_comment, my_rating, best_players, is_cooperative,
-                          manual_fields, image_path, own, bgg_status
-                   FROM games
-                   WHERE tags IS NOT NULL OR is_favorite = 1 OR has_insert = 1
-                      OR my_comment IS NOT NULL OR my_rating IS NOT NULL
-                      OR best_players IS NOT NULL OR is_cooperative IS NOT NULL
-                      OR image_path IS NOT NULL OR own = 0
-                      OR (bgg_status IS NOT NULL AND bgg_status != 'own')
-                   """).fetchall()]
-
-        # Embed any custom cover photo as base64 -- the raw image_path is a
-        # device-local absolute path that means nothing on another machine.
-        import base64 as _base64
-        for cu in customisations:
-            path = cu.pop("image_path", None)
-            if path and os.path.isfile(path):
-                try:
-                    with open(path, "rb") as imgf:
-                        cu["photo_base64"] = _base64.b64encode(imgf.read()).decode("ascii")
-                    cu["photo_ext"] = os.path.splitext(path)[1].lstrip(".").lower() or "jpg"
-                except OSError:
-                    pass  # Photo file unreadable -- skip it, don't fail the whole export.
-
-        payload = {
-            "version": 3,
-            "exported_at": db.now_iso(),
-            "members": members,
-            "plays": plays,
-            "loans": loans,
-            "customisations": customisations,
-        }
+            payload = db.build_backup_payload(c)
 
         try:
             with open(dest_path, "w", encoding="utf-8") as f:
                 _json.dump(payload, f, indent=2, default=str)
-            n_m = len(members)
-            n_p = len(plays)
-            n_l = len(loans)
+            n_g = len(payload["games"])
+            n_m = len(payload["members"])
+            n_p = len(payload["plays"])
+            n_l = len(payload["loans"])
             p = dest_path
             self.status(f"Exported for mobile: {Path(p).name}")
             messagebox.showinfo(
                 "Export complete",
                 f"Saved: {p}\n\n"
-                f"  {n_m} member{'s' if n_m != 1 else ''}\n"
+                f"  {n_g} game{'s' if n_g != 1 else ''}\n"
+                f"  {n_m} friend{'s' if n_m != 1 else ''}\n"
                 f"  {n_p} play record{'s' if n_p != 1 else ''}\n"
                 f"  {n_l} loan record{'s' if n_l != 1 else ''}\n\n"
                 "Transfer this file to your phone, then open the\n"

@@ -42,14 +42,14 @@
        label, matching the desktop app's equivalent popup. #}
     <details class="bstatus-details">
       <summary class="filter-select bstatus-summary" id="bstatus-summary">
-        {{ 'Owned' if bstatuses == ['owned'] else (bstatuses[0] if bstatuses|length == 1 else bstatuses|length ~ ' selected') }}
+        {% if bstatuses|length == 1 %}{{ {'all': 'All', 'owned': 'Owned'}.get(bstatuses[0], bgg_status_labels.get(bstatuses[0], bstatuses[0])) }}{% else %}{{ bstatuses|length }} selected{% endif %}
       </summary>
       <div class="bstatus-menu" aria-label="Filter by BGG collection status">
         <label class="bstatus-option">
-          <input type="checkbox" name="bstatus" value="owned" {% if 'owned' in bstatuses %}checked{% endif %}> Owned
+          <input type="checkbox" name="bstatus" value="all" {% if 'all' in bstatuses %}checked{% endif %}> All
         </label>
         <label class="bstatus-option">
-          <input type="checkbox" name="bstatus" value="all" {% if 'all' in bstatuses %}checked{% endif %}> All statuses
+          <input type="checkbox" name="bstatus" value="owned" {% if 'owned' in bstatuses %}checked{% endif %}> Owned
         </label>
         {% for f in bgg_status_flags if f != 'own' %}
           <label class="bstatus-option" style="background:{{ bgg_status_colors[f].bg }};color:{{ bgg_status_colors[f].text }}">
@@ -69,8 +69,9 @@
 </div>
 
 <script>
-// Collection-status checklist: "All" is exclusive with every other option —
-// checking it clears the rest, checking anything else clears it — and the
+// Collection-status checklist: "All" (the default) is exclusive with every
+// other option — checking it clears the rest, checking anything else clears
+// it, and deselecting everything falls back to it — and the
 // <summary> label reflects the current selection, matching the desktop
 // app's equivalent popup. Submission itself needs none of this; plain
 // checkboxes sharing name="bstatus" already submit as repeated params.
@@ -83,7 +84,8 @@
 
   function updateSummary() {
     const checked = boxes.filter(b => b.checked);
-    if (checked.length === 0) { allBox && (allBox.checked = false); boxes.find(b => b.value === 'owned').checked = true; }
+    // Nothing selected is never valid — fall back to the default, "All".
+    if (checked.length === 0 && allBox) allBox.checked = true;
     const now = boxes.filter(b => b.checked);
     const labels = now.map(b => b.parentElement.textContent.trim());
     summary.textContent = now.length === 1 ? labels[0] : `${now.length} selected`;
@@ -125,6 +127,7 @@
   <form method="get" action="/games" class="compare-form">
     <input type="hidden" name="q" value="{{ q }}">
     <input type="hidden" name="status" value="{{ status }}">
+    {% for b in bstatuses %}<input type="hidden" name="bstatus" value="{{ b }}">{% endfor %}
     {% if tag_filter %}<input type="hidden" name="tag" value="{{ tag_filter }}">{% endif %}
     {% if show_exp %}<input type="hidden" name="exp" value="1">{% endif %}
     {% if coop and coop != 'any' %}<input type="hidden" name="coop" value="{{ coop }}">{% endif %}

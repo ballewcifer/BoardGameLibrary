@@ -222,9 +222,7 @@ document.addEventListener('DOMContentLoaded', () => {
 function applyTheme(name) {
   const t = (window.BGL_THEMES || {})[name];
   if (!t) return;
-  const r = document.documentElement;
-  r.style.setProperty('--navy', t[0]);
-  r.style.setProperty('--navy-d', t[1]);
+  window.bglSetThemeVars(t);
   try { localStorage.setItem('bgl_theme', name); } catch (e) {}
   document.querySelectorAll('.theme-swatch').forEach(el => {
     el.classList.toggle('active', el.dataset.theme === name);

@@ -6,9 +6,7 @@ Then open  http://localhost:5000  on any device on the same Wi-Fi.
 """
 from __future__ import annotations
 
-import base64
 import json
-import os
 import random
 import sys
 import threading
@@ -37,6 +35,10 @@ db.init_db()
 with db.connect() as _c:
     _u = _config.load().get("bgg_username", "")
     db.ensure_collection_migration(_c, default_username=_u, default_name=_u or "My Collection")
+    # One-time: the old claimed_member_id (a Friend) becomes claimed_bgg_username.
+    _s = _config.load()
+    if db.migrate_claimed_member(_c, _s):
+        _config.save(_s)
 
 # ── Background sync state ─────────────────────────────────────────────────────
 _sync_lock   = threading.Lock()
@@ -120,10 +122,11 @@ def games():
     status     = request.args.get("status", "all")   # all | available | out | favs
     coop       = request.args.get("coop", "any")     # any | coop | competitive
     # Multi-select: any combination of "owned" + a bgg.STATUS_FLAGS value, or
-    # just ["all"]. Repeated query params (?bstatus=wishlist&bstatus=fortrade)
+    # just ["all"] (the default, so newly synced wishlist / for-trade items
+    # aren't hidden). Repeated query params (?bstatus=wishlist&bstatus=fortrade)
     # carry the selection; db.list_games()/count_games() combine them (see
     # db._status_where()).
-    bstatuses  = request.args.getlist("bstatus") or ["owned"]
+    bstatuses  = request.args.getlist("bstatus") or ["all"]
     show_exp   = request.args.get("exp", "") == "1"
     collection = request.args.get("collection", "all")
     compare    = request.args.get("compare", "off")          # off | shared | only | diff
@@ -327,11 +330,9 @@ def clear_collections():
         deleted = db.clear_collections(c, ids)
         s = _config.load()
         changed = False
-        # If the device owner's collection was just cleared, drop the claim so a
-        # new collection can be claimed.
-        mid = s.get("claimed_member_id")
-        if mid and not db.owned_collection_ids(c, mid):
-            s.pop("claimed_member_id", None)
+        # If the device's claimed collection was just cleared, drop the claim
+        # so a new collection can be claimed.
+        if db.reset_claim_if_cleared(s, cleared_usernames):
             changed = True
         username = s.get("bgg_username")
         if username and username in cleared_usernames:
@@ -363,10 +364,10 @@ def game_detail(bgg_id):
         # collection that contains it, plus members who claimed nothing).
         allowed   = db.members_allowed_to_checkout(c, bgg_id)
         users     = [_row_to_dict(r) for r in db.list_users(c) if r["id"] in allowed]
-        # If this device's owner has claimed a collection, only their own games
-        # may be checked out here.
-        my_id = _config.load().get("claimed_member_id")
-        can_checkout_here = (not my_id) or db.user_can_checkout(c, my_id, bgg_id)
+        # If this device has claimed its synced collection as its own, only
+        # games in that collection may be checked out here.
+        claimed = _config.load().get("claimed_bgg_username")
+        can_checkout_here = (not claimed) or db.game_in_username_collection(c, claimed, bgg_id)
         base_game = _row_to_dict(db.get_game(c, game["base_game_id"])) if game.get("base_game_id") else None
         owned_expansions = [_row_to_dict(r) for r in db.list_expansions_of(c, bgg_id)]
 
@@ -404,6 +405,11 @@ def checkout(bgg_id):
             game = db.get_game(c, bgg_id)
             if not game or game["own"] != 1:
                 flash("Only games you own can be checked out.", "error")
+                return redirect(url_for("game_detail", bgg_id=bgg_id))
+            claimed = _config.load().get("claimed_bgg_username")
+            if claimed and not db.game_in_username_collection(c, claimed, bgg_id):
+                flash("This game isn't in your claimed collection, so it can't be "
+                      "checked out here.", "error")
                 return redirect(url_for("game_detail", bgg_id=bgg_id))
             # New name, not a current friend — auto-create them, same as
             # logging a play with a new player name does.
@@ -507,12 +513,32 @@ def members():
 def add_member():
     first = request.form.get("first_name", "").strip()
     last  = request.form.get("last_name",  "").strip()
-    if not first or not last:
-        flash("First and last name are required.", "error")
-        return redirect(url_for("members"))
+    bgg   = request.form.get("bgg_username", "").strip()
     with db.connect() as c:
-        db.add_user(c, first, last)
+        error = db.validate_friend(c, first, last)
+        if error:
+            flash(error, "error")
+            return redirect(url_for("members"))
+        db.add_user(c, first, last, bgg)
     flash(f"Added {first} {last}.", "success")
+    return redirect(url_for("members"))
+
+
+@app.route("/members/<int:user_id>/edit", methods=["POST"])
+def edit_member(user_id):
+    first = request.form.get("first_name", "").strip()
+    last  = request.form.get("last_name",  "").strip()
+    bgg   = request.form.get("bgg_username", "").strip()
+    with db.connect() as c:
+        if c.execute("SELECT 1 FROM users WHERE id = ?", (user_id,)).fetchone() is None:
+            flash("That friend no longer exists.", "error")
+            return redirect(url_for("members"))
+        error = db.validate_friend(c, first, last, exclude_id=user_id)
+        if error:
+            flash(error, "error")
+            return redirect(url_for("members"))
+        db.update_user(c, user_id, first, last, bgg)
+    flash(f"Updated {first} {last}.", "success")
     return redirect(url_for("members"))
 
 
@@ -847,7 +873,7 @@ def add_game_manual():
 # BGG Sync
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _run_sync(owner_first: str = "", owner_last: str = "", claim_as_mine: bool = False):
+def _run_sync(claim_as_mine: bool = False):
     global _sync_status
     settings = _settings()
     username = settings.get("bgg_username", "")
@@ -915,21 +941,14 @@ def _run_sync(owner_first: str = "", owner_last: str = "", claim_as_mine: bool =
                 all_ids = [g.bgg_id for g in games]
                 db.replace_collection_games(c, cid, all_ids)
 
-                # Optionally add the importer as a member, claim the collection
-                # for them, and mark them as this device's owner ("me").
-                if claim_as_mine and (owner_first or owner_last):
-                    existing = next(
-                        (u for u in db.list_users(c)
-                         if u["first_name"].strip().lower() == owner_first.lower()
-                         and u["last_name"].strip().lower() == owner_last.lower()),
-                        None,
-                    )
-                    uid = existing["id"] if existing else db.add_user(
-                        c, owner_first, owner_last)
-                    db.claim_collection(c, cid, uid)
+                # Optionally claim this collection as this device's own. The
+                # BGG username being synced is the identity — no name is asked
+                # for and no Friend is created. An existing claim is kept.
+                if claim_as_mine:
                     s = _config.load()
-                    s["claimed_member_id"] = uid
-                    _config.save(s)
+                    if not s.get("claimed_bgg_username"):
+                        s["claimed_bgg_username"] = username
+                        _config.save(s)
 
         _sync_status["message"] = f"Sync complete — {len(games)} games."
     except Exception as e:
@@ -947,8 +966,6 @@ def sync():
         s = _config.load()
         s["bgg_username"] = new_username
         _config.save(s)
-    owner_first = request.form.get("owner_first", "").strip()
-    owner_last  = request.form.get("owner_last", "").strip()
     claim_as_mine = request.form.get("claim_as_mine") == "1"
     with _sync_lock:
         if _sync_status["running"]:
@@ -961,8 +978,7 @@ def sync():
         _sync_status["message"] = "Starting sync…"
         _sync_status["error"]   = None
     threading.Thread(target=_run_sync,
-                     kwargs={"owner_first": owner_first, "owner_last": owner_last,
-                             "claim_as_mine": claim_as_mine},
+                     kwargs={"claim_as_mine": claim_as_mine},
                      daemon=True).start()
     flash("BGG sync started — refresh in a moment.", "info")
     return redirect(url_for("dashboard"))
@@ -981,52 +997,10 @@ def sync_status():
 
 @app.route("/backup/export")
 def backup_export():
+    # Version-5 backup: the whole library (see db.build_backup_payload) —
+    # games, collections + membership, friends, plays, loans, customisations.
     with db.connect() as c:
-        members = [dict(r) for r in c.execute("SELECT * FROM users ORDER BY id").fetchall()]
-        plays = [dict(r) for r in c.execute(
-            """SELECT plays.*, games.name AS game_name
-               FROM plays
-               LEFT JOIN games ON games.bgg_id = plays.game_id
-               ORDER BY plays.played_at DESC""").fetchall()]
-        loans = [dict(r) for r in c.execute(
-            """SELECT loans.*, games.name AS game_name,
-                      users.first_name, users.last_name
-               FROM loans
-               LEFT JOIN games ON games.bgg_id = loans.game_id
-               LEFT JOIN users ON users.id = loans.user_id
-               ORDER BY loans.checked_out_at DESC""").fetchall()]
-        customisations = [dict(r) for r in c.execute(
-            """SELECT bgg_id, name, tags, is_favorite, has_insert,
-                      my_comment, my_rating, best_players, is_cooperative,
-                      manual_fields, image_path, own, bgg_status
-               FROM games
-               WHERE tags IS NOT NULL OR is_favorite = 1 OR has_insert = 1
-                  OR my_comment IS NOT NULL OR my_rating IS NOT NULL
-                  OR best_players IS NOT NULL OR is_cooperative IS NOT NULL
-                  OR image_path IS NOT NULL OR own = 0
-                  OR (bgg_status IS NOT NULL AND bgg_status != 'own')
-               """).fetchall()]
-
-    # Embed any custom cover photo as base64 -- the raw image_path is a
-    # server-local absolute path that means nothing once restored elsewhere.
-    for cu in customisations:
-        path = cu.pop("image_path", None)
-        if path and os.path.isfile(path):
-            try:
-                with open(path, "rb") as imgf:
-                    cu["photo_base64"] = base64.b64encode(imgf.read()).decode("ascii")
-                cu["photo_ext"] = os.path.splitext(path)[1].lstrip(".").lower() or "jpg"
-            except OSError:
-                pass  # Photo file unreadable -- skip it, don't fail the whole export.
-
-    payload = {
-        "version": 3,
-        "exported_at": db.now_iso(),
-        "members": members,
-        "plays": plays,
-        "loans": loans,
-        "customisations": customisations,
-    }
+        payload = db.build_backup_payload(c)
     body = json.dumps(payload, indent=2, default=str)
     filename = f"bgl-backup-{datetime.now():%Y-%m-%d}.json"
     return Response(
@@ -1047,92 +1021,20 @@ def backup_import():
     except Exception:
         flash("Could not read that file — is it a valid backup JSON?", "error")
         return redirect(url_for("dashboard"))
-    if not data.get("version") or not data.get("members"):
+    if not db.is_backup_payload(data):
         flash("This doesn't appear to be a Board Game Library backup.", "error")
         return redirect(url_for("dashboard"))
 
-    counts = {"members": 0, "plays": 0, "loans": 0, "customisations": 0, "skipped": 0}
-    with db.connect() as c:
-        # Members — map old ids -> local ids so loans/plays resolve correctly.
-        user_id_map: dict[int, int] = {}
-        for m in data.get("members") or []:
-            row = c.execute(
-                "SELECT id FROM users WHERE first_name = ? AND last_name = ?",
-                (m.get("first_name"), m.get("last_name")),
-            ).fetchone()
-            if row:
-                user_id_map[m["id"]] = row["id"]
-                counts["skipped"] += 1
-            else:
-                new_id = db.add_user(c, m.get("first_name") or "", m.get("last_name") or "")
-                user_id_map[m["id"]] = new_id
-                counts["members"] += 1
+    # Merge: adds games missing locally, then friends, collections, plays, loans
+    # and per-game customisations; never overwrites an existing game row.
+    try:
+        with db.connect() as c:
+            counts = db.restore_backup_tables(c, data, images_dir=IMAGES_DIR)
+    except Exception as e:
+        flash(f"Import failed: {e}", "error")
+        return redirect(url_for("dashboard"))
 
-        for p in data.get("plays") or []:
-            exists = c.execute(
-                "SELECT id FROM plays WHERE game_id = ? AND played_at = ?",
-                (p.get("game_id"), p.get("played_at")),
-            ).fetchone()
-            if exists or not db.get_game(c, p.get("game_id")):
-                counts["skipped"] += 1
-                continue
-            db.log_play(
-                c, p["game_id"], p["played_at"],
-                p.get("player_names") or "", p.get("winner") or "", p.get("notes") or "",
-                duration_minutes=p.get("duration_minutes"), scores=p.get("scores"),
-            )
-            counts["plays"] += 1
-
-        for l in data.get("loans") or []:
-            mapped_user_id = user_id_map.get(l.get("user_id"), l.get("user_id"))
-            exists = c.execute(
-                "SELECT id FROM loans WHERE game_id = ? AND checked_out_at = ?",
-                (l.get("game_id"), l.get("checked_out_at")),
-            ).fetchone()
-            if exists or not db.get_game(c, l.get("game_id")):
-                counts["skipped"] += 1
-                continue
-            c.execute(
-                "INSERT INTO loans (game_id, user_id, checked_out_at, returned_at, due_date, notes) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (l["game_id"], mapped_user_id, l["checked_out_at"],
-                 l.get("returned_at"), l.get("due_date"), l.get("notes")),
-            )
-            counts["loans"] += 1
-
-        for cu in data.get("customisations") or []:
-            if not db.get_game(c, cu.get("bgg_id")):
-                counts["skipped"] += 1
-                continue
-            image_path = None
-            if cu.get("photo_base64"):
-                try:
-                    ext = cu.get("photo_ext") or "jpg"
-                    IMAGES_DIR.mkdir(parents=True, exist_ok=True)
-                    dest = IMAGES_DIR / f"{cu['bgg_id']}.{ext}"
-                    dest.write_bytes(base64.b64decode(cu["photo_base64"]))
-                    image_path = str(dest)
-                except (OSError, ValueError):
-                    pass  # Couldn't write the photo -- keep any existing one.
-            c.execute(
-                "UPDATE games SET tags=?, is_favorite=?, has_insert=?, "
-                "my_comment=?, my_rating=?, best_players=?, is_cooperative=?, "
-                "manual_fields=?, image_path=COALESCE(?, image_path), "
-                "own=COALESCE(?, own), bgg_status=COALESCE(?, bgg_status) WHERE bgg_id=?",
-                (cu.get("tags"), cu.get("is_favorite") or 0, cu.get("has_insert") or 0,
-                 cu.get("my_comment"), cu.get("my_rating"), cu.get("best_players"),
-                 cu.get("is_cooperative"), cu.get("manual_fields"), image_path,
-                 cu.get("own"), cu.get("bgg_status"),
-                 cu["bgg_id"]),
-            )
-            counts["customisations"] += 1
-
-    flash(
-        f"Import complete — Members: +{counts['members']}, Plays: +{counts['plays']}, "
-        f"Loans: +{counts['loans']}, Customisations: {counts['customisations']}, "
-        f"Skipped (already existed): {counts['skipped']}",
-        "success",
-    )
+    flash("Import complete — " + db.summarize_import(counts, sep=", "), "success")
     return redirect(url_for("dashboard"))
 
 
@@ -1146,7 +1048,7 @@ def inject_globals():
         "now": datetime.now(),
         "sync_status": _sync_status,
         "bgg_username": _config.load().get("bgg_username", ""),
-        "already_claimed": bool(_config.load().get("claimed_member_id")),
+        "claimed_username": _config.load().get("claimed_bgg_username") or "",
     }
 
 

@@ -3,14 +3,16 @@
 [hidden] { display: none !important; }
 
 :root {
-  --navy:   #1a237e;
-  --navy-d: #0d1457;
+  --navy:   #1B4B79;
+  --navy-d: #13395F;
+  --stripe: #6C5AE2;
+  --c1: #1B4B79; --c2: #5B55CD; --c3: #226F72; --c4: #8D3EC6;
   --white:  #ffffff;
-  --bg:     #f4f6fa;
+  --bg:     #F3F6F9;
   --card:   #ffffff;
   --text:   #1a1a2e;
   --muted:  #6b7280;
-  --border: #e5e7eb;
+  --border: #EAEDF0;
   --red:    #b71c1c;
   --green:  #1b5e20;
   --gold:   #f0c674;
@@ -46,6 +48,7 @@ img { max-width: 100%; display: block; }
   position: fixed; top: 0; left: 0; right: 0; z-index: 100;
   height: var(--top-h);
   background: var(--navy);
+  border-bottom: 4px solid var(--stripe);
   color: var(--white);
   display: flex; align-items: center; justify-content: space-between;
   padding: 0 16px;
@@ -69,8 +72,8 @@ img { max-width: 100%; display: block; }
 .bottom-nav {
   position: fixed; bottom: 0; left: 0; right: 0; z-index: 100;
   height: var(--nav-h);
-  background: var(--white);
-  border-top: 1px solid var(--border);
+  background: var(--navy);
+  border-top: 1px solid rgba(255,255,255,.14);
   display: flex;
   padding-bottom: env(safe-area-inset-bottom);
   box-shadow: 0 -1px 8px rgba(0,0,0,.08);
@@ -79,20 +82,21 @@ img { max-width: 100%; display: block; }
   flex: 1; display: flex; flex-direction: column;
   align-items: center; justify-content: center;
   position: relative;
-  color: var(--muted); font-size: .7rem; gap: 3px;
+  color: rgba(255,255,255,.62); font-size: .7rem; gap: 3px;
   transition: color .15s;
   text-decoration: none;
 }
-.nav-item.active { color: var(--navy); }
+.nav-item.active { color: var(--white); }
 .nav-item.active::before {
   content: '';
   position: absolute;
   top: 0; left: 20%; right: 20%;
   height: 3px;
-  background: var(--navy);
+  background: var(--stripe);
   border-radius: 0 0 3px 3px;
 }
 .nav-icon { font-size: 1.25rem; line-height: 1; }
+.nav-item:not(.active) .nav-icon { filter: grayscale(1) brightness(1.7); opacity: .75; }
 .nav-label { font-size: .7rem; }
 .nav-item.active .nav-label { font-weight: 600; }
 
