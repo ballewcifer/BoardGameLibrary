@@ -36,7 +36,7 @@
         <td>{{ loan.game_name }}</td>
         <td>{{ loan.first_name }} {{ loan.last_name }}</td>
         <td class="center">{{ loan.checked_out_at|usdate }}</td>
-        <td class="center">{{ loan.due_date|usdate or '—' }}</td>
+        <td class="center">{{ loan.due_date|usdate or '—' }}{% if loan.overdue %} <span class="overdue-tag">⚠ Overdue</span>{% endif %}</td>
         <td>
           <form method="post" action="/history/{{ loan.id }}/return_now" style="display:inline">
             <button class="btn btn-sm btn-outline">Return</button>

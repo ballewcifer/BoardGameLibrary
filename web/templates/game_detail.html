@@ -12,7 +12,7 @@
   <div class="detail-info">
     <h1 class="detail-title">
       {{ game.name }}
-      {% if game.is_favorite %}<span class="fav-badge">★</span>{% endif %}
+      {% if game.is_favorite %}<span class="fav-badge"><span aria-hidden="true">★</span><span class="sr-only">Favorite</span></span>{% endif %}
       {% if game.is_expansion %}<span class="exp-badge">Expansion</span>{% endif %}
     </h1>
     <div class="detail-meta muted">

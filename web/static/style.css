@@ -182,6 +182,7 @@ img { max-width: 100%; display: block; }
 .data-table td { padding: 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
 .data-table tr:last-child td { border-bottom: none; }
 .data-table tr.overdue td { color: var(--red); }
+.overdue-tag { font-size: .72rem; font-weight: 700; color: var(--red); white-space: nowrap; }
 .data-table tr.history-row { cursor: pointer; }
 .data-table tr.history-row:hover td { background: var(--card); }
 .data-table th.sortable-col { cursor: pointer; user-select: none; }
@@ -279,13 +280,19 @@ img { max-width: 100%; display: block; }
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: 12px;
 }
-.game-card {
+/* .game-card-wrap is the actual grid cell / visual card box; .game-card (an
+   <a>) is the clickable content inside it. Split this way so the multi-select
+   checkbox can be a sibling of the link instead of nested inside it (an
+   interactive control inside an <a> is invalid HTML and confuses keyboard/
+   screen-reader focus order). */
+.game-card-wrap {
   background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow);
   overflow: hidden; display: flex; flex-direction: column; position: relative;
   transition: transform .15s, box-shadow .15s;
 }
-.game-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,.15); }
-.game-card--out  { outline: 2px solid var(--gold); }
+.game-card-wrap:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,.15); }
+.game-card-wrap.game-card--out { outline: 2px solid var(--gold); }
+.game-card { display: flex; flex-direction: column; flex: 1; min-height: 0; color: inherit; text-decoration: none; }
 
 .game-card-img  { height: 120px; background: #e8eaf6; overflow: hidden; flex-shrink: 0; }
 .game-card-img img { width: 100%; height: 100%; object-fit: cover; }

@@ -733,6 +733,7 @@ class App(tk.Tk):
             command=close,
         ).pack(side="right")
 
+        win.bind("<Escape>", lambda *_: win.destroy())
         win.grab_set()
 
     # ---------- style / theme ----------
@@ -929,7 +930,7 @@ class App(tk.Tk):
         menubar.add_cascade(label="Library", menu=lib_menu)
         lib_menu.add_command(label="Sync from BGG…", command=self.on_import_from_bgg)
         lib_menu.add_separator()
-        lib_menu.add_command(label="Add from BGG…", command=self.on_add_game)
+        lib_menu.add_command(label="Add Game from BGG…", command=self.on_add_game)
         lib_menu.add_command(label="Add Game Manually…", command=self.on_add_game_manual)
         lib_menu.add_command(label="Pick a Random Game…", command=self.on_random_game)
 
@@ -1068,14 +1069,17 @@ class App(tk.Tk):
         # previously reachable only via Library → Add Game…; mobile and web
         # both surface it as a standing button, so the desktop toolbar
         # should too rather than relying on the menu bar alone).
-        ttk.Button(bar, text="+ Add Manually", command=self.on_add_game_manual
-                   ).pack(side="right", padx=(0, SP["md"]))
-        ttk.Button(bar, text="+ Add from BGG", command=self.on_add_game
-                   ).pack(side="right", padx=(0, SP["md"]))
+        # Same width, bottom-aligned with the dropdowns beside them, and flush
+        # with the bar's right edge so they line up with the Sort control
+        # in the filter row below.
+        ttk.Button(bar, text="+ Add Game Manually", width=20, command=self.on_add_game_manual
+                   ).pack(side="right", anchor="s")
+        ttk.Button(bar, text="+ Add Game from BGG", width=20, command=self.on_add_game
+                   ).pack(side="right", anchor="s", padx=(0, SP["md"]))
 
-        # VIEW dropdown
+        # VIEW dropdown — a full gap before the buttons so they don't touch.
         view_field = ttk.Frame(bar, style="Filter.TFrame")
-        view_field.pack(side="right")
+        view_field.pack(side="right", padx=(0, SP["lg"]), anchor="s")
         ttk.Label(view_field, text="VIEW", style="Filter.TLabel").pack(anchor="w")
         self._view_var = tk.StringVar(value="Cards" if self._view_mode == "cards" else "Table")
         view_cb = ttk.Combobox(view_field, textvariable=self._view_var,
@@ -1088,13 +1092,13 @@ class App(tk.Tk):
         # SIZE dropdown — only visible in card view
         self._size_field = ttk.Frame(bar, style="Filter.TFrame")
         if self._view_mode == "cards":
-            self._size_field.pack(side="right", padx=(0, SP["md"]))
+            self._size_field.pack(side="right", padx=(0, SP["md"]), anchor="s")
         ttk.Label(self._size_field, text="SIZE", style="Filter.TLabel").pack(anchor="w")
         _sz_labels = {"sm": "Small", "md": "Medium", "lg": "Large"}
         _sz_keys   = {"Small": "sm", "Medium": "md", "Large": "lg"}
         self._size_var = tk.StringVar(value=_sz_labels[self._card_size])
         size_cb = ttk.Combobox(self._size_field, textvariable=self._size_var,
-                               values=["Small", "Medium", "Large"], state="readonly", width=7)
+                               values=["Small", "Medium", "Large"], state="readonly", width=8)
         size_cb.pack()
         size_cb.bind("<<ComboboxSelected>>",
                      lambda e: self._set_card_size(_sz_keys[self._size_var.get()]))
@@ -1199,6 +1203,20 @@ class App(tk.Tk):
         self._collection_status_colors_for = _collection_status_colors
         fgroup("COLLECTION", _make_collection_filter)
 
+        # The collection button is a plain tk.Button, a few pixels shorter than
+        # the ttk comboboxes beside it, which left its label sitting lower than
+        # the other filter labels. Pad it to the comboboxes' height once real
+        # sizes are known (measured, so it holds at any display scaling).
+        def _match_collection_button_height():
+            try:
+                want = self.tag_filter_cb.winfo_reqheight()
+                have = self._collection_filter_btn.winfo_reqheight()
+                if want > have:
+                    self._collection_filter_btn.pack_configure(ipady=(want - have + 1) // 2)
+            except tk.TclError:
+                pass
+        self.after_idle(_match_collection_button_height)
+
         reset_frame = ttk.Frame(fbar, style="Filter.TFrame")
         reset_frame.pack(side="left", padx=(SP["xs"], SP["lg"]), anchor="s")
         ttk.Label(reset_frame, text=" ", style="Filter.TLabel").pack(anchor="w")
@@ -1282,7 +1300,7 @@ class App(tk.Tk):
                       bg=C_BLUE_050, fg=C_BLUE_700,
                       activebackground=C_SURFACE, activeforeground=C_BLUE_700,
                       font=("Segoe UI", 11, "bold"),
-                      relief="flat", bd=0, padx=self.SP["sm"], pady=1,
+                      relief="flat", bd=0, padx=self.SP["sm"], pady=self.SP["xs"],
                       cursor="hand2",
                       command=_make_dismiss(clear_fn)).pack(side="left")
 
@@ -1371,6 +1389,7 @@ class App(tk.Tk):
             cb.pack(anchor="w", fill="x", pady=1)
 
         ttk.Button(frame, text="Done", command=win.destroy).pack(anchor="e", pady=(8, 0))
+        win.bind("<Escape>", lambda *_: win.destroy())
         win.grab_set()
 
     def _build_tabs(self) -> None:
@@ -1760,7 +1779,7 @@ class App(tk.Tk):
             self._card_frame.pack_forget()
             self._table_frame.pack(fill="both", expand=True)
         else:
-            self._size_field.pack(side="right", padx=(0, self.SP["md"]))
+            self._size_field.pack(side="right", padx=(0, self.SP["md"]), anchor="s")
             self._table_frame.pack_forget()
             self._card_frame.pack(fill="both", expand=True)
         self.refresh_games()
@@ -2043,6 +2062,7 @@ class App(tk.Tk):
         ttk.Button(row, text="Cancel", style="Ghost.TButton",
                    command=win.destroy).pack(side="left", padx=(0, 6))
         ttk.Button(row, text="Claim", command=do_claim).pack(side="left")
+        win.bind("<Escape>", lambda *_: win.destroy())
         win.grab_set()
 
     def _rename_collection(self, col_id: int) -> None:
@@ -3391,6 +3411,7 @@ class App(tk.Tk):
         summary.pack(anchor="w", padx=10)
 
         ttk.Button(win, text="Close", command=win.destroy).pack(pady=(4, 10))
+        win.bind("<Escape>", lambda *_: win.destroy())
         win.grab_set()
 
     # ---------- history tab ----------
@@ -3774,6 +3795,7 @@ class App(tk.Tk):
                    command=win.destroy).pack(side="left", padx=(0, 6))
         ttk.Button(btn_row, text="Save",   command=save).pack(side="left")
 
+        win.bind("<Escape>", lambda *_: win.destroy())
         win.grab_set()
 
     # ---------- settings dialog ----------
@@ -3867,6 +3889,7 @@ class App(tk.Tk):
         ttk.Button(btn_row, text="Save", command=save).pack(side="left")
 
         frame.columnconfigure(1, weight=1)
+        win.bind("<Escape>", lambda *_: win.destroy())
         win.grab_set()
 
     def on_clear_collection(self) -> None:
@@ -4039,6 +4062,7 @@ class App(tk.Tk):
                    command=win.destroy).pack(side="left", padx=(0, 6))
         ttk.Button(btn_row, text="Clear Selected", style="Danger.TButton",
                    command=do_clear).pack(side="left")
+        win.bind("<Escape>", lambda *_: win.destroy())
         win.grab_set()
 
     # ---------- about ----------
@@ -4111,6 +4135,7 @@ class App(tk.Tk):
             padx=20, pady=6, cursor="hand2",
         ).pack(pady=(14, 18))
 
+        win.bind("<Escape>", lambda *_: win.destroy())
         win.grab_set()
 
     # ---------- actions ----------
@@ -4469,6 +4494,7 @@ class App(tk.Tk):
         ttk.Button(btn_row, text="Keep All", command=win.destroy).pack(side="left", padx=(0, 6))
         ttk.Button(btn_row, text="Remove Selected", command=_do_remove).pack(side="left")
 
+        win.bind("<Escape>", lambda *_: win.destroy())
         win.grab_set()
 
     def _sync_play_to_bgg_bg(
@@ -4760,6 +4786,7 @@ class App(tk.Tk):
         open_btn.state(["disabled"])
         ttk.Button(btn_row, text="🎲  Pick", command=pick).pack(side="left")
 
+        win.bind("<Escape>", lambda *_: win.destroy())
         win.grab_set()
 
     def on_add_game(self) -> None:
@@ -4860,6 +4887,7 @@ class App(tk.Tk):
         search_btn.configure(command=do_search)
         add_btn.configure(command=proceed)
 
+        dlg.bind("<Escape>", lambda *_: dlg.destroy())
         dlg.grab_set()
         query_entry.focus_set()
 
@@ -5266,6 +5294,7 @@ class App(tk.Tk):
                    command=save).pack(side="left")
 
         dlg.columnconfigure(1, weight=1)
+        dlg.bind("<Escape>", lambda *_: dlg.destroy())
         dlg.grab_set()
 
     def _fetch_and_cache_images_bg(self, bgg_ids: list[int], force: bool = False) -> None:
@@ -5578,6 +5607,7 @@ class App(tk.Tk):
 
         ttk.Button(dialog, text="Cancel", command=dialog.destroy).grid(row=next_row, column=0, padx=12, pady=(0, 12), sticky="we")
         ttk.Button(dialog, text="Check Out", command=confirm).grid(row=next_row, column=1, padx=12, pady=(0, 12), sticky="we")
+        dialog.bind("<Escape>", lambda *_: dialog.destroy())
         dialog.grab_set()
 
     def on_check_in(self, game) -> None:
@@ -6193,6 +6223,7 @@ class App(tk.Tk):
         ttk.Button(btn_frame, text="Save Changes" if editing else "Save Play",
                    command=save_play).pack(side="left")
 
+        dialog.bind("<Escape>", lambda *_: dialog.destroy())
         dialog.grab_set()
 
     def on_edit_play(self) -> None:
@@ -6441,6 +6472,7 @@ class App(tk.Tk):
             text_box.pack(fill="x", pady=(0, 6))
             text_box.bind("<MouseWheel>", _on_mousewheel)
 
+        win.bind("<Escape>", lambda *_: win.destroy())
         win.grab_set()
 
     # ---------- set image ----------
@@ -6558,6 +6590,7 @@ class App(tk.Tk):
         ttk.Button(btn_frame, text="Cancel", command=dialog.destroy).pack(side="left")
         ttk.Button(btn_frame, text="Set Image", command=confirm).pack(side="right")
         dialog.bind("<Return>", lambda *_: confirm())
+        dialog.bind("<Escape>", lambda *_: dialog.destroy())
         dialog.grab_set()
 
     # ---------- BGG play history import ----------

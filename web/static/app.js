@@ -73,10 +73,30 @@ document.addEventListener('click', e => {
   if (e.target.classList.contains('modal-backdrop')) _dismissModal(e.target);
 });
 
-// Close modal on Escape
+// Close modal on Escape; trap Tab focus inside the open modal so keyboard
+// users can't tab out into the (still-present) page content behind it.
+const FOCUSABLE_SEL = 'a[href], button:not([disabled]), input:not([disabled]):not([type=hidden]), ' +
+  'select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     document.querySelectorAll('.modal-backdrop:not([hidden])').forEach(_dismissModal);
+    return;
+  }
+  if (e.key !== 'Tab') return;
+  const backdrop = document.querySelector('.modal-backdrop:not([hidden])');
+  const dlg = backdrop && backdrop.querySelector('.modal');
+  if (!dlg) return;
+  const focusables = Array.from(dlg.querySelectorAll(FOCUSABLE_SEL)).filter(el => el.offsetParent !== null);
+  if (!focusables.length) return;
+  const first = focusables[0], last = focusables[focusables.length - 1];
+  if (e.shiftKey && document.activeElement === first) {
+    e.preventDefault(); last.focus();
+  } else if (!e.shiftKey && document.activeElement === last) {
+    e.preventDefault(); first.focus();
+  } else if (!dlg.contains(document.activeElement)) {
+    // Focus somehow escaped the dialog (or landed on the dialog wrapper) —
+    // pull it back in rather than letting Tab continue into page content.
+    e.preventDefault(); first.focus();
   }
 });
 
