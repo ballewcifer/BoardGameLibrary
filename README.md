@@ -11,7 +11,7 @@ A self-hosted **board game library manager** — catalog your collection, **lend
 Both share the same local SQLite database and the `db.py` / `bgg.py` / `config.py` modules.
 
 ## Features
-- **BoardGameGeek sync** — import your collection by username (public, or private via login), including wishlist, for-trade, preordered and other BGG collection statuses, not just what you own. Read-only on Web and Mobile. On **Desktop**, an opt-in setting can also post plays you log here back to your BGG account (off by default; your BGG password is used once per post and never stored).
+- **BoardGameGeek sync** — import your collection by username (public, or private via login), including wishlist, for-trade, preordered and other BGG collection statuses, not just what you own. Games that are "In Collection" on BGG with no status ticked show as "In Collection" (not owned). Read-only on Web and Mobile. On **Desktop**, an opt-in setting can also post plays you log here back to your BGG account (off by default; your BGG password is used once per post and never stored).
 - **Add games** via BGG search, or import a BGG collection export CSV (desktop)
 - **Cooperative / Competitive** game type — auto-detected from BGG mechanics, editable per game, and usable as a filter
 - **Expansions** automatically link to their base game — "Expansion for X" on the expansion, "Expansions You Own" on the base game

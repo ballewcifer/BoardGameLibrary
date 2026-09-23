@@ -80,7 +80,13 @@ def _ssl_ctx() -> ssl.SSLContext:
 # fortrade=1 simultaneously — "I own it but I'll trade it"). Owning it is
 # always the most useful single label; after that we favor the flags that
 # represent active intent over passive history ("prevowned").
-STATUS_FLAGS = ("own", "fortrade", "preordered", "wanttobuy", "wanttoplay", "wishlist", "prevowned", "want")
+STATUS_FLAGS = ("own", "fortrade", "preordered", "wanttobuy", "wanttoplay", "wishlist", "prevowned", "want", "incollection")
+# "incollection" is a synthetic, lowest-priority status: BGG keeps a collection
+# row (with every status checkbox at 0) for games the user only rated,
+# commented on or played. There is no such XML/CSV attribute, so it always
+# reads as false from BGG data; it is assigned by the parsers when a row
+# exists but resolve_status() finds no real flag. It is NOT owned.
+_REAL_STATUS_FLAGS = tuple(f for f in STATUS_FLAGS if f != "incollection")
 
 # Human-readable labels for UI (filter dropdowns, badges) — keyed by the same
 # strings stored in bgg_status.
@@ -93,6 +99,7 @@ STATUS_LABELS = {
     "wishlist": "Wishlist",
     "prevowned": "Previously Owned",
     "want": "Want",
+    "incollection": "In Collection",
 }
 
 # Badge colors for each non-"own" status, so they visually stand apart from
@@ -109,6 +116,7 @@ STATUS_COLORS = {
     "wanttoplay": {"bg": "#CFFAFE", "text": "#0E7490"},  # cyan
     "prevowned":  {"bg": "#F1F5F9", "text": "#475569"},  # slate
     "want":       {"bg": "#FFEDD5", "text": "#C2410C"},  # orange
+    "incollection": {"bg": "#E2E8F0", "text": "#334155"},  # light slate (neutral)
 }
 
 
@@ -116,10 +124,16 @@ def resolve_status(flags: dict) -> Optional[str]:
     """Pick one status string from a dict of {flag_name: bool}, in STATUS_FLAGS
     priority order. Returns None if no flag is set (e.g. a manually-added game
     with no BGG collection data)."""
-    for key in STATUS_FLAGS:
+    for key in _REAL_STATUS_FLAGS:
         if flags.get(key):
             return key
     return None
+
+
+def resolve_collection_row_status(flags: dict) -> str:
+    """Status for a row that EXISTS in a BGG collection: the highest-priority
+    flag set, or "incollection" when every checkbox is 0."""
+    return resolve_status(flags) or "incollection"
 
 
 @dataclass
@@ -276,21 +290,35 @@ def fetch_collection(
     if on_status:
         on_status(f"Fetching collection for {username}...")
     root = _fetch_xml(url, token=token, on_status=on_status, opener=opener)
+    return parse_collection_xml(root)
 
+
+def parse_collection_xml(root) -> list[CollectionEntry]:
+    """Turn a BGG /collection XML root into CollectionEntry rows (one per
+    objectid). Split out from fetch_collection so it can be tested offline."""
     entries: list[CollectionEntry] = []
-    seen_ids: set[int] = set()
+    seen_ids: dict[int, int] = {}          # objectid -> index in entries
+    merged_flags: dict[int, dict] = {}     # objectid -> OR of all rows' flags
     for item in root.findall("item"):
         bgg_id = int(item.get("objectid", "0"))
         if not bgg_id:
             continue
-        # BGG collections can list the same objectid more than once (e.g. two
-        # of a user's collection rows get merged into the same game by BGG
-        # staff) — dedupe here so callers that report len(entries) as the
-        # synced count don't overcount versus what actually lands in the DB
-        # once duplicate bgg_ids collapse in upsert_game.
+        status_el = item.find("status")
+        row_flags = {f: (status_el is not None and status_el.get(f) == "1") for f in STATUS_FLAGS}
+        # BGG collections can list the same objectid more than once (different
+        # collids) — dedupe so callers that report len(entries) don't
+        # overcount, and OR the status flags across the rows so a real flag
+        # (e.g. own) on any row wins over an all-zero row, whatever the order.
         if bgg_id in seen_ids:
+            mf = merged_flags[bgg_id]
+            for f in STATUS_FLAGS:
+                mf[f] = mf[f] or row_flags[f]
+            e = entries[seen_ids[bgg_id]]
+            e.own = mf["own"]
+            e.bgg_status = resolve_collection_row_status(mf)
             continue
-        seen_ids.add(bgg_id)
+        seen_ids[bgg_id] = len(entries)
+        merged_flags[bgg_id] = dict(row_flags)
         name_el = item.find("name")
         year_el = item.find("yearpublished")
         image_el = item.find("image")
@@ -299,10 +327,8 @@ def fetch_collection(
         rating_el = item.find("./stats/rating")
         my_rating = rating_el.get("value") if rating_el is not None else None
         comment_el = item.find("comment")
-        status_el = item.find("status")
-        flags = {f: (status_el is not None and status_el.get(f) == "1") for f in STATUS_FLAGS}
-        own = flags["own"]
-        bgg_status = resolve_status(flags)
+        own = row_flags["own"]
+        bgg_status = resolve_collection_row_status(row_flags)
 
         # Parse player counts / playtime from <stats> (present when stats=1)
         min_players = max_players = min_playtime = max_playtime = None
@@ -784,6 +810,8 @@ def import_collection_csv(csv_path: Path) -> list[GameDetails]:
     — the user chose what to include when they exported.
     """
     games: list[GameDetails] = []
+    csv_seen: dict[int, int] = {}
+    csv_flags: dict[int, dict] = {}
     with open(csv_path, "r", encoding="utf-8-sig", newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
@@ -826,7 +854,22 @@ def import_collection_csv(csv_path: Path) -> list[GameDetails]:
             details.my_rating = _f(_pick(row, "rating"))
             details.my_comment = _pick(row, "comment")
             # BGG's CSV export has one 0/1 column per status flag (own, fortrade, etc.)
-            details.bgg_status = resolve_status({f: row.get(f) == "1" for f in STATUS_FLAGS})
+            row_flags = {f: row.get(f) == "1" for f in _REAL_STATUS_FLAGS}
+            has_status_cols = any(f in row for f in _REAL_STATUS_FLAGS)
+            if bgg_id in csv_seen:
+                # Same objectid on several rows: OR the flags (own wins).
+                mf = csv_flags[bgg_id]
+                for k in _REAL_STATUS_FLAGS:
+                    mf[k] = mf[k] or row_flags[k]
+                if has_status_cols:
+                    games[csv_seen[bgg_id]].bgg_status = resolve_collection_row_status(mf)
+                continue
+            csv_seen[bgg_id] = len(games)
+            csv_flags[bgg_id] = dict(row_flags)
+            # A row exists but no checkbox is set -> "incollection" (not owned).
+            # A CSV with no status columns at all keeps the legacy None.
+            details.bgg_status = (resolve_collection_row_status(row_flags)
+                                  if has_status_cols else None)
             games.append(details)
     return games
 

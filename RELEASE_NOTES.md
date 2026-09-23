@@ -1,5 +1,13 @@
 # Release Notes
 
+## Desktop/Web v7.1.1 - "In Collection" fix
+
+- **Games with no status checked on BoardGameGeek are no longer imported as Owned.** BGG keeps a game in your collection (shown as "In Collection") when you only rated, commented on or played it, even if none of Own, Wishlist, etc. is ticked. Those games used to show up as Owned and could be checked out. They now import with an "In Collection" label and a neutral grey badge, are not loanable, and can be filtered and edited like any other status. Set a real status on the game if you do own it.
+- **Duplicate rows merged.** If BGG lists the same game more than once in your collection, the statuses are now combined (Owned still wins) instead of the last row winning.
+- **To correct games already in your library, run a sync again.** A status you changed by hand in the app is left alone.
+
+---
+
 ## Desktop/Web v7.1.0 - "Not played yet"
 
 - **Mark games you own but haven't played.** It is your call, not automatic: a game with no plays in the app may still have been played before you started using it. Mark a game "Not played yet" and it stays marked until you log a play for it, which clears the mark for you.
