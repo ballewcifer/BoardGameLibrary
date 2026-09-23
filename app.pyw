@@ -173,6 +173,33 @@ def _open_url(url: str) -> None:
     except Exception:
         pass
 
+# ── Collection status filter (BGG's own/wishlist/fortrade/etc. flags) ────────
+# "All" is the default view so newly synced wishlist / for-trade items aren't
+# hidden (matches the mobile app). "Owned" narrows to own=1 only. The rest map
+# 1:1 to bgg.STATUS_FLAGS via their label.
+_COLLECTION_STATUS_LABELS = ["All", "Owned"] + [
+    bgg.STATUS_LABELS[f] for f in bgg.STATUS_FLAGS if f != "own"
+]
+_COLLECTION_STATUS_LABEL_TO_FLAG = {v: k for k, v in bgg.STATUS_LABELS.items()}
+
+
+def _collection_status_params(labels) -> Optional[list[str]]:
+    """Map a set of _COLLECTION_STATUS_LABELS selections to db.list_games()'s
+    `status` kwarg (a list — see db._status_where() for the combining rules)."""
+    if not labels:
+        return None   # no selection — db.list_games() falls back to owned_only=True
+    out = []
+    for label in labels:
+        if label == "Owned":
+            out.append("owned")
+        elif label == "All":
+            out.append("all")
+        else:
+            flag = _COLLECTION_STATUS_LABEL_TO_FLAG.get(label)
+            if flag:
+                out.append(flag)
+    return out or None
+
 # ── Design system tokens (design-tokens.json) ────────────────────────────────
 # Brand / navy
 C_NAVY_900 = "#0E2A47"   # header / top bar
@@ -239,17 +266,62 @@ THEMES: dict = {
                           "blue600": "#0072B2", "blue700": "#005B8F", "blue800": "#00466E", "blue050": "#E1F0F8"},
 }
 
+# Per-theme extras (identical values on web + mobile): header/tab-strip/status bars use the
+# theme's own mid-tone, four dashboard card colours from a neighbouring-hue family, an accent
+# stripe under the header, and a canvas/border tint from the theme hue.
+THEME_EXTRA: dict = {
+    "Classic Navy": {"hdr": "#1B4B79", "ftr": "#1B4B79", "cards": ("#1B4B79", "#5B55CD", "#226F72", "#8D3EC6"),
+                    "stripe": "#6C5AE2", "bg": "#F3F6F9", "line100": "#EAEDF0", "line200": "#D6DBE1"},
+    "Ocean": {"hdr": "#12527E", "ftr": "#12527E", "cards": ("#12527E", "#4D5ACB", "#21726A", "#7F46C9"),
+             "stripe": "#5A5CE2", "bg": "#F3F7F9", "line100": "#EAEEF0", "line200": "#D6DCE1"},
+    "Teal": {"hdr": "#155E67", "ftr": "#155E67", "cards": ("#155E67", "#3467B2", "#217352", "#6455CE"),
+            "stripe": "#5A86E2", "bg": "#F3F8F9", "line100": "#EAF0F0", "line200": "#D6E0E1"},
+    "Forest": {"hdr": "#1C5E39", "ftr": "#1C5E39", "cards": ("#1C5E39", "#2E706B", "#357430", "#3B6A91"),
+              "stripe": "#5AE1E2", "bg": "#F3F9F6", "line100": "#EAF0ED", "line200": "#D6E1DA"},
+    "Slate": {"hdr": "#384857", "ftr": "#384857", "cards": ("#384857", "#5E5CB2", "#346E6F", "#8250AA"),
+             "stripe": "#685AE2", "bg": "#F3F6F9", "line100": "#EAEDF0", "line200": "#D6DBE1"},
+    "Indigo": {"hdr": "#33398E", "ftr": "#33398E", "cards": ("#33398E", "#7952AD", "#416B8B", "#954899"),
+              "stripe": "#9F5AE2", "bg": "#F3F4F9", "line100": "#EAEAF0", "line200": "#D6D6E1"},
+    "Purple": {"hdr": "#52247B", "ftr": "#52247B", "cards": ("#52247B", "#9A449C", "#5C5EB8", "#A34775"),
+              "stripe": "#E25ADA", "bg": "#F6F3F9", "line100": "#EDEAF0", "line200": "#DBD6E1"},
+    "Burgundy": {"hdr": "#73243E", "ftr": "#73243E", "cards": ("#73243E", "#99523D", "#A4428D", "#75642F"),
+                "stripe": "#E2855A", "bg": "#F9F3F5", "line100": "#F0EAEC", "line200": "#E1D6D9"},
+    "Crimson": {"hdr": "#7D202B", "ftr": "#7D202B", "cards": ("#7D202B", "#915A36", "#A73E7D", "#6C6728"),
+               "stripe": "#E29C5A", "bg": "#F9F3F4", "line100": "#F0EAEB", "line200": "#E1D6D7"},
+    "Bronze": {"hdr": "#74561E", "ftr": "#74561E", "cards": ("#74561E", "#636C2D", "#9E4F42", "#44702F"),
+              "stripe": "#C4E25A", "bg": "#F9F7F3", "line100": "#F0EEEA", "line200": "#E1DDD6"},
+    "High Contrast": {"hdr": "#333333", "ftr": "#333333", "cards": ("#000000", "#1C5F4D", "#5F1C48", "#824517"),
+                     "stripe": "#FFD54F", "bg": "#F5F5F5", "line100": "#E6E6E6", "line200": "#BDBDBD"},
+    "Colour-blind Safe": {"hdr": "#00638C", "ftr": "#00638C", "cards": ("#004C6B", "#26826A", "#D02597", "#5F391C"),
+                         "stripe": "#5A62E2", "bg": "#F3F7F9", "line100": "#EAEEF0", "line200": "#D6DDE1"},
+}
+
+C_HDR = "#1B4B79"; C_FTR = "#1B4B79"; C_STRIPE = "#6C5AE2"
+C_CARDS = ("#1B4B79", "#5B55CD", "#226F72", "#8D3EC6")
+
+
+def _mix(hex_a: str, hex_b: str, t: float) -> str:
+    """Blend hex_a toward hex_b by t (0..1)."""
+    a = [int(hex_a[i:i + 2], 16) for i in (1, 3, 5)]
+    b = [int(hex_b[i:i + 2], 16) for i in (1, 3, 5)]
+    return "#%02X%02X%02X" % tuple(round(x + (y - x) * t) for x, y in zip(a, b))
+
 
 def apply_theme(name: str) -> None:
     """Override the brand-colour globals with the named theme (default Classic Navy)."""
     global C_NAVY_900, C_NAVY_800, C_NAVY_700
     global C_BLUE_600, C_BLUE_700, C_BLUE_800, C_BLUE_050
     global C_NAVY, C_BLUE, C_SKY
+    global C_HDR, C_FTR, C_STRIPE, C_CARDS, C_BG, C_LINE_100, C_LINE_200, C_PALE
     t = THEMES.get(name) or THEMES["Classic Navy"]
     C_NAVY_900, C_NAVY_800, C_NAVY_700 = t["navy900"], t["navy800"], t["navy700"]
     C_BLUE_600, C_BLUE_700, C_BLUE_800, C_BLUE_050 = (
         t["blue600"], t["blue700"], t["blue800"], t["blue050"])
     C_NAVY, C_BLUE, C_SKY = C_NAVY_900, C_BLUE_600, C_BLUE_050
+    x = THEME_EXTRA.get(name) or THEME_EXTRA["Classic Navy"]
+    C_HDR, C_FTR, C_STRIPE, C_CARDS = x["hdr"], x["ftr"], x["stripe"], x["cards"]
+    C_BG, C_LINE_100, C_LINE_200 = x["bg"], x["line100"], x["line200"]
+    C_PALE = C_LINE_100
 
 
 _ORDINALS = {
@@ -293,6 +365,17 @@ def fmt_date(iso: Optional[str]) -> str:
         return datetime.fromisoformat(iso).strftime("%m/%d/%Y")
     except ValueError:
         return iso
+
+
+def play_summary_text(count: int, first: Optional[str], last: Optional[str],
+                      compact: bool = False) -> str:
+    """Human line for a game's play history (see db.play_summary)."""
+    if not count:
+        return "Not played yet"
+    times = f"Played {count} time{'s' if count != 1 else ''}"
+    if compact:
+        return f"{times} · last {fmt_date(last)}"
+    return f"{times} · last {fmt_date(last)} · first {fmt_date(first)}"
 
 
 class _AutocompleteEntry(ttk.Entry):
@@ -518,6 +601,10 @@ class App(tk.Tk):
                 default_username=self.settings.get("bgg_username", ""),
                 default_name=self.settings.get("bgg_username", "") or "My Collection",
             )
+            # One-time: the old claimed_member_id (a Friend) becomes
+            # claimed_bgg_username (the BGG username of the claimed collection).
+            if db.migrate_claimed_member(c, self.settings):
+                config.save(self.settings)
         self._image_cache:    dict[str, ImageTk.PhotoImage] = {}
         self._gradient_cache: dict[int, ImageTk.PhotoImage] = {}  # palette_idx → gradient
         self._placeholder_img: Optional[ImageTk.PhotoImage] = None
@@ -543,7 +630,7 @@ class App(tk.Tk):
         self._compare_other: Optional[int] = None
         self._collections: list = []                    # cached collection rows
         self._gc_map: dict = {}                          # {game_id: {collection_id,...}}
-        self._my_collection_ids = None                   # collections owned by "me" (None = no claim)
+        self._claimed_collection_id = None               # collection id of claimed_bgg_username (None = no claim)
         self._collection_sig = None                     # rebuild guard for the tab bar
 
         apply_theme(self.settings.get("ui_theme", "Classic Navy"))
@@ -657,6 +744,7 @@ class App(tk.Tk):
             command=close,
         ).pack(side="right")
 
+        win.bind("<Escape>", lambda *_: win.destroy())
         win.grab_set()
 
     # ---------- style / theme ----------
@@ -739,16 +827,16 @@ class App(tk.Tk):
             background=[("active", "#a01e18")])
 
         # ── Notebook tabs (navy-800 strip) ─────────────────────────────────────
-        s.configure("TNotebook", background=C_NAVY_800, borderwidth=0,
+        s.configure("TNotebook", background=C_FTR, borderwidth=0,
                     tabmargins=[2, 6, 2, 0])
         s.configure("TNotebook.Tab",
-            background=C_NAVY_800, foreground="#C7D6E6",
+            background=C_FTR, foreground="#DCE6F0",
             font=("Segoe UI", 9),
             padding=[self.SP["sm"], self.SP["xs"] + 2],
             focuscolor="")
         s.map("TNotebook.Tab",
-            background=[("selected", C_BG), ("active", "#1E4A73")],
-            foreground=[("selected", C_NAVY_900), ("active", C_SURFACE)],
+            background=[("selected", C_BG), ("active", _mix(C_FTR, "#FFFFFF", 0.14))],
+            foreground=[("selected", C_HDR), ("active", C_SURFACE)],
             font=[("selected", self.FONTS["control"])],
             padding=[("selected", [self.SP["xl"], self.SP["sm"] + 1])],
             expand=[("selected", [1, 3, 1, 0])])
@@ -782,7 +870,7 @@ class App(tk.Tk):
             foreground=C_INK_900, rowheight=32, borderwidth=0,
             font=self.FONTS["body"])
         s.configure("Treeview.Heading",
-            background=C_NAVY_900, foreground=C_SURFACE,
+            background=C_HDR, foreground=C_SURFACE,
             font=self.FONTS["label"], relief="flat", padding=[self.SP["sm"], 6])
         s.map("Treeview.Heading", background=[("active", C_NAVY_800)])
         s.map("Treeview",
@@ -810,14 +898,14 @@ class App(tk.Tk):
                     font=self.FONTS["body"])
 
         # ── Status bar (navy-900) ──────────────────────────────────────────────
-        s.configure("Status.TFrame", background=C_NAVY_900)
-        s.configure("Status.TLabel", background=C_NAVY_900, foreground=C_SURFACE,
+        s.configure("Status.TFrame", background=C_FTR)
+        s.configure("Status.TLabel", background=C_FTR, foreground=C_SURFACE,
                     font=self.FONTS["body"])
         # Determinate progress bar shown in the status strip during long tasks.
         s.configure("Status.Horizontal.TProgressbar",
-                    troughcolor=C_NAVY_800, background=C_BLUE_600,
-                    bordercolor=C_NAVY_800, lightcolor=C_BLUE_600,
-                    darkcolor=C_BLUE_600, thickness=10)
+                    troughcolor=_mix(C_FTR, "#000000", 0.25), background=C_STRIPE,
+                    bordercolor=_mix(C_FTR, "#000000", 0.25), lightcolor=C_STRIPE,
+                    darkcolor=C_STRIPE, thickness=10)
 
     # ---------- layout ----------
 
@@ -853,7 +941,8 @@ class App(tk.Tk):
         menubar.add_cascade(label="Library", menu=lib_menu)
         lib_menu.add_command(label="Sync from BGG…", command=self.on_import_from_bgg)
         lib_menu.add_separator()
-        lib_menu.add_command(label="Add Game…", command=self.on_add_game)
+        lib_menu.add_command(label="Add Game from BGG…", command=self.on_add_game)
+        lib_menu.add_command(label="Add Game Manually…", command=self.on_add_game_manual)
         lib_menu.add_command(label="Pick a Random Game…", command=self.on_random_game)
 
         # ── View ──────────────────────────────────────────────────────────────
@@ -878,28 +967,52 @@ class App(tk.Tk):
         """Switch the UI colour theme live and remember the choice."""
         self.settings["ui_theme"] = name
         config.save(self.settings)
+        old_tints = [C_BG, C_LINE_100, C_LINE_200]
         apply_theme(name)
+        old_tints = dict(zip(old_tints, [C_BG, C_LINE_100, C_LINE_200]))
         if hasattr(self, "_theme_var"):
             self._theme_var.set(name)
         # ttk styles repaint all styled widgets; reconfigure the tk header band
         # and repaint the cards/chips/dashboard with the new colours.
         self._apply_style()
         if hasattr(self, "_hdr"):
-            self._hdr.configure(bg=C_NAVY_900)
-            self._hdr_inner.configure(bg=C_NAVY_900)
-            self._hdr_logo.configure(bg=C_NAVY_900)
-            self._hdr_title.configure(bg=C_NAVY_900)
+            self._hdr.configure(bg=C_HDR)
+            self._hdr_inner.configure(bg=C_HDR)
+            self._hdr_logo.configure(bg=C_HDR)
+            self._hdr_title.configure(bg=C_HDR)
+            self._hdr_stripe.configure(bg=C_STRIPE)
+        self._recolor_tk(old_tints)
         self._collection_sig = None      # force the collection tab bar to recolour
         self.refresh_games()
         self.refresh_dashboard()
         self.status(f"Theme: {name}")
 
+    def _recolor_tk(self, mapping: dict) -> None:
+        """Remap the old canvas/hairline tints to the new theme's on every existing tk widget
+        (ttk widgets follow _apply_style; plain tk ones keep the colour they were built with)."""
+        mapping = {o.upper(): n for o, n in mapping.items() if o.upper() != n.upper()}
+        self.configure(bg=C_BG)
+        if not mapping:
+            return
+
+        def walk(w):
+            for opt in ("bg", "highlightbackground"):
+                try:
+                    new = mapping.get(str(w.cget(opt)).upper())
+                    if new:
+                        w.configure(**{opt: new})
+                except tk.TclError:
+                    pass
+            for c in w.winfo_children():
+                walk(c)
+        walk(self)
+
     def _build_header(self) -> None:
-        """Navy-900 app bar: white logo chip + title on its own band (kept compact)."""
-        self._hdr = tk.Frame(self, bg=C_NAVY_900)
+        """Theme-coloured app bar: white logo chip + title on its own band (kept compact)."""
+        self._hdr = tk.Frame(self, bg=C_HDR)
         self._hdr.pack(side="top", fill="x")
 
-        self._hdr_inner = tk.Frame(self._hdr, bg=C_NAVY_900)
+        self._hdr_inner = tk.Frame(self._hdr, bg=C_HDR)
         self._hdr_inner.pack(side="left", padx=self.SP["lg"], pady=self.SP["xs"])
 
         # Logo chip — the actual program icon in a white square (falls back to a
@@ -908,24 +1021,25 @@ class App(tk.Tk):
             _logo_im = Image.open(_resource_path("icon.ico")).convert("RGBA").resize((28, 28), Image.LANCZOS)
             self._hdr_logo_img = ImageTk.PhotoImage(_logo_im)
             self._hdr_logo = tk.Label(self._hdr_inner, image=self._hdr_logo_img,
-                                      bg=C_NAVY_900, bd=0, padx=0, pady=0)
+                                      bg=C_HDR, bd=0, padx=0, pady=0)
         except Exception:
             self._hdr_logo = tk.Label(
                 self._hdr_inner, text="\U0001f3b2",
-                bg=C_NAVY_900, fg=C_SURFACE,
+                bg=C_HDR, fg=C_SURFACE,
                 font=("Segoe UI", 14, "bold"), padx=2, pady=1,
             )
         self._hdr_logo.pack(side="left", padx=(0, self.SP["sm"]))
 
         self._hdr_title = tk.Label(
             self._hdr_inner, text="Board Game Library",
-            bg=C_NAVY_900, fg=C_SURFACE,
+            bg=C_HDR, fg=C_SURFACE,
             font=("Segoe UI", 15, "bold"),
         )
         self._hdr_title.pack(side="left")
 
-        # Hairline under the app bar (line_200 over the navy/grey seam)
-        tk.Frame(self, bg=C_LINE_200, height=1).pack(side="top", fill="x")
+        # Accent stripe under the app bar
+        self._hdr_stripe = tk.Frame(self, bg=C_STRIPE, height=4)
+        self._hdr_stripe.pack(side="top", fill="x")
 
     def _build_toolbar(self, parent=None) -> None:
         """Toolbar (search + segmented view toggle), filter bar, and chips row.
@@ -958,6 +1072,7 @@ class App(tk.Tk):
         search_row.pack(fill="x")
         search_entry = ttk.Entry(search_row, textvariable=self.search_var)
         search_entry.pack(side="left", fill="x", expand=True)
+        self.search_entry = search_entry
         ttk.Button(search_row, text="Clear", style="Quiet.TButton",
                    command=lambda: self.search_var.set("")).pack(side="left", padx=(SP["xs"], 0))
 
@@ -965,12 +1080,17 @@ class App(tk.Tk):
         # previously reachable only via Library → Add Game…; mobile and web
         # both surface it as a standing button, so the desktop toolbar
         # should too rather than relying on the menu bar alone).
-        ttk.Button(bar, text="+ Add Game", command=self.on_add_game
-                   ).pack(side="right", padx=(0, SP["md"]))
+        # Same width, bottom-aligned with the dropdowns beside them, and flush
+        # with the bar's right edge so they line up with the Sort control
+        # in the filter row below.
+        ttk.Button(bar, text="+ Add Game Manually", width=20, command=self.on_add_game_manual
+                   ).pack(side="right", anchor="s")
+        ttk.Button(bar, text="+ Add Game from BGG", width=20, command=self.on_add_game
+                   ).pack(side="right", anchor="s", padx=(0, SP["md"]))
 
-        # VIEW dropdown
+        # VIEW dropdown — a full gap before the buttons so they don't touch.
         view_field = ttk.Frame(bar, style="Filter.TFrame")
-        view_field.pack(side="right")
+        view_field.pack(side="right", padx=(0, SP["lg"]), anchor="s")
         ttk.Label(view_field, text="VIEW", style="Filter.TLabel").pack(anchor="w")
         self._view_var = tk.StringVar(value="Cards" if self._view_mode == "cards" else "Table")
         view_cb = ttk.Combobox(view_field, textvariable=self._view_var,
@@ -983,13 +1103,13 @@ class App(tk.Tk):
         # SIZE dropdown — only visible in card view
         self._size_field = ttk.Frame(bar, style="Filter.TFrame")
         if self._view_mode == "cards":
-            self._size_field.pack(side="right", padx=(0, SP["md"]))
+            self._size_field.pack(side="right", padx=(0, SP["md"]), anchor="s")
         ttk.Label(self._size_field, text="SIZE", style="Filter.TLabel").pack(anchor="w")
         _sz_labels = {"sm": "Small", "md": "Medium", "lg": "Large"}
         _sz_keys   = {"Small": "sm", "Medium": "md", "Large": "lg"}
         self._size_var = tk.StringVar(value=_sz_labels[self._card_size])
         size_cb = ttk.Combobox(self._size_field, textvariable=self._size_var,
-                               values=["Small", "Medium", "Large"], state="readonly", width=7)
+                               values=["Small", "Medium", "Large"], state="readonly", width=8)
         size_cb.pack()
         size_cb.bind("<<ComboboxSelected>>",
                      lambda e: self._set_card_size(_sz_keys[self._size_var.get()]))
@@ -1056,11 +1176,60 @@ class App(tk.Tk):
         ))
         self.tag_filter_cb.bind("<<ComboboxSelected>>", lambda *_: self.refresh_games())
 
+        self.unplayed_filter_var = tk.BooleanVar(value=False)
+        fcheck("Not played yet", self.unplayed_filter_var)
+
         self.coop_filter_var = tk.StringVar(value="Any")
         fgroup("TYPE", lambda p: ttk.Combobox(
             p, textvariable=self.coop_filter_var, width=12, state="readonly",
             values=["Any", "Cooperative", "Competitive"],
         )).bind("<<ComboboxSelected>>", lambda *_: self.refresh_games())
+
+        # Multi-select: any combination of "Owned" + the real BGG statuses,
+        # or just {"All"} (the default). A plain set, not a Tk variable — every mutation
+        # path (the popup's checkboxes, an active-filter-chip removal, the
+        # full reset) calls refresh_games() directly afterward, which also
+        # keeps this button's own text/color in sync via _update_collection_
+        # filter_button(), the same way it already refreshes the chips row.
+        self.collection_status_labels: set[str] = {"All"}
+
+        def _collection_status_colors(label: str):
+            if label == "All":
+                return None
+            flag = _COLLECTION_STATUS_LABEL_TO_FLAG.get(label, "own")
+            return bgg.STATUS_COLORS.get(flag, bgg.STATUS_COLORS["own"])
+
+        def _make_collection_filter(p):
+            # A plain button, not a Menubutton/Combobox — clicking it opens
+            # our own popup (a real checklist that stays open across
+            # multiple toggles) rather than a tk.Menu or ttk.Combobox
+            # dropdown, both of which close/collapse after a single pick.
+            btn = tk.Button(
+                p, text="All", relief="raised", bd=1, width=12,
+                anchor="w", padx=6, font=("Segoe UI", 9),
+                command=lambda: self._open_collection_status_picker(btn),
+            )
+            self._collection_filter_btn = btn
+            self._collection_filter_default_colors = (btn.cget("bg"), btn.cget("fg"))
+            self._update_collection_filter_button()
+            return btn
+
+        self._collection_status_colors_for = _collection_status_colors
+        fgroup("COLLECTION", _make_collection_filter)
+
+        # The collection button is a plain tk.Button, a few pixels shorter than
+        # the ttk comboboxes beside it, which left its label sitting lower than
+        # the other filter labels. Pad it to the comboboxes' height once real
+        # sizes are known (measured, so it holds at any display scaling).
+        def _match_collection_button_height():
+            try:
+                want = self.tag_filter_cb.winfo_reqheight()
+                have = self._collection_filter_btn.winfo_reqheight()
+                if want > have:
+                    self._collection_filter_btn.pack_configure(ipady=(want - have + 1) // 2)
+            except tk.TclError:
+                pass
+        self.after_idle(_match_collection_button_height)
 
         reset_frame = ttk.Frame(fbar, style="Filter.TFrame")
         reset_frame.pack(side="left", padx=(SP["xs"], SP["lg"]), anchor="s")
@@ -1119,6 +1288,13 @@ class App(tk.Tk):
         if self.tag_filter_var.get() != "Any":
             v = self.tag_filter_var.get()
             active.append(("Tag", v, lambda _v=v: self.tag_filter_var.set("Any")))
+        if self.unplayed_filter_var.get():
+            active.append(("Not played yet", "on", lambda: self.unplayed_filter_var.set(False)))
+        if self.collection_status_labels != {"All"}:
+            v = (next(iter(self.collection_status_labels))
+                 if len(self.collection_status_labels) == 1
+                 else f"{len(self.collection_status_labels)} selected")
+            active.append(("Collection", v, self._reset_collection_filter))
 
         # Never re-pack the frame — it's already in the correct position above
         # the card grid. Just populate or clear its children.
@@ -1140,9 +1316,97 @@ class App(tk.Tk):
                       bg=C_BLUE_050, fg=C_BLUE_700,
                       activebackground=C_SURFACE, activeforeground=C_BLUE_700,
                       font=("Segoe UI", 11, "bold"),
-                      relief="flat", bd=0, padx=self.SP["sm"], pady=1,
+                      relief="flat", bd=0, padx=self.SP["sm"], pady=self.SP["xs"],
                       cursor="hand2",
                       command=_make_dismiss(clear_fn)).pack(side="left")
+
+    def _reset_collection_filter(self) -> None:
+        self.collection_status_labels.clear()
+        self.collection_status_labels.add("All")
+
+    def _update_collection_filter_button(self) -> None:
+        """Keep the COLLECTION filter button's text/color in sync with
+        self.collection_status_labels — called from refresh_games() so every
+        mutation path (the popup, an active-filter-chip removal, the full
+        reset) picks it up, not just a direct pick from the popup itself."""
+        btn = getattr(self, "_collection_filter_btn", None)
+        if btn is None:
+            return
+        labels = self.collection_status_labels
+        if len(labels) == 1:
+            text = next(iter(labels))
+        else:
+            text = f"{len(labels)} selected"
+        btn.configure(text=text)
+        color = (self._collection_status_colors_for(next(iter(labels)))
+                 if len(labels) == 1 else None)
+        if color:
+            btn.configure(bg=color["bg"], fg=color["text"],
+                           activebackground=color["bg"], activeforeground=color["text"])
+        else:
+            _bg, _fg = self._collection_filter_default_colors
+            btn.configure(bg=_bg, fg=_fg, activebackground=_bg, activeforeground=_fg)
+
+    def _open_collection_status_picker(self, anchor_widget) -> None:
+        """Popup checklist for the COLLECTION filter — stays open across
+        multiple toggles (unlike a tk.Menu, which closes after each pick),
+        with each status colored the same way as its badge elsewhere."""
+        win = tk.Toplevel(self)
+        win.title("Filter by Collection Status")
+        win.transient(self)
+        win.resizable(False, False)
+        win.configure(bg=C_BG)
+        x = anchor_widget.winfo_rootx()
+        y = anchor_widget.winfo_rooty() + anchor_widget.winfo_height()
+        win.geometry(f"+{x}+{y}")
+
+        frame = ttk.Frame(win, padding=12)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(frame, text="Select any combination",
+                  font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(0, 6))
+
+        vars_by_label: dict[str, tk.BooleanVar] = {}
+
+        def _on_toggle(label: str) -> None:
+            checked = vars_by_label[label].get()
+            if label == "All":
+                if checked:
+                    self.collection_status_labels.clear()
+                    self.collection_status_labels.add("All")
+                    for lbl, v in vars_by_label.items():
+                        v.set(lbl == "All")
+                else:
+                    # "All" is exclusive and is the fallback — unchecking it
+                    # leaves nothing else selected, so it just stays on.
+                    vars_by_label["All"].set(True)
+            else:
+                self.collection_status_labels.discard("All")
+                vars_by_label["All"].set(False)
+                if checked:
+                    self.collection_status_labels.add(label)
+                else:
+                    self.collection_status_labels.discard(label)
+                if not self.collection_status_labels:
+                    self._reset_collection_filter()
+                    vars_by_label["All"].set(True)
+            self.refresh_games()
+
+        for lbl in _COLLECTION_STATUS_LABELS:
+            v = tk.BooleanVar(value=lbl in self.collection_status_labels)
+            vars_by_label[lbl] = v
+            c = self._collection_status_colors_for(lbl)
+            cb = tk.Checkbutton(
+                frame, text=lbl, variable=v, anchor="w",
+                font=("Segoe UI", 9), command=lambda l=lbl: _on_toggle(l),
+            )
+            if c:
+                cb.configure(bg=c["bg"], fg=c["text"], selectcolor=c["bg"],
+                              activebackground=c["bg"], activeforeground=c["text"])
+            cb.pack(anchor="w", fill="x", pady=1)
+
+        ttk.Button(frame, text="Done", command=win.destroy).pack(anchor="e", pady=(8, 0))
+        win.bind("<Escape>", lambda *_: win.destroy())
+        win.grab_set()
 
     def _build_tabs(self) -> None:
         self.nb = ttk.Notebook(self)
@@ -1307,8 +1571,9 @@ class App(tk.Tk):
                       background=C_BG).pack(anchor="w", pady=(self.SP["lg"], self.SP["xs"]))
             ttk.Separator(parent, orient="horizontal").pack(fill="x", pady=(0, self.SP["sm"]))
 
-        def stat_card(parent, label, value, color=C_NAVY_900, tab=None):
-            # Solid coloured stat tile (navy / green / purple / red per token map)
+        def stat_card(parent, label, value, color=None, tab=None):
+            # Solid coloured stat tile (theme card colours)
+            color = color or C_CARDS[0]
             f = tk.Frame(parent, bg=color, padx=self.SP["lg"], pady=self.SP["md"],
                          highlightbackground=color, highlightthickness=1,
                          cursor="hand2" if tab else "")
@@ -1329,12 +1594,10 @@ class App(tk.Tk):
         # ── stat cards row ────────────────────────────────────────────────────
         cards_row = tk.Frame(inner, bg=C_BG)
         cards_row.pack(fill="x", pady=(0, self.SP["xs"]))
-        stat_card(cards_row, "Games",       summary["total_games"],   C_NAVY_900, tab=self.games_tab)
-        stat_card(cards_row, "Total Plays", summary["total_plays"],   C_OK_SOLID, tab=self.plays_tab)
-        stat_card(cards_row, "Friends",     summary["total_members"], "#4A148C",  tab=self.members_tab)
-        stat_card(cards_row, "Checked Out", summary["checked_out"],
-                  C_DR_SOLID if summary["checked_out"] else C_INK_600,
-                  tab=self.history_tab)
+        stat_card(cards_row, "Games",       summary["total_games"],   C_CARDS[0], tab=self.games_tab)
+        stat_card(cards_row, "Total Plays", summary["total_plays"],   C_CARDS[1], tab=self.plays_tab)
+        stat_card(cards_row, "Friends",     summary["total_members"], C_CARDS[2], tab=self.members_tab)
+        stat_card(cards_row, "Checked Out", summary["checked_out"],   C_CARDS[3], tab=self.history_tab)
 
         # ── currently checked out ────────────────────────────────────────────
         section(inner, "Currently Checked Out")
@@ -1470,12 +1733,13 @@ class App(tk.Tk):
             self._card_frame.pack(fill="both", expand=True)
 
     def _build_table_widget(self, parent: ttk.Frame) -> None:
-        cols = ("fav", "insert", "name", "year", "players", "time", "weight", "rating", "best", "status", "plays")
+        cols = ("fav", "insert", "unplayed", "name", "year", "players", "time", "weight", "rating", "best", "status", "plays")
         self.games_tree = ttk.Treeview(parent, columns=cols, show="headings", selectmode="extended")
 
         col_defs = [
             ("fav",     "★",           34,  "center"),
             ("insert",  "Insert",      56,  "center"),
+            ("unplayed", "Unplayed",    92,  "center"),
             ("name",    "Name",        260, "w"     ),
             ("year",    "Year",         56, "center"),
             ("players", "Players",      88, "center"),
@@ -1512,6 +1776,12 @@ class App(tk.Tk):
         self.games_tree.tag_configure("out",       background=C_WN_BG)
         self.games_tree.tag_configure("favorite",  foreground=C_GOLD)
         self.games_tree.tag_configure("expansion", background="#f3e5f5")
+        # One row-tint tag per non-"own" BGG status — a Treeview can't color
+        # individual cells, so the whole row is tinted instead. Applied last
+        # (see _refresh_games_table) so it takes priority over "expansion".
+        for _status, _colors in bgg.STATUS_COLORS.items():
+            if _status != "own":
+                self.games_tree.tag_configure(f"status_{_status}", background=_colors["bg"])
         # Per-game actions live on the row right-click menu (no bulk toolbar).
 
     def _set_view(self, mode: str) -> None:
@@ -1526,7 +1796,7 @@ class App(tk.Tk):
             self._card_frame.pack_forget()
             self._table_frame.pack(fill="both", expand=True)
         else:
-            self._size_field.pack(side="right", padx=(0, self.SP["md"]))
+            self._size_field.pack(side="right", padx=(0, self.SP["md"]), anchor="s")
             self._table_frame.pack_forget()
             self._card_frame.pack(fill="both", expand=True)
         self.refresh_games()
@@ -1677,6 +1947,10 @@ class App(tk.Tk):
             self._compare_cb.pack(side="right")
             ttk.Label(self._collection_bar, text="Compare:",
                       style="Filter.TLabel").pack(side="right", padx=(self.SP["md"], self.SP["xs"]))
+            ttk.Label(self._collection_bar,
+                      text="Compare collections to see which games are shared, or unique to one.",
+                      foreground=C_INK_500, font=("Segoe UI", 8)
+                      ).pack(side="right", padx=(self.SP["md"], self.SP["xs"]))
 
         if not multi:
             return
@@ -1805,6 +2079,7 @@ class App(tk.Tk):
         ttk.Button(row, text="Cancel", style="Ghost.TButton",
                    command=win.destroy).pack(side="left", padx=(0, 6))
         ttk.Button(row, text="Claim", command=do_claim).pack(side="left")
+        win.bind("<Escape>", lambda *_: win.destroy())
         win.grab_set()
 
     def _rename_collection(self, col_id: int) -> None:
@@ -1841,6 +2116,8 @@ class App(tk.Tk):
         self.status_filter_var.set("Any")
         self.tag_filter_var.set("Any")
         self.coop_filter_var.set("Any")
+        self.unplayed_filter_var.set(False)
+        self._reset_collection_filter()
         self._active_collection = None
         self._compare_mode = "off"
         self._compare_other = None
@@ -1949,7 +2226,8 @@ class App(tk.Tk):
                     continue
 
             # --- availability / favorites filter ---
-            if status_val == "Available" and g["bgg_id"] in open_loans:
+            # Only owned games are ever loanable, so only they can be "Available".
+            if status_val == "Available" and (g["own"] != 1 or g["bgg_id"] in open_loans):
                 continue
             if status_val == "Checked out" and g["bgg_id"] not in open_loans:
                 continue
@@ -1962,6 +2240,10 @@ class App(tk.Tk):
                 game_tags = [t.strip() for t in (g["tags"] or "").split(",") if t.strip()]
                 if tag_val not in game_tags:
                     continue
+
+            # --- "not played yet" filter (owned + manually marked) ---
+            if self.unplayed_filter_var.get() and not (g["own"] == 1 and g["is_unplayed"]):
+                continue
 
             # --- cooperative/competitive filter ---
             coop_val = self.coop_filter_var.get()
@@ -1988,9 +2270,11 @@ class App(tk.Tk):
                                  else self.games_canvas.yview()[0])
             except Exception:
                 _prev_scroll = 0.0
+        status_param = _collection_status_params(self.collection_status_labels)
         with db.connect() as c:
-            games = db.list_games(c, self.search_var.get().strip())
-            total_count = c.execute("SELECT COUNT(*) FROM games WHERE own = 1").fetchone()[0]
+            games = db.list_games(c, self.search_var.get().strip(), status=status_param)
+            total_count = db.count_games(c, status=status_param)
+            self._total_games_unfiltered = db.count_games(c, status="all")
             open_loans = {
                 row["game_id"]: row
                 for row in c.execute(
@@ -2007,11 +2291,20 @@ class App(tk.Tk):
             # drops its tab automatically.
             self._collections = [r for r in db.list_collections(c) if r["game_count"] > 0]
             self._gc_map = db.game_collection_map(c)
-            # Collections owned by "me" (the device owner who claimed during
-            # import). None → no claim, so check-out is offered for every game.
-            _mine = self.settings.get("claimed_member_id")
-            self._my_collection_ids = (
-                db.owned_collection_ids(c, _mine) if _mine else None)
+            # The collection this device claimed as "mine", by BGG username.
+            # None → no claim (or that collection is gone), so check-out is
+            # offered for every game.
+            _claimed = self.settings.get("claimed_bgg_username")
+            self._claimed_collection_id = (
+                db.collection_id_for_username(c, _claimed) if _claimed else None)
+
+        # Grey out the search field when the library has no games at all —
+        # re-evaluated on every refresh, not just at startup.
+        if hasattr(self, "search_entry"):
+            if self._total_games_unfiltered == 0:
+                self.search_entry.state(["disabled"])
+            else:
+                self.search_entry.state(["!disabled"])
 
         # Refresh tag dropdown (preserve selection if tag still exists)
         cur_tag = self.tag_filter_var.get()
@@ -2022,6 +2315,7 @@ class App(tk.Tk):
         self._refresh_collection_bar()
         games = self._apply_filters(list(games), open_loans)
         self._refresh_chips()
+        self._update_collection_filter_button()
 
         # Apply sort (card view and table view both respect this)
         sort_key = getattr(self, '_sort_var', None)
@@ -2057,7 +2351,9 @@ class App(tk.Tk):
                                       self.status_filter_var.get(),
                                       self.tag_filter_var.get(),
                                       self.coop_filter_var.get()])
+            or self.collection_status_labels != {"All"}
             or self.exact_players_var.get()
+            or self.unplayed_filter_var.get()
             or bool(self.search_var.get())
             or (len(self._collections) >= 2
                 and (self._active_collection is not None or self._compare_mode != "off"))
@@ -2283,6 +2579,7 @@ class App(tk.Tk):
                 elif c == "plays":   return play_counts.get(g["bgg_id"], 0)
                 elif c == "fav":     return 0 if g["is_favorite"] else 1
                 elif c == "insert":  return 0 if g["has_insert"] else 1
+                elif c == "unplayed": return 0 if (g["own"] == 1 and g["is_unplayed"]) else 1
                 return ""
             games = sorted(games, key=_key, reverse=self._sort_rev)
 
@@ -2304,6 +2601,11 @@ class App(tk.Tk):
                 tags.append("favorite")
             if g["is_expansion"]:
                 tags.append("expansion")
+            # Non-owned statuses get their own row tint (added last so it
+            # takes priority over "expansion") — owned games keep the plain
+            # row background, relying on the "out" tag when checked out.
+            if g["own"] != 1 and g["bgg_status"] and g["bgg_status"] in bgg.STATUS_COLORS:
+                tags.append(f"status_{g['bgg_status']}")
 
             exp_prefix = "↳ " if g["is_expansion"] else ""
             self.games_tree.insert(
@@ -2312,6 +2614,7 @@ class App(tk.Tk):
                 values=(
                     "★" if g["is_favorite"] else "",
                     "✓" if g["has_insert"] else "",
+                    "✓" if (g["own"] == 1 and g["is_unplayed"]) else "",
                     f"{exp_prefix}{g['name']}",
                     g["year"] or "—",
                     fmt_players(g["min_players"], g["max_players"]),
@@ -2319,7 +2622,12 @@ class App(tk.Tk):
                     f"{g['weight']:.1f}" if g["weight"] else "—",
                     f"{g['avg_rating']:.1f}" if g["avg_rating"] else "—",
                     g["best_players"] or "—",
-                    f"Out: {loan['first_name']} {loan['last_name']}" if loan else "Available",
+                    # Only owned games are ever loanable, so only they get an
+                    # Out/Available status; other BGG statuses (Wishlist, For
+                    # Trade, ...) show their status instead, with the row
+                    # tinted per-status above so they stand apart.
+                    (f"Out: {loan['first_name']} {loan['last_name']}" if loan else "Available")
+                    if g["own"] == 1 else bgg.STATUS_LABELS.get(g["bgg_status"], "—"),
                     n_plays if n_plays else "—",
                 ),
             )
@@ -2332,7 +2640,7 @@ class App(tk.Tk):
             self._sort_rev = False
 
         _labels = {
-            "fav": "★", "insert": "Insert", "name": "Name", "year": "Year",
+            "fav": "★", "insert": "Insert", "unplayed": "Unplayed", "name": "Name", "year": "Year",
             "players": "Players", "time": "Time", "weight": "Complexity",
             "rating": "BGG ★", "best": "Best At", "status": "Status", "plays": "Plays",
         }
@@ -2451,6 +2759,15 @@ class App(tk.Tk):
                               command=lambda: self._bulk_set_insert(games, True))
             menu.add_command(label=f"Clear 3D Insert on {len(games)} Games",
                               command=lambda: self._bulk_set_insert(games, False))
+            menu.add_separator()
+            # One toggle: when every selected game is already marked it clears
+            # the mark instead (mirrors the mobile Unplayed / Played button).
+            if all(g["is_unplayed"] for g in games):
+                menu.add_command(label=f"Clear Not Played Yet on {len(games)} Games",
+                                  command=lambda: self._bulk_set_unplayed(games, False))
+            else:
+                menu.add_command(label=f"Mark {len(games)} Games as Not Played Yet",
+                                  command=lambda: self._bulk_set_unplayed(games, True))
             menu.tk_popup(x_root, y_root)
             return
 
@@ -2465,15 +2782,17 @@ class App(tk.Tk):
             ).fetchone()
 
         menu = tk.Menu(self, tearoff=0)
+        # Only owned games are ever loanable — no Check In/Out for others.
         if loan:
             menu.add_command(label="Check In",  command=lambda: self.on_check_in(game))
-        else:
+        elif game["own"] == 1:
             menu.add_command(label="Check Out", command=lambda: self.on_check_out(game))
         menu.add_command(label="Log Play…",    command=lambda: self.on_log_play(game))
         menu.add_separator()
         menu.add_command(label="Details…",     command=lambda: self.show_details(game))
         menu.add_command(label="Edit Game…",   command=lambda: self.on_edit_game(game))
         menu.add_command(label="Set Image…",   command=lambda: self.on_set_image(game))
+        self._add_unplayed_item(menu, game)
 
         fav_lbl = "Remove from Favorites" if game["is_favorite"] else "Add to Favorites"
         menu.add_command(label=fav_lbl,        command=lambda: self.on_toggle_favorite(game))
@@ -2481,6 +2800,34 @@ class App(tk.Tk):
         menu.add_separator()
         menu.add_command(label="Delete Game…", command=lambda: self.on_delete_game(game))
         menu.tk_popup(x_root, y_root)
+
+    def _add_unplayed_item(self, menu: tk.Menu, game) -> None:
+        """Right-click item to mark / clear "not played yet" on one game. Shown
+        only when it applies (owned + no plays, or already marked)."""
+        if game["is_unplayed"]:
+            menu.add_command(label="Clear Not Played Yet",
+                             command=lambda: self._bulk_set_unplayed([game], False))
+        elif game["own"] == 1:
+            with db.connect() as c:
+                ok = db.unplayed_eligible(c, game["bgg_id"])
+            if ok:
+                menu.add_command(label="Mark as Not Played Yet",
+                                 command=lambda: self._bulk_set_unplayed([game], True))
+
+    def _bulk_set_unplayed(self, games: list, value: bool) -> None:
+        with db.connect() as c:
+            changed, skipped = db.set_unplayed(c, [g["bgg_id"] for g in games], value)
+        self.refresh_games(preserve_scroll=True)
+        if value and changed == 0:
+            messagebox.showinfo("Not played yet", db.UNPLAYED_NONE_ELIGIBLE, parent=self)
+        elif value:
+            msg = f"Marked {changed} game{'s' if changed != 1 else ''} as not played yet."
+            if skipped:
+                msg += (f" Skipped {skipped} (games with a logged play, and games "
+                        f"you don't own, can't be marked).")
+            self.status(msg)
+        else:
+            self.status(f"Cleared the mark on {changed} game{'s' if changed != 1 else ''}.")
 
     def _bulk_set_insert(self, games: list, value: bool) -> None:
         with db.connect() as c:
@@ -2512,15 +2859,26 @@ class App(tk.Tk):
         n_plays   = play_counts.get(bgg_id, 0)
         due       = loan["due_date"] if loan else None
 
-        # ── status badge (text + dot + colour) ─────────────────────────────────
-        if out_to:
-            overdue = bool(due and due < datetime.now().strftime("%Y-%m-%d"))
-            if overdue:
-                badge_txt, badge_bg, badge_fg = "● Overdue", C_DR_BG, C_DR_TEXT
+        # ── status badge (text + dot + colour) ──────────────────────────────
+        # Only owned games are ever loanable, so only they get an Available/
+        # Checked out/Overdue badge; every other BGG status (Wishlist, For
+        # Trade, ...) gets its own colored badge instead, so the different
+        # statuses stand apart at a glance.
+        if game["own"] == 1:
+            if out_to:
+                overdue = bool(due and due < datetime.now().strftime("%Y-%m-%d"))
+                if overdue:
+                    badge_txt, badge_bg, badge_fg = "● Overdue", C_DR_BG, C_DR_TEXT
+                else:
+                    badge_txt, badge_bg, badge_fg = "● Checked out", C_WN_BG, C_WN_TEXT
             else:
-                badge_txt, badge_bg, badge_fg = "● Checked out", C_WN_BG, C_WN_TEXT
+                badge_txt, badge_bg, badge_fg = "● Available", C_OK_BG, C_OK_TEXT
+        elif game["bgg_status"] and game["bgg_status"] in bgg.STATUS_COLORS:
+            _sc = bgg.STATUS_COLORS[game["bgg_status"]]
+            badge_txt = bgg.STATUS_LABELS.get(game["bgg_status"], game["bgg_status"])
+            badge_bg, badge_fg = _sc["bg"], _sc["text"]
         else:
-            badge_txt, badge_bg, badge_fg = "● Available", C_OK_BG, C_OK_TEXT
+            badge_txt, badge_bg, badge_fg = "", C_SURFACE, C_INK_500
 
         overdue = bool(out_to and due and due < datetime.now().strftime("%Y-%m-%d"))
 
@@ -2570,6 +2928,7 @@ class App(tk.Tk):
 
         # Expansion ribbon — bottom-left of cover, sized to fit the label so it
         # never clips (the text width grows with DPI / card size).
+        _stack_top = _IH   # y where the next bottom-left ribbon must end
         if game["is_expansion"]:
             _exp_id = img_canvas.create_text(
                 SP["sm"], _IH - 12, anchor="w", text="Expansion",
@@ -2580,6 +2939,22 @@ class App(tk.Tk):
             _exp_bg = img_canvas.create_rectangle(0, y1, x2, _IH,
                                                   fill=C_BLUE_050, outline="")
             img_canvas.tag_lower(_exp_bg, _exp_id)   # behind the text, above the image
+            _stack_top = y1
+
+        # "Not played yet" ribbon — bottom-left of the cover (stacked above the
+        # Expansion ribbon if both apply). Fill is the active theme's second
+        # card colour with white text (>= 4.68:1 in every theme); the label is
+        # text, so the meaning never relies on colour alone.
+        if game["own"] == 1 and game["is_unplayed"]:
+            _up_id = img_canvas.create_text(
+                SP["sm"], _stack_top - 3, anchor="sw", text="UNPLAYED",
+                fill="#FFFFFF", font=self.FONTS["label"])
+            bb = img_canvas.bbox(_up_id)
+            x2 = (bb[2] + SP["sm"]) if bb else 90
+            y1 = (bb[1] - 3) if bb else (_stack_top - 22)
+            _up_bg = img_canvas.create_rectangle(0, y1, x2, _stack_top,
+                                                 fill=C_CARDS[1], outline="")
+            img_canvas.tag_lower(_up_bg, _up_id)
 
         # ── card body ──────────────────────────────────────────────────────────
         _is_sm = self._card_size == "sm"
@@ -2659,14 +3034,19 @@ class App(tk.Tk):
 
         # Primary button — full width. When a collection has been claimed as
         # "mine", only games from my collection can be checked out, so the
-        # Check Out button is hidden for games in other collections.
-        my_ids = getattr(self, "_my_collection_ids", None)
-        can_checkout = (my_ids is None) or bool(
-            self._gc_map.get(bgg_id, set()) & my_ids)
+        # Check Out button is hidden for games in other collections. Only
+        # owned games are ever loanable at all, so non-owned games (Wishlist,
+        # For Trade, ...) get no Check In/Out button or "Not in your
+        # collection" label here — nothing loan-related applies to them.
+        claimed_cid = getattr(self, "_claimed_collection_id", None)
+        can_checkout = (claimed_cid is None) or (
+            claimed_cid in self._gc_map.get(bgg_id, set()))
         if out_to:
             ttk.Button(body, text="Check In",
                        command=lambda g=game: self.on_check_in(g)
                        ).pack(fill="x", pady=(0, SP["xs"]))
+        elif game["own"] != 1:
+            pass
         elif can_checkout:
             ttk.Button(body, text="Check Out",
                        command=lambda g=game: self.on_check_out(g)
@@ -2787,15 +3167,17 @@ class App(tk.Tk):
             ).fetchone()
 
         menu = tk.Menu(self, tearoff=0)
+        # Only owned games are ever loanable — no Check In/Out for others.
         if loan:
             menu.add_command(label="Check In",  command=lambda: self.on_check_in(game))
-        else:
+        elif game["own"] == 1:
             menu.add_command(label="Check Out", command=lambda: self.on_check_out(game))
         menu.add_command(label="Log Play…",     command=lambda: self.on_log_play(game))
         menu.add_separator()
         menu.add_command(label="Details…",      command=lambda: self.show_details(game))
         menu.add_command(label="Edit Game…",    command=lambda: self.on_edit_game(game))
         menu.add_command(label="Set Image…",    command=lambda: self.on_set_image(game))
+        self._add_unplayed_item(menu, game)
         fav_lbl = "Remove from Favorites" if game["is_favorite"] else "Add to Favorites"
         menu.add_command(label=fav_lbl,         command=lambda: self.on_toggle_favorite(game))
         self._add_collection_remove_item(menu, game)
@@ -2841,6 +3223,9 @@ class App(tk.Tk):
         ttk.Label(frame, text="Friends", style="Section.TLabel").pack(anchor="w")
         ttk.Separator(frame, orient="horizontal").pack(fill="x", pady=(SP["xs"], SP["md"]))
 
+        ttk.Label(frame, text="Adding friends lets you track plays and loan out games to them.",
+                  foreground=C_INK_500, font=("Segoe UI", 8)).pack(anchor="w", pady=(0, SP["xs"]))
+
         # Add-member form: labelled inputs, one primary + one ghost action
         form = ttk.Frame(frame)
         form.pack(fill="x")
@@ -2854,25 +3239,41 @@ class App(tk.Tk):
         last_entry = ttk.Entry(form, textvariable=self.last_name_var, width=18)
         last_entry.pack(side="left", padx=(0, SP["md"]))
         last_entry.bind("<Return>", lambda *_: self.on_add_member())
+        ttk.Label(form, text="BGG username (optional)", style="Filter.TLabel").pack(side="left", padx=(0, SP["xs"]))
+        self.bgg_user_var = tk.StringVar()
+        bgg_entry = ttk.Entry(form, textvariable=self.bgg_user_var, width=18)
+        bgg_entry.pack(side="left", padx=(0, SP["md"]))
+        bgg_entry.bind("<Return>", lambda *_: self.on_add_member())
         ttk.Button(form, text="Add friend", command=self.on_add_member).pack(side="left")
-        ttk.Button(form, text="Remove selected", style="Ghost.TButton",
+
+        # Actions on the selected row sit on their own line so the add form
+        # above never outgrows the window's minimum width.
+        row_actions = ttk.Frame(frame)
+        row_actions.pack(fill="x", pady=(SP["sm"], 0))
+        ttk.Button(row_actions, text="Edit selected", style="Ghost.TButton",
+                   command=self.on_edit_member).pack(side="left")
+        ttk.Button(row_actions, text="Remove selected", style="Ghost.TButton",
                    command=self.on_delete_member).pack(side="left", padx=(SP["sm"], 0))
 
-        cols = ("name", "out", "since")
-        self._members_headings = {"name": "Name", "out": "Currently out", "since": "Friend since"}
+        cols = ("name", "bgg", "out", "since")
+        self._members_headings = {"name": "Name", "bgg": "BGG username",
+                                  "out": "Currently out", "since": "Friend since"}
         self.members_tree = ttk.Treeview(frame, columns=cols, show="headings")
         self.members_tree.heading("name", text="Name")
+        self.members_tree.heading("bgg", text="BGG username")
         self.members_tree.heading("out", text="Currently out")
         self.members_tree.heading("since", text="Friend since")
         self._make_sortable(self.members_tree, self._members_headings)
         self.members_tree.column("name", width=240)
+        self.members_tree.column("bgg", width=180)
         self.members_tree.column("out", width=120, anchor="center")
         self.members_tree.column("since", width=160, anchor="center")
         self.members_tree.pack(fill="both", expand=True, pady=(SP["md"], 0))
         self.members_tree.bind("<Double-1>", self._on_member_double_click)
         self.members_tree.bind("<Return>",   self._on_member_return)
 
-        ttk.Label(frame, text="Double-click a friend to see their checkout history.",
+        ttk.Label(frame, text="Double-click a friend to see their checkout history, "
+                              "or select one and choose Edit selected to change their details.",
                   style="Muted.TLabel").pack(anchor="w", pady=(SP["xs"], 0))
 
     def refresh_members(self) -> None:
@@ -2892,12 +3293,14 @@ class App(tk.Tk):
                 "",
                 "end",
                 iid=iid,
-                values=(f"{u['first_name']} {u['last_name']}", counts.get(u["id"], 0), fmt_date(u["created_at"])),
+                values=(f"{u['first_name']} {u['last_name']}", u["bgg_username"] or "",
+                        counts.get(u["id"], 0), fmt_date(u["created_at"])),
             )
             # Sort "Name" by last name (then first), and "Member since" by its
             # real ISO timestamp — both differ from what's actually displayed.
             self._tv_rawdata[id(self.members_tree)][iid] = {
                 "name": (u["last_name"].lower(), u["first_name"].lower()),
+                "bgg": (u["bgg_username"] or "").lower(),
                 "since": u["created_at"] or "",
             }
         self._reapply_sort(self.members_tree, self._members_headings)
@@ -2905,15 +3308,76 @@ class App(tk.Tk):
     def on_add_member(self) -> None:
         first = self.first_name_var.get().strip()
         last = self.last_name_var.get().strip()
-        if not first or not last:
-            messagebox.showerror("Missing info", "Both first and last name are required.")
-            return
+        bgg = self.bgg_user_var.get().strip()
         with db.connect() as c:
-            db.add_user(c, first, last)
+            error = db.validate_friend(c, first, last)
+            if not error:
+                db.add_user(c, first, last, bgg)
+        if error:
+            messagebox.showerror("Can't add friend", error)
+            return
         self.first_name_var.set("")
         self.last_name_var.set("")
+        self.bgg_user_var.set("")
         self.refresh_members()
         self.status(f"Added {first} {last}.")
+
+    def on_edit_member(self) -> None:
+        """Edit the selected friend's first name, last name and BGG username."""
+        sel = self.members_tree.selection()
+        if not sel:
+            messagebox.showinfo("Edit friend", "Select a friend to edit first.")
+            return
+        with db.connect() as c:
+            user = c.execute("SELECT * FROM users WHERE id = ?", (int(sel[0]),)).fetchone()
+        if not user:
+            return
+
+        win = tk.Toplevel(self)
+        win.title("Edit Friend")
+        win.transient(self)
+        win.resizable(False, False)
+        win.configure(bg=C_BG)
+
+        frame = ttk.Frame(win, padding=16)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(frame, text="Update this friend's details.",
+                  foreground=C_INK_500, font=("Segoe UI", 8)).grid(
+                      row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        first_var = tk.StringVar(value=user["first_name"])
+        last_var = tk.StringVar(value=user["last_name"])
+        bgg_var = tk.StringVar(value=user["bgg_username"] or "")
+        first_entry = None
+        for row, (label, var) in enumerate([("First name", first_var),
+                                            ("Last name", last_var),
+                                            ("BGG username (optional)", bgg_var)], start=1):
+            ttk.Label(frame, text=label).grid(row=row, column=0, sticky="w", pady=4, padx=(0, 10))
+            entry = ttk.Entry(frame, textvariable=var, width=28)
+            entry.grid(row=row, column=1, sticky="we", pady=4)
+            entry.bind("<Return>", lambda *_: save())
+            if first_entry is None:
+                first_entry = entry
+
+        def save() -> None:
+            first, last, bgg = first_var.get().strip(), last_var.get().strip(), bgg_var.get().strip()
+            with db.connect() as c:
+                error = db.validate_friend(c, first, last, exclude_id=user["id"])
+                if not error:
+                    db.update_user(c, user["id"], first, last, bgg)
+            if error:
+                messagebox.showerror("Can't save friend", error, parent=win)
+                return
+            win.destroy()
+            self.refresh_all()
+            self.status(f"Updated {first} {last}.")
+
+        btn_row = ttk.Frame(frame)
+        btn_row.grid(row=4, column=0, columnspan=2, sticky="e", pady=(12, 0))
+        ttk.Button(btn_row, text="Cancel", command=win.destroy).pack(side="left", padx=(0, 6))
+        ttk.Button(btn_row, text="Save", command=save).pack(side="left")
+        win.bind("<Escape>", lambda *_: win.destroy())
+        first_entry.focus_set()
+        win.grab_set()
 
     def on_delete_member(self) -> None:
         sel = self.members_tree.selection()
@@ -3028,6 +3492,7 @@ class App(tk.Tk):
         summary.pack(anchor="w", padx=10)
 
         ttk.Button(win, text="Close", command=win.destroy).pack(pady=(4, 10))
+        win.bind("<Escape>", lambda *_: win.destroy())
         win.grab_set()
 
     # ---------- history tab ----------
@@ -3411,6 +3876,7 @@ class App(tk.Tk):
                    command=win.destroy).pack(side="left", padx=(0, 6))
         ttk.Button(btn_row, text="Save",   command=save).pack(side="left")
 
+        win.bind("<Escape>", lambda *_: win.destroy())
         win.grab_set()
 
     # ---------- settings dialog ----------
@@ -3504,6 +3970,7 @@ class App(tk.Tk):
         ttk.Button(btn_row, text="Save", command=save).pack(side="left")
 
         frame.columnconfigure(1, weight=1)
+        win.bind("<Escape>", lambda *_: win.destroy())
         win.grab_set()
 
     def on_clear_collection(self) -> None:
@@ -3525,16 +3992,10 @@ class App(tk.Tk):
                 except OSError:
                     pass
 
-    def _reset_claim_if_orphaned(self) -> None:
-        """Drop the device-owner claim if that member no longer owns any
-        collection (e.g. it was just cleared), so a new collection can be claimed."""
-        mid = self.settings.get("claimed_member_id")
-        if not mid:
-            return
-        with db.connect() as c:
-            still_owns = db.owned_collection_ids(c, mid)
-        if not still_owns:
-            self.settings.pop("claimed_member_id", None)
+    def _reset_claim_if_cleared(self, cleared_usernames: list) -> None:
+        """Drop the claimed-collection setting if that collection was just
+        cleared, so a new collection can be claimed."""
+        if db.reset_claim_if_cleared(self.settings, cleared_usernames):
             config.save(self.settings)
 
     def _forget_bgg_username_if_cleared(self, cleared_usernames: list) -> None:
@@ -3559,7 +4020,7 @@ class App(tk.Tk):
         with db.connect() as c:
             deleted = db.clear_collections(c, [col["id"]])
         self._drop_images(deleted)
-        self._reset_claim_if_orphaned()
+        self._reset_claim_if_cleared([col["bgg_username"]])
         self._forget_bgg_username_if_cleared([col["bgg_username"]])
         self._image_cache.clear()
         self._gradient_cache.clear()
@@ -3591,6 +4052,7 @@ class App(tk.Tk):
                 "SELECT bgg_username FROM collections WHERE bgg_username IS NOT NULL")]
             c.execute("DELETE FROM collections")
         self._drop_images(deleted)
+        self._reset_claim_if_cleared(cleared_usernames)
         self._forget_bgg_username_if_cleared(cleared_usernames)
         self._image_cache.clear()
         self._gradient_cache.clear()
@@ -3661,7 +4123,7 @@ class App(tk.Tk):
                         p.unlink()
                     except OSError:
                         pass
-            self._reset_claim_if_orphaned()
+            self._reset_claim_if_cleared(cleared_usernames)
             self._forget_bgg_username_if_cleared(cleared_usernames)
             self._image_cache.clear()
             self._gradient_cache.clear()
@@ -3681,6 +4143,7 @@ class App(tk.Tk):
                    command=win.destroy).pack(side="left", padx=(0, 6))
         ttk.Button(btn_row, text="Clear Selected", style="Danger.TButton",
                    command=do_clear).pack(side="left")
+        win.bind("<Escape>", lambda *_: win.destroy())
         win.grab_set()
 
     # ---------- about ----------
@@ -3753,6 +4216,7 @@ class App(tk.Tk):
             padx=20, pady=6, cursor="hand2",
         ).pack(pady=(14, 18))
 
+        win.bind("<Escape>", lambda *_: win.destroy())
         win.grab_set()
 
     # ---------- actions ----------
@@ -3839,7 +4303,7 @@ class App(tk.Tk):
         """
         username = self.settings.get("bgg_username", "").strip()
         password = _kr_get_password()
-        tok      = bgg.BGG_APP_TOKEN or self.settings.get("bgg_token", "").strip()
+        tok      = bgg.BGG_APP_TOKEN.strip()
 
         # Always show the Sync dialog (pre-filled) so credentials can be entered
         # or updated right in the sync flow — parity with the mobile app.
@@ -3874,29 +4338,28 @@ class App(tk.Tk):
             bg=C_BG, fg="#888", font=("Segoe UI", 8), padx=16, justify="left",
         ).pack(anchor="w", pady=(0, 8))
 
-        # Claim this collection as your own — disabled once you've claimed one.
-        already_claimed = bool(self.settings.get("claimed_member_id"))
-        _state = "disabled" if already_claimed else "normal"
+        # Claim this collection as your own — the checkbox alone is enough (no
+        # name, no Friend created); the claim is keyed by the BGG username being
+        # synced. Once one is claimed, the dialog just says which.
+        claimed = self.settings.get("claimed_bgg_username") or ""
         claim_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(dialog, text="Claim this collection as my own",
-                        variable=claim_var, state=_state).pack(
-                            anchor="w", padx=16, pady=(2, 0))
-        _name_row = ttk.Frame(dialog)
-        _name_row.pack(padx=16, pady=(2, 2), anchor="w")
-        first_var = tk.StringVar()
-        last_var  = tk.StringVar()
-        ttk.Entry(_name_row, textvariable=first_var, width=15,
-                  state=_state).pack(side="left")
-        ttk.Entry(_name_row, textvariable=last_var, width=16,
-                  state=_state).pack(side="left", padx=(6, 0))
-        tk.Label(
-            dialog,
-            text=("You've already claimed a collection."
-                  if already_claimed else
-                  "Adds you as a member and restricts check-outs so only you can\n"
-                  "borrow games from this collection."),
-            bg=C_BG, fg="#888", font=("Segoe UI", 8), padx=16, justify="left",
-        ).pack(anchor="w", pady=(0, 8))
+        if claimed:
+            tk.Label(
+                dialog,
+                text=f"You've already claimed \"{claimed}\" as your own collection.",
+                bg=C_BG, fg="#888", font=("Segoe UI", 8), padx=16, justify="left",
+            ).pack(anchor="w", pady=(2, 8))
+        else:
+            ttk.Checkbutton(dialog, text="Claim this collection as my own",
+                            variable=claim_var).pack(anchor="w", padx=16, pady=(2, 0))
+            tk.Label(
+                dialog,
+                text="Marks this synced collection as yours, so check-outs are only\n"
+                     "offered for games from it. Doesn't add a friend — that only\n"
+                     "happens when you add one directly or type a new name while\n"
+                     "checking out or logging a play.",
+                bg=C_BG, fg="#888", font=("Segoe UI", 8), padx=16, justify="left",
+            ).pack(anchor="w", pady=(0, 8))
 
         btn_frame = ttk.Frame(dialog)
         btn_frame.pack(padx=16, pady=(4, 14), fill="x")
@@ -3908,15 +4371,7 @@ class App(tk.Tk):
             if not uname:
                 messagebox.showerror("Username required", "Enter your BGG username.", parent=dialog)
                 return
-            owner_first = first_var.get().strip()
-            owner_last  = last_var.get().strip()
             claim = claim_var.get()
-            if claim and not (owner_first or owner_last):
-                messagebox.showerror(
-                    "Name required",
-                    "Enter your name to claim this collection as your own.",
-                    parent=dialog)
-                return
             self.settings["bgg_username"] = uname
             self.settings.pop("bgg_password", None)
             config.save(self.settings)
@@ -3928,9 +4383,7 @@ class App(tk.Tk):
             threading.Thread(
                 target=self._import_from_username_bg,
                 args=(uname, tok, pwd or None),
-                kwargs={"owner_first": owner_first if claim else "",
-                        "owner_last":  owner_last if claim else "",
-                        "claim_as_mine": claim},
+                kwargs={"claim_as_mine": claim},
                 daemon=True,
             ).start()
 
@@ -3944,7 +4397,6 @@ class App(tk.Tk):
 
     def _import_from_username_bg(self, username: str, token: str,
                                    password: Optional[str] = None,
-                                   owner_first: str = "", owner_last: str = "",
                                    claim_as_mine: bool = False) -> None:
         try:
             opener = None
@@ -3970,7 +4422,7 @@ class App(tk.Tk):
             if not games:
                 self.after(0, lambda: messagebox.showinfo(
                     "Nothing found",
-                    f"No owned games found for '{username}'.\n"
+                    f"No games found in {username}'s BGG collection.\n"
                     "Check the username is correct. If your collection is private,\n"
                     "enter your BGG password in the sync dialog.",
                 ))
@@ -3987,24 +4439,13 @@ class App(tk.Tk):
 
             self._save_games_to_db(games, collection_username=username)
 
-            # Optionally add the importer as a member, claim this collection for
-            # them, and mark them as this device's owner ("me") so the UI only
-            # offers check-outs from their own collection.
-            if claim_as_mine and (owner_first or owner_last):
-                with db.connect() as c:
-                    cid = db.collection_id_for_username(c, username)
-                    if cid:
-                        existing = next(
-                            (u for u in db.list_users(c)
-                             if u["first_name"].strip().lower() == owner_first.lower()
-                             and u["last_name"].strip().lower() == owner_last.lower()),
-                            None,
-                        )
-                        uid = existing["id"] if existing else db.add_user(
-                            c, owner_first, owner_last)
-                        db.claim_collection(c, cid, uid)
-                        self.settings["claimed_member_id"] = uid
-                        config.save(self.settings)
+            # Optionally claim this collection as this device's own, so the UI
+            # only offers check-outs for games in it. The BGG username being
+            # synced is the identity — no name is asked for and no Friend is
+            # created. An existing claim is kept.
+            if claim_as_mine and not self.settings.get("claimed_bgg_username"):
+                self.settings["claimed_bgg_username"] = username
+                config.save(self.settings)
 
             # Refresh everything (dashboard tiles, games, members, history,
             # plays) — not just the games grid — so the stat counts update too.
@@ -4134,6 +4575,7 @@ class App(tk.Tk):
         ttk.Button(btn_row, text="Keep All", command=win.destroy).pack(side="left", padx=(0, 6))
         ttk.Button(btn_row, text="Remove Selected", command=_do_remove).pack(side="left")
 
+        win.bind("<Escape>", lambda *_: win.destroy())
         win.grab_set()
 
     def _sync_play_to_bgg_bg(
@@ -4155,7 +4597,7 @@ class App(tk.Tk):
             self._post_status(f"BGG sync error: {exc}")
 
     def on_sync_api(self) -> None:
-        token = bgg.BGG_APP_TOKEN or self.settings.get("bgg_token", "")
+        token = bgg.BGG_APP_TOKEN
         username = self.settings.get("bgg_username", "")
         if not token:
             messagebox.showinfo(
@@ -4173,17 +4615,19 @@ class App(tk.Tk):
     def _sync_api_bg(self, username: str, token: str) -> None:
         try:
             self._post_status(f"Fetching collection for {username}...")
-            collection = bgg.fetch_collection(username, token=token, on_status=self._post_status)
+            collection = bgg.fetch_collection(username, token=token, on_status=self._post_status,
+                                               own_only=False)
             ids = [e.bgg_id for e in collection]
             self._post_status(f"Got {len(ids)} games. Fetching details...")
             details = bgg.fetch_things(ids, token=token, on_status=self._post_status)
-            # merge collection-only fields (my_rating, my_comment) into details
+            # merge collection-only fields (my_rating, my_comment, bgg_status) into details
             by_id = {d.bgg_id: d for d in details}
             for entry in collection:
                 d = by_id.get(entry.bgg_id)
                 if d is not None:
                     d.my_rating = entry.my_rating
                     d.my_comment = entry.my_comment
+                    d.bgg_status = entry.bgg_status
 
             # Detect games that left THIS collection's BGG list (not other collections')
             bgg_ids = set(by_id.keys())
@@ -4292,6 +4736,7 @@ class App(tk.Tk):
         complexity_var = tk.StringVar(value="Any")
         coop_var       = tk.StringVar(value="Any")
         available_var  = tk.BooleanVar(value=True)
+        unplayed_only_var = tk.BooleanVar(value=False)
 
         def crit_row(r, label, var, values):
             ttk.Label(frame, text=label).grid(row=r, column=0, sticky="w", pady=3, padx=(0, 10))
@@ -4311,19 +4756,23 @@ class App(tk.Tk):
                         variable=available_var,
                         style="Filter.TCheckbutton").grid(row=5, column=0, columnspan=2,
                                                           sticky="w", pady=(6, 0))
+        ttk.Checkbutton(frame, text="Only games I haven't played",
+                        variable=unplayed_only_var,
+                        style="Filter.TCheckbutton").grid(row=6, column=0, columnspan=2,
+                                                          sticky="w", pady=(2, 0))
 
         ttk.Separator(frame, orient="horizontal").grid(
-            row=6, column=0, columnspan=2, sticky="ew", pady=12)
+            row=7, column=0, columnspan=2, sticky="ew", pady=12)
 
         # ── result area ───────────────────────────────────────────────────────
         result_name = tk.StringVar(value="Set your criteria, then press Pick.")
         result_meta = tk.StringVar(value="")
         name_lbl = ttk.Label(frame, textvariable=result_name,
                              font=("Segoe UI", 12, "bold"), wraplength=320, justify="left")
-        name_lbl.grid(row=7, column=0, columnspan=2, sticky="w")
+        name_lbl.grid(row=8, column=0, columnspan=2, sticky="w")
         meta_lbl = ttk.Label(frame, textvariable=result_meta, foreground=C_INK_600,
                              font=("Segoe UI", 9), wraplength=320, justify="left")
-        meta_lbl.grid(row=8, column=0, columnspan=2, sticky="w", pady=(2, 0))
+        meta_lbl.grid(row=9, column=0, columnspan=2, sticky="w", pady=(2, 0))
 
         picked: list = [None]   # holds the current game row
 
@@ -4334,6 +4783,8 @@ class App(tk.Tk):
 
         def _matches(g, open_ids) -> bool:
             if available_var.get() and g["bgg_id"] in open_ids:
+                return False
+            if unplayed_only_var.get() and not (g["own"] == 1 and g["is_unplayed"]):
                 return False
             pv = players_var.get()
             if pv != "Any":
@@ -4414,7 +4865,7 @@ class App(tk.Tk):
 
         # ── buttons ───────────────────────────────────────────────────────────
         btn_row = ttk.Frame(frame)
-        btn_row.grid(row=9, column=0, columnspan=2, sticky="e", pady=(16, 0))
+        btn_row.grid(row=10, column=0, columnspan=2, sticky="e", pady=(16, 0))
         ttk.Button(btn_row, text="Close", style="Ghost.TButton",
                    command=win.destroy).pack(side="left", padx=(0, 6))
         open_btn = ttk.Button(btn_row, text="Open Details", style="Ghost.TButton",
@@ -4423,6 +4874,7 @@ class App(tk.Tk):
         open_btn.state(["disabled"])
         ttk.Button(btn_row, text="🎲  Pick", command=pick).pack(side="left")
 
+        win.bind("<Escape>", lambda *_: win.destroy())
         win.grab_set()
 
     def on_add_game(self) -> None:
@@ -4432,6 +4884,11 @@ class App(tk.Tk):
         dlg.transient(self)
         dlg.resizable(False, False)
         dlg.configure(bg=C_BG)
+
+        ttk.Label(dlg, text="Search BoardGameGeek to add a game with its full details "
+                  "filled in automatically.",
+                  foreground=C_INK_500, font=("Segoe UI", 8),
+                  padding=(12, 8, 12, 0)).pack(anchor="w")
 
         # ── search row ────────────────────────────────────────────────────────
         top = ttk.Frame(dlg, padding=(12, 12, 12, 4))
@@ -4479,7 +4936,7 @@ class App(tk.Tk):
 
             def _bg():
                 try:
-                    tok = bgg.BGG_APP_TOKEN or self.settings.get("bgg_token", "")
+                    tok = bgg.BGG_APP_TOKEN
                     found = bgg.search_games(q, token=tok)
                 except Exception as exc:
                     self.after(0, lambda: status_var.set(f"Search failed: {exc}"))
@@ -4518,6 +4975,7 @@ class App(tk.Tk):
         search_btn.configure(command=do_search)
         add_btn.configure(command=proceed)
 
+        dlg.bind("<Escape>", lambda *_: dlg.destroy())
         dlg.grab_set()
         query_entry.focus_set()
 
@@ -4533,7 +4991,7 @@ class App(tk.Tk):
         wait.grab_set()
         wait.update()
 
-        tok = (bgg.BGG_APP_TOKEN or self.settings.get("bgg_token", "")).strip() or None
+        tok = (bgg.BGG_APP_TOKEN).strip() or None
 
         def _bg():
             details = None
@@ -4582,12 +5040,20 @@ class App(tk.Tk):
         )
         self._open_game_edit_dialog(details, is_new=False)
 
+    def on_add_game_manual(self) -> None:
+        """Open the shared game-edit dialog with no BGG data pre-filled, skipping
+        the BGG search step entirely — for games not on BoardGameGeek."""
+        self._open_game_edit_dialog(bgg.GameDetails(bgg_id=None, name=""),
+                                    is_new=True, is_manual=True)
+
     def _open_game_edit_dialog(self, details: Optional[bgg.GameDetails], *,
-                               is_new: bool) -> None:
+                               is_new: bool, is_manual: bool = False) -> None:
         """Editable form pre-filled from a GameDetails object.
 
-        is_new=True  → saves as a new game (or replaces if BGG ID already exists).
-        is_new=False → updates an existing game, preserving image_path.
+        is_new=True    → saves as a new game (or replaces if BGG ID already exists).
+        is_new=False   → updates an existing game, preserving image_path.
+        is_manual=True → opened via "Add Manually" (blank `details`, no BGG search);
+                          shows a caption explaining the manual-entry flow.
         """
         if details is None:
             messagebox.showerror("Error", "No game data received from BGG.")
@@ -4602,7 +5068,17 @@ class App(tk.Tk):
         lpad = {"padx": (12, 4), "pady": 3, "sticky": "e"}
         rpad = {"padx": (4, 12), "pady": 3, "sticky": "we"}
 
+        # When opened via "Add Manually" a caption occupies row 0, pushing every
+        # other row down by one (grid rows must be non-negative).
+        _roff = 1 if is_manual else 0
+        if is_manual:
+            ttk.Label(dlg, text="Enter a game's details yourself — useful for games "
+                      "not on BoardGameGeek.",
+                      foreground=C_INK_500, font=("Segoe UI", 8),
+                      ).grid(row=0, column=0, columnspan=2, padx=12, pady=(10, 0), sticky="w")
+
         def row_entry(r, label, value, width=34):
+            r += _roff
             ttk.Label(dlg, text=label, font=("Segoe UI", 9, "bold")).grid(
                 row=r, column=0, **lpad)
             var = tk.StringVar(value=str(value) if value is not None else "")
@@ -4628,7 +5104,7 @@ class App(tk.Tk):
         comment_var = row_entry(8, "Comment",           d.my_comment)
 
         # Tags row — uses existing tags from DB when editing
-        ttk.Label(dlg, text="Tags", font=("Segoe UI", 9, "bold")).grid(row=9, column=0, **lpad)
+        ttk.Label(dlg, text="Tags", font=("Segoe UI", 9, "bold")).grid(row=9 + _roff, column=0, **lpad)
         existing_tags = ""
         if not is_new:
             with db.connect() as c:
@@ -4639,16 +5115,16 @@ class App(tk.Tk):
             _existing_tag_list = ["Any"] + db.all_tags(c)
         tags_var = tk.StringVar(value=existing_tags)
         _AutocompleteEntry(dlg, _existing_tag_list, textvariable=tags_var,
-                           width=34).grid(row=9, column=1, **rpad)
+                           width=34).grid(row=9 + _roff, column=1, **rpad)
         ttk.Label(dlg, text="Comma-separated, e.g. Party, Family, Filler",
                   foreground=C_INK_500, font=("Segoe UI", 8),
-                  ).grid(row=10, column=1, sticky="w", padx=(4, 12), pady=(0, 2))
+                  ).grid(row=10 + _roff, column=1, sticky="w", padx=(4, 12), pady=(0, 2))
 
         ttk.Label(dlg, text="Description",
-                  font=("Segoe UI", 9, "bold")).grid(row=11, column=0, **lpad)
+                  font=("Segoe UI", 9, "bold")).grid(row=11 + _roff, column=0, **lpad)
         desc_box = tk.Text(dlg, width=38, height=5, font=("Segoe UI", 9),
                            wrap="word", relief="solid", bd=1)
-        desc_box.grid(row=11, column=1, padx=(4, 12), pady=3, sticky="we")
+        desc_box.grid(row=11 + _roff, column=1, padx=(4, 12), pady=3, sticky="we")
         if d.description:
             desc_box.insert("1.0", d.description)
 
@@ -4660,9 +5136,9 @@ class App(tk.Tk):
                     _current_insert = bool(_gi["has_insert"])
         insert_var = tk.BooleanVar(value=_current_insert)
         ttk.Label(dlg, text="3D Insert",
-                  font=("Segoe UI", 9, "bold")).grid(row=12, column=0, **lpad)
+                  font=("Segoe UI", 9, "bold")).grid(row=12 + _roff, column=0, **lpad)
         ttk.Checkbutton(dlg, text="Has 3D printed insert",
-                        variable=insert_var).grid(row=12, column=1, sticky="w",
+                        variable=insert_var).grid(row=12 + _roff, column=1, sticky="w",
                                                    padx=(4, 12), pady=3)
 
         # Cooperative/competitive — auto-derived from BGG mechanics for a new
@@ -4677,15 +5153,61 @@ class App(tk.Tk):
                 _current_coop = _gi["is_cooperative"] if _gi else None
         coop_var = tk.StringVar(value=_COOP_LABELS[_current_coop])
         ttk.Label(dlg, text="Type",
-                  font=("Segoe UI", 9, "bold")).grid(row=13, column=0, **lpad)
+                  font=("Segoe UI", 9, "bold")).grid(row=13 + _roff, column=0, **lpad)
         ttk.Combobox(dlg, textvariable=coop_var, state="readonly", width=16,
                      values=["Unset", "Cooperative", "Competitive"]
-                     ).grid(row=13, column=1, sticky="w", padx=(4, 12), pady=3)
+                     ).grid(row=13 + _roff, column=1, sticky="w", padx=(4, 12), pady=3)
+
+        # Collection status — normally set by BGG sync, but editable here for
+        # manually-added games (or to override until the next sync overwrites
+        # it). Uses a colored tk.Menu (via Menubutton) rather than a plain
+        # ttk.Combobox — a ttk.Combobox's dropdown can't be colored per item,
+        # but tk.Menu's add_command can, so every status stands apart here
+        # the same way it does in the badges elsewhere.
+        _STATUS_LABEL_LIST = ["Owned"] + [
+            bgg.STATUS_LABELS[f] for f in bgg.STATUS_FLAGS if f != "own"
+        ]
+        _label_to_flag = {bgg.STATUS_LABELS[f]: f for f in bgg.STATUS_FLAGS}
+        if is_new:
+            _current_status_label = "Owned"
+        else:
+            with db.connect() as c:
+                _gi = db.get_game(c, d.bgg_id)
+            _current_status_label = bgg.STATUS_LABELS.get(
+                _gi["bgg_status"] if _gi else None, "Owned")
+        status_var = tk.StringVar(value=_current_status_label)
+        ttk.Label(dlg, text="Collection",
+                  font=("Segoe UI", 9, "bold")).grid(row=14 + _roff, column=0, **lpad)
+
+        def _status_colors_for(label: str) -> dict:
+            return bgg.STATUS_COLORS.get(_label_to_flag.get(label, "own"), bgg.STATUS_COLORS["own"])
+
+        status_btn = tk.Menubutton(
+            dlg, textvariable=status_var, relief="raised", bd=1, width=14,
+            anchor="w", padx=6, font=("Segoe UI", 9),
+        )
+        status_menu = tk.Menu(status_btn, tearoff=0)
+
+        def _pick_status(label: str) -> None:
+            status_var.set(label)
+            sc = _status_colors_for(label)
+            status_btn.configure(bg=sc["bg"], fg=sc["text"],
+                                  activebackground=sc["bg"], activeforeground=sc["text"])
+
+        for _lbl in _STATUS_LABEL_LIST:
+            _sc = _status_colors_for(_lbl)
+            status_menu.add_command(
+                label=_lbl, background=_sc["bg"], foreground=_sc["text"],
+                command=lambda l=_lbl: _pick_status(l),
+            )
+        status_btn.configure(menu=status_menu)
+        _pick_status(_current_status_label)
+        status_btn.grid(row=14 + _roff, column=1, sticky="w", padx=(4, 12), pady=3)
 
         err_var = tk.StringVar()
         ttk.Label(dlg, textvariable=err_var, foreground=C_DR_TEXT,
                   font=("Segoe UI", 8)).grid(
-            row=14, column=0, columnspan=2, padx=12, sticky="w")
+            row=15 + _roff, column=0, columnspan=2, padx=12, sticky="w")
 
         # --- lock-status row (editing an existing game only) ---
         _FIELD_DISPLAY = {
@@ -4695,11 +5217,11 @@ class App(tk.Tk):
             "max_playtime": "Play time",
             "weight": "Complexity", "description": "Description",
             "my_comment": "Comment", "best_players": "Best at",
-            "is_cooperative": "Type",
+            "is_cooperative": "Type", "bgg_status": "Collection",
         }
         lock_lbl_var = tk.StringVar()
         lock_frame = ttk.Frame(dlg)
-        lock_frame.grid(row=15, column=0, columnspan=2,
+        lock_frame.grid(row=16 + _roff, column=0, columnspan=2,
                         padx=12, pady=(0, 2), sticky="w")
         ttk.Label(lock_frame, textvariable=lock_lbl_var,
                   foreground=C_INK_600, font=("Segoe UI", 8)).pack(side="left")
@@ -4753,9 +5275,7 @@ class App(tk.Tk):
                     return
             else:
                 with db.connect() as c:
-                    r = c.execute("SELECT MIN(bgg_id) FROM games").fetchone()
-                    lowest = r[0] if r[0] is not None else 0
-                bgg_id = min(lowest, 0) - 1
+                    bgg_id = db.next_manual_id(c)
 
             pt_val = _i(time_var)
 
@@ -4794,9 +5314,12 @@ class App(tk.Tk):
                 "publishers":    ", ".join(d.publishers) if d.publishers else None,
                 "best_players":  best_var.get().strip() or None,
                 "my_comment":    comment_var.get().strip() or None,
-                "own":           1,
+                "own":           1 if status_var.get() == "Owned" else 0,
                 "last_synced":   db.now_iso(),
                 "is_cooperative": _COOP_VALUES[coop_var.get()],
+                "base_game_id":   d.base_game_id,
+                "base_game_name": d.base_game_name,
+                "bgg_status":    {v: k for k, v in bgg.STATUS_LABELS.items()}[status_var.get()],
             }
             with db.connect() as c:
                 # Auto-lock any fields the user explicitly changed vs the DB.
@@ -4815,6 +5338,11 @@ class App(tk.Tk):
                     for field, new_val, old_val in field_checks:
                         if new_val != old_val:
                             manual.add(field)
+                    # Collection status and `own` move together — a manual status
+                    # change should stay put until the next sync's real BGG data
+                    # is deliberately allowed back in (via "Clear overrides").
+                    if game_row["bgg_status"] != existing["bgg_status"]:
+                        manual.update({"bgg_status", "own"})
                     # Weight: round to 2 dp to avoid float-precision false positives.
                     new_w = game_row["weight"]
                     old_w = existing["weight"]
@@ -4848,12 +5376,13 @@ class App(tk.Tk):
                 ).start()
 
         btn_row = ttk.Frame(dlg, padding=(12, 4, 12, 12))
-        btn_row.grid(row=16, column=0, columnspan=2, sticky="e")
+        btn_row.grid(row=17 + _roff, column=0, columnspan=2, sticky="e")
         ttk.Button(btn_row, text="Cancel", command=dlg.destroy).pack(side="left", padx=(0, 6))
         ttk.Button(btn_row, text="Save Game" if is_new else "Save Changes",
                    command=save).pack(side="left")
 
         dlg.columnconfigure(1, weight=1)
+        dlg.bind("<Escape>", lambda *_: dlg.destroy())
         dlg.grab_set()
 
     def _fetch_and_cache_images_bg(self, bgg_ids: list[int], force: bool = False) -> None:
@@ -4985,10 +5514,17 @@ class App(tk.Tk):
                     "publishers": ", ".join(g.publishers) if g.publishers else None,
                     "best_players": g.best_players,
                     "my_comment": g.my_comment,
-                    "own": 1,
+                    # BGG collection status, when known, determines real ownership;
+                    # unknown status (e.g. an older CSV export with no status
+                    # columns) defaults to owned, matching this function's
+                    # pre-existing behavior.
+                    "own": 1 if g.bgg_status in (None, "own") else 0,
                     "last_synced": db.now_iso(),
                     "is_expansion": int(g.is_expansion),
                     "is_cooperative": bgg.derive_cooperative(g.mechanics),
+                    "base_game_id": g.base_game_id,
+                    "base_game_name": g.base_game_name,
+                    "bgg_status": g.bgg_status,
                 }
                 # Don't clobber image_path or manually-locked fields on re-sync.
                 existing = db.get_game(c, g.bgg_id)
@@ -4999,12 +5535,14 @@ class App(tk.Tk):
                     skip = db.get_manual_fields(c, g.bgg_id)
                 db.upsert_game(c, row, skip_fields=skip)
 
-            # Link these games to their collection (one collection per synced BGG
-            # username); the collection's membership becomes exactly this set.
+            # Link every synced game (owned, wishlist, for-trade, etc.) to this
+            # collection so "Clear Collection" removes all of them, and collection
+            # comparisons reflect the full BGG collection.
             if collection_username:
                 cid = db.get_or_create_collection(
                     c, collection_username, collection_name or collection_username)
-                db.replace_collection_games(c, cid, [g.bgg_id for g in games])
+                all_ids = [g.bgg_id for g in games]
+                db.replace_collection_games(c, cid, all_ids)
 
     # Largest card cover is 260 px tall; store covers a bit bigger so they look
     # crisp at the Large size, but cap to keep image files small on disk.
@@ -5061,6 +5599,22 @@ class App(tk.Tk):
     # ---------- check in / out ----------
 
     def on_check_out(self, game) -> None:
+        if game["own"] != 1:
+            messagebox.showerror("Not owned", "Only games you own can be checked out.")
+            return
+        # This device has claimed its synced collection as "mine": only games
+        # in that collection may be checked out here (whichever entry point —
+        # card button, right-click menu, double-click — got us here).
+        claimed = self.settings.get("claimed_bgg_username")
+        if claimed:
+            with db.connect() as c:
+                in_claimed = db.game_in_username_collection(c, claimed, game["bgg_id"])
+            if not in_claimed:
+                messagebox.showinfo(
+                    "Not in your collection",
+                    f"\"{game['name']}\" isn't in your claimed collection "
+                    f"(\"{claimed}\"), so it can't be checked out here.")
+                return
         with db.connect() as c:
             all_users = db.list_users(c)
             allowed = db.members_allowed_to_checkout(c, game["bgg_id"])
@@ -5141,6 +5695,7 @@ class App(tk.Tk):
 
         ttk.Button(dialog, text="Cancel", command=dialog.destroy).grid(row=next_row, column=0, padx=12, pady=(0, 12), sticky="we")
         ttk.Button(dialog, text="Check Out", command=confirm).grid(row=next_row, column=1, padx=12, pady=(0, 12), sticky="we")
+        dialog.bind("<Escape>", lambda *_: dialog.destroy())
         dialog.grab_set()
 
     def on_check_in(self, game) -> None:
@@ -5255,6 +5810,13 @@ class App(tk.Tk):
 
         ttk.Button(controls, text="Delete selected", style="Danger.TButton",
                    command=self.on_delete_play).pack(side="right")
+
+        # One-line "how often have I played this?" summary for the chosen game.
+        self.plays_summary_var = tk.StringVar(value="")
+        self._plays_summary_lbl = ttk.Label(
+            frame, textvariable=self.plays_summary_var,
+            font=("Segoe UI", 10, "bold"), foreground=C_INK_600)
+        # Packed only while a specific game is selected (see refresh_plays).
 
         # ── Play log pane ────────────────────────────────────────────────
         self._plays_pane = ttk.Frame(frame)
@@ -5475,9 +6037,19 @@ class App(tk.Tk):
 
         with db.connect() as c:
             rows = db.list_plays(c, game_id=game_id)
+            summary = db.play_summary(c, game_id) if game_id is not None else None
+
+        if summary is None:
+            self.plays_summary_var.set("")
+            self._plays_summary_lbl.pack_forget()
+        else:
+            self.plays_summary_var.set(play_summary_text(*summary))
+            if not self._plays_summary_lbl.winfo_ismapped():
+                self._plays_summary_lbl.pack(anchor="w", pady=(0, self.SP["sm"]),
+                                             before=self._plays_pane)
 
         for r in rows:
-            dur = f"{r['duration_minutes']} min" if r["duration_minutes"] else ""
+            dur =f"{r['duration_minutes']} min" if r["duration_minutes"] else ""
             iid = str(r["id"])
             self.plays_tree.insert(
                 "", "end",
@@ -5542,7 +6114,7 @@ class App(tk.Tk):
                 "Search BGG", "Game name to search on BGG:", initialvalue=q, parent=dialog)
             if not q:
                 return
-            tok = bgg.BGG_APP_TOKEN or self.settings.get("bgg_token", "")
+            tok = bgg.BGG_APP_TOKEN
             try:
                 results = bgg.search_games(q, token=tok)
             except Exception as exc:
@@ -5591,6 +6163,8 @@ class App(tk.Tk):
                     "my_comment": None, "own": 0, "last_synced": db.now_iso(),
                     "is_expansion": int(d.is_expansion) if d else 0,
                     "is_cooperative": bgg.derive_cooperative(d.mechanics) if d else None,
+                    "base_game_id": d.base_game_id if d else None,
+                    "base_game_name": d.base_game_name if d else None,
                 })
             # Refresh game list in combobox
             game_id_map[name] = bgg_id
@@ -5754,6 +6328,7 @@ class App(tk.Tk):
         ttk.Button(btn_frame, text="Save Changes" if editing else "Save Play",
                    command=save_play).pack(side="left")
 
+        dialog.bind("<Escape>", lambda *_: dialog.destroy())
         dialog.grab_set()
 
     def on_edit_play(self) -> None:
@@ -5804,6 +6379,23 @@ class App(tk.Tk):
             toggles, text="📦 Has 3D printed insert",
             variable=insert_var, command=on_insert_toggle,
         ).pack(side="left")
+
+        # "Not played yet" — only offered for an owned game with no logged plays
+        # (logging a play clears the mark automatically).
+        with db.connect() as c:
+            _fresh = db.get_game(c, game["bgg_id"])
+            _can_unplayed = db.unplayed_eligible(c, game["bgg_id"])
+        unplayed_var = tk.BooleanVar(value=bool(_fresh and _fresh["is_unplayed"]))
+        if _can_unplayed:
+            def on_unplayed_toggle() -> None:
+                with db.connect() as c:
+                    db.set_unplayed(c, [game["bgg_id"]], unplayed_var.get())
+                self.refresh_games(preserve_scroll=True)
+                _sync_unplayed_banner()
+            ttk.Checkbutton(
+                toggles, text="Not played yet",
+                variable=unplayed_var, command=on_unplayed_toggle,
+            ).pack(side="left", padx=(20, 0))
 
         fav_var = tk.BooleanVar(value=bool(game["is_favorite"]))
         def on_fav_toggle() -> None:
@@ -5873,8 +6465,23 @@ class App(tk.Tk):
         if game["is_expansion"]:
             tk.Label(info, text="Expansion", bg=C_BLUE_050, fg=C_BLUE_800,
                      font=("Segoe UI", 8), padx=6, pady=2).pack(anchor="w", pady=(2, 0))
+        # Themed "not played yet" banner (white on the theme's card colour).
+        unplayed_banner = tk.Label(
+            info, text="Not played yet — Log a play to clear",
+            bg=C_CARDS[1], fg="#FFFFFF", font=("Segoe UI", 9, "bold"),
+            padx=8, pady=3, anchor="w")
+        def _sync_unplayed_banner() -> None:
+            if unplayed_var.get() and _fresh is not None and _fresh["own"] == 1:
+                unplayed_banner.pack(anchor="w", pady=(4, 0), after=name_lbl)
+            else:
+                unplayed_banner.pack_forget()
+        _sync_unplayed_banner()
         if game["year"]:
             ttk.Label(info, text=f"Published {game['year']}", foreground=C_INK_600).pack(anchor="w")
+        with db.connect() as c:
+            _ps = db.play_summary(c, game["bgg_id"])
+        ttk.Label(info, text=play_summary_text(*_ps, compact=True),
+                  font=("Segoe UI", 9, "bold"), foreground=C_INK_600).pack(anchor="w")
 
         detail_rows: list[tuple[str, str]] = []
         detail_rows.append(("Players",     fmt_players(game["min_players"], game["max_players"])))
@@ -5901,14 +6508,35 @@ class App(tk.Tk):
             detail_rows.append(("Designers",  game["designers"]))
         if game["publishers"]:
             detail_rows.append(("Publishers", game["publishers"]))
+        if game["base_game_id"]:
+            detail_rows.append(("Expansion for", game["base_game_name"] or f"#{game['base_game_id']}"))
+        if game["bgg_status"] and game["bgg_status"] != "own":
+            detail_rows.append(("Collection", bgg.STATUS_LABELS.get(game["bgg_status"], game["bgg_status"])))
+
+        base_game_row = None
+        if game["base_game_id"]:
+            with db.connect() as c:
+                base_game_row = db.get_game(c, game["base_game_id"])
 
         grid = ttk.Frame(info)
         grid.pack(anchor="w", pady=(8, 0), fill="x")
         for i, (k, v) in enumerate(detail_rows):
             ttk.Label(grid, text=f"{k}:", font=("Segoe UI", 9, "bold")).grid(
                 row=i, column=0, sticky="nw", padx=(0, 8))
-            ttk.Label(grid, text=v, wraplength=320, justify="left").grid(
-                row=i, column=1, sticky="w")
+            if k == "Expansion for" and base_game_row is not None:
+                link = tk.Label(grid, text=f"{v}  →", fg=C_BLUE_700, cursor="hand2",
+                                 wraplength=320, justify="left", bg=C_BG)
+                link.grid(row=i, column=1, sticky="w")
+                link.bind("<Button-1>", lambda e, bg_row=base_game_row: self.show_details(bg_row))
+            elif k == "Collection" and game["bgg_status"] in bgg.STATUS_COLORS:
+                # Colored to match the badges elsewhere, instead of plain text.
+                _sc = bgg.STATUS_COLORS[game["bgg_status"]]
+                tk.Label(grid, text=v, bg=_sc["bg"], fg=_sc["text"],
+                         font=("Segoe UI", 9, "bold"), padx=6, pady=1
+                         ).grid(row=i, column=1, sticky="w")
+            else:
+                ttk.Label(grid, text=v, wraplength=320, justify="left").grid(
+                    row=i, column=1, sticky="w")
 
         if game["tags"]:
             ttk.Label(content, text="Tags:",
@@ -5925,6 +6553,17 @@ class App(tk.Tk):
                       font=("Segoe UI", 9, "bold"), padding=(0, 6, 0, 0)).pack(anchor="w")
             ttk.Label(content, text=game["my_comment"],
                       wraplength=600, justify="left").pack(anchor="w")
+
+        with db.connect() as c:
+            owned_expansions = db.list_expansions_of(c, game["bgg_id"])
+        if owned_expansions:
+            ttk.Label(content, text="Expansions you own:",
+                      font=("Segoe UI", 9, "bold"), padding=(0, 6, 0, 0)).pack(anchor="w")
+            for exp in owned_expansions:
+                link = tk.Label(content, text=f"• {exp['name']}", fg=C_BLUE_700,
+                                 cursor="hand2", bg=C_BG)
+                link.pack(anchor="w")
+                link.bind("<Button-1>", lambda e, exp_row=exp: self.show_details(exp_row))
 
         # ── play statistics ────────────────────────────────────────────────────
         with db.connect() as c:
@@ -5970,6 +6609,7 @@ class App(tk.Tk):
             text_box.pack(fill="x", pady=(0, 6))
             text_box.bind("<MouseWheel>", _on_mousewheel)
 
+        win.bind("<Escape>", lambda *_: win.destroy())
         win.grab_set()
 
     # ---------- set image ----------
@@ -6087,6 +6727,7 @@ class App(tk.Tk):
         ttk.Button(btn_frame, text="Cancel", command=dialog.destroy).pack(side="left")
         ttk.Button(btn_frame, text="Set Image", command=confirm).pack(side="right")
         dialog.bind("<Return>", lambda *_: confirm())
+        dialog.bind("<Escape>", lambda *_: dialog.destroy())
         dialog.grab_set()
 
     # ---------- BGG play history import ----------
@@ -6106,7 +6747,7 @@ class App(tk.Tk):
         ):
             return
         self.status(f"Importing BGG plays for {username}…")
-        token = bgg.BGG_APP_TOKEN or self.settings.get("bgg_token", "")
+        token = bgg.BGG_APP_TOKEN
         threading.Thread(
             target=self._import_bgg_plays_bg,
             args=(username, token),
@@ -6350,6 +6991,9 @@ class App(tk.Tk):
                     self._placeholder_img = None
                     self.settings = config.load()
                     db.init_db()          # apply any pending migrations
+                    with db.connect() as c:   # backup from an older version: claimed_member_id
+                        if db.migrate_claimed_member(c, self.settings):
+                            config.save(self.settings)
                     self.refresh_all()
                     self.status("Library imported successfully.")
                     messagebox.showinfo(
@@ -6370,8 +7014,10 @@ class App(tk.Tk):
 
     def _import_json_backup(self, src_path: str) -> None:
         """Merge-import a JSON backup (from Export for Mobile, or the mobile
-        app's own export) — adds new members/plays/loans/customisations
-        without touching existing data. Mirrors mobile's importBackup()."""
+        app's own export). Adds whatever is missing — games, friends,
+        collections and their membership, plays, loans, game notes/ratings —
+        without touching existing data. Mirrors mobile's importBackup(); the
+        merge itself is shared with the web app (db.restore_backup_tables)."""
         import json as _json
 
         try:
@@ -6381,7 +7027,7 @@ class App(tk.Tk):
             messagebox.showerror("Invalid file", f"Could not read the file:\n{exc}")
             return
 
-        if not data.get("version") or not data.get("members"):
+        if not db.is_backup_payload(data):
             messagebox.showerror(
                 "Invalid file",
                 "This doesn't appear to be a Board Game Library backup.",
@@ -6390,98 +7036,24 @@ class App(tk.Tk):
 
         if not messagebox.askyesno(
             "Import Backup",
-            "This will ADD any members, plays, loans and game notes/ratings from "
-            "this file that don't already exist locally.\n\n"
+            "This will ADD any games, friends, collections, plays, loans and game "
+            "notes/ratings from this file that don't already exist locally.\n\n"
             "Existing data is not changed or removed. Continue?",
         ):
             return
 
         def _bg():
-            counts = {"members": 0, "plays": 0, "loans": 0, "customisations": 0, "skipped": 0}
             try:
                 with db.connect() as c:
-                    # ── Members — map old ids -> local ids so loans/plays resolve ──
-                    user_id_map: dict[int, int] = {}
-                    for m in data.get("members") or []:
-                        row = c.execute(
-                            "SELECT id FROM users WHERE first_name = ? AND last_name = ?",
-                            (m.get("first_name"), m.get("last_name")),
-                        ).fetchone()
-                        if row:
-                            user_id_map[m["id"]] = row["id"]
-                            counts["skipped"] += 1
-                        else:
-                            new_id = db.add_user(c, m.get("first_name") or "", m.get("last_name") or "")
-                            user_id_map[m["id"]] = new_id
-                            counts["members"] += 1
-
-                    # ── Plays ────────────────────────────────────────────────────
-                    for p in data.get("plays") or []:
-                        exists = c.execute(
-                            "SELECT id FROM plays WHERE game_id = ? AND played_at = ?",
-                            (p.get("game_id"), p.get("played_at")),
-                        ).fetchone()
-                        if exists:
-                            counts["skipped"] += 1
-                            continue
-                        if not db.get_game(c, p.get("game_id")):
-                            counts["skipped"] += 1
-                            continue
-                        db.log_play(
-                            c, p["game_id"], p["played_at"],
-                            p.get("player_names") or "", p.get("winner") or "",
-                            p.get("notes") or "",
-                            duration_minutes=p.get("duration_minutes"),
-                            scores=p.get("scores"),
-                        )
-                        counts["plays"] += 1
-
-                    # ── Loans ────────────────────────────────────────────────────
-                    for l in data.get("loans") or []:
-                        mapped_user_id = user_id_map.get(l.get("user_id"), l.get("user_id"))
-                        exists = c.execute(
-                            "SELECT id FROM loans WHERE game_id = ? AND checked_out_at = ?",
-                            (l.get("game_id"), l.get("checked_out_at")),
-                        ).fetchone()
-                        if exists:
-                            counts["skipped"] += 1
-                            continue
-                        if not db.get_game(c, l.get("game_id")):
-                            counts["skipped"] += 1
-                            continue
-                        c.execute(
-                            "INSERT INTO loans (game_id, user_id, checked_out_at, returned_at, due_date, notes) "
-                            "VALUES (?, ?, ?, ?, ?, ?)",
-                            (l["game_id"], mapped_user_id, l["checked_out_at"],
-                             l.get("returned_at"), l.get("due_date"), l.get("notes")),
-                        )
-                        counts["loans"] += 1
-
-                    # ── Game customisations ─────────────────────────────────────
-                    for cu in data.get("customisations") or []:
-                        if not db.get_game(c, cu.get("bgg_id")):
-                            counts["skipped"] += 1
-                            continue
-                        c.execute(
-                            "UPDATE games SET tags=?, is_favorite=?, has_insert=?, "
-                            "my_comment=?, my_rating=?, manual_fields=? WHERE bgg_id=?",
-                            (cu.get("tags"), cu.get("is_favorite") or 0, cu.get("has_insert") or 0,
-                             cu.get("my_comment"), cu.get("my_rating"), cu.get("manual_fields"),
-                             cu["bgg_id"]),
-                        )
-                        counts["customisations"] += 1
+                    counts = db.restore_backup_tables(c, data, images_dir=IMAGES_DIR)
 
                 def _finish():
+                    self._image_cache.clear()
+                    self._placeholder_img = None
+                    self._collection_sig = None
                     self.refresh_all()
                     self.status("Backup imported.")
-                    messagebox.showinfo(
-                        "Import complete",
-                        f"Members: +{counts['members']}\n"
-                        f"Plays: +{counts['plays']}\n"
-                        f"Loans: +{counts['loans']}\n"
-                        f"Customisations: {counts['customisations']}\n"
-                        f"Skipped (already existed): {counts['skipped']}",
-                    )
+                    messagebox.showinfo("Import complete", db.summarize_import(counts))
 
                 self.after(0, _finish)
             except Exception as exc:
@@ -6495,8 +7067,10 @@ class App(tk.Tk):
         threading.Thread(target=_bg, daemon=True).start()
 
     def on_export_for_mobile(self) -> None:
-        """Export members, plays, loans and customisations as a JSON file
-        that can be imported on the mobile app via Dashboard → Import Backup."""
+        """Export the whole library (games, collections, friends, plays, loans
+        and per-game customisations) as a version-5 JSON file that can be
+        imported on the mobile app via Dashboard → Import Backup. Device-local
+        image paths are never written; custom cover photos are embedded."""
         import json as _json
 
         default_name = f"bgl-backup-{datetime.now():%Y-%m-%d}.json"
@@ -6510,52 +7084,22 @@ class App(tk.Tk):
             return
 
         with db.connect() as c:
-            members = [dict(r) for r in c.execute(
-                "SELECT * FROM users ORDER BY id").fetchall()]
-
-            plays = [dict(r) for r in c.execute(
-                """SELECT plays.*, games.name AS game_name
-                   FROM plays
-                   LEFT JOIN games ON games.bgg_id = plays.game_id
-                   ORDER BY plays.played_at DESC""").fetchall()]
-
-            loans = [dict(r) for r in c.execute(
-                """SELECT loans.*, games.name AS game_name,
-                          users.first_name, users.last_name
-                   FROM loans
-                   LEFT JOIN games ON games.bgg_id = loans.game_id
-                   LEFT JOIN users ON users.id = loans.user_id
-                   ORDER BY loans.checked_out_at DESC""").fetchall()]
-
-            customisations = [dict(r) for r in c.execute(
-                """SELECT bgg_id, name, tags, is_favorite, has_insert,
-                          my_comment, my_rating, manual_fields
-                   FROM games
-                   WHERE tags IS NOT NULL OR is_favorite = 1 OR has_insert = 1
-                      OR my_comment IS NOT NULL OR my_rating IS NOT NULL
-                   """).fetchall()]
-
-        payload = {
-            "version": 1,
-            "exported_at": db.now_iso(),
-            "members": members,
-            "plays": plays,
-            "loans": loans,
-            "customisations": customisations,
-        }
+            payload = db.build_backup_payload(c)
 
         try:
             with open(dest_path, "w", encoding="utf-8") as f:
                 _json.dump(payload, f, indent=2, default=str)
-            n_m = len(members)
-            n_p = len(plays)
-            n_l = len(loans)
+            n_g = len(payload["games"])
+            n_m = len(payload["members"])
+            n_p = len(payload["plays"])
+            n_l = len(payload["loans"])
             p = dest_path
             self.status(f"Exported for mobile: {Path(p).name}")
             messagebox.showinfo(
                 "Export complete",
                 f"Saved: {p}\n\n"
-                f"  {n_m} member{'s' if n_m != 1 else ''}\n"
+                f"  {n_g} game{'s' if n_g != 1 else ''}\n"
+                f"  {n_m} friend{'s' if n_m != 1 else ''}\n"
                 f"  {n_p} play record{'s' if n_p != 1 else ''}\n"
                 f"  {n_l} loan record{'s' if n_l != 1 else ''}\n\n"
                 "Transfer this file to your phone, then open the\n"

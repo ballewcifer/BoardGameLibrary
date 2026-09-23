@@ -12,7 +12,7 @@
   <div class="detail-info">
     <h1 class="detail-title">
       {{ game.name }}
-      {% if game.is_favorite %}<span class="fav-badge">★</span>{% endif %}
+      {% if game.is_favorite %}<span class="fav-badge"><span aria-hidden="true">★</span><span class="sr-only">Favorite</span></span>{% endif %}
       {% if game.is_expansion %}<span class="exp-badge">Expansion</span>{% endif %}
     </h1>
     <div class="detail-meta muted">
@@ -26,10 +26,38 @@
     {% if game.designers %}<div class="muted">By {{ game.designers }}</div>{% endif %}
     {% if game.best_players %}<div class="muted">★ Best at {{ game.best_players }} players</div>{% endif %}
     {% if game.has_insert %}<div class="muted">📦 Has 3D printed insert</div>{% endif %}
+    {% if game.base_game_id %}
+      <div class="muted">
+        {% if base_game %}
+          Expansion for <a href="/games/{{ game.base_game_id }}">{{ game.base_game_name }}</a>
+        {% else %}
+          Expansion for {{ game.base_game_name }}
+        {% endif %}
+      </div>
+    {% endif %}
   </div>
 </div>
 
-<!-- Status banner -->
+{% if owned_expansions %}
+<section class="card mt">
+  <h2 class="section-title">Expansions You Own</h2>
+  <ul class="plain-list">
+    {% for exp in owned_expansions %}
+      <li><a href="/games/{{ exp.bgg_id }}">{{ exp.name }}</a></li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+{% if game.own == 1 and game.is_unplayed %}
+<div class="unplayed-banner" role="status">Not played yet — Log a play to clear</div>
+{% endif %}
+
+<!-- Status banner — owned games get the loan-based Available/Checked Out
+     banner and a Check In/Out action; every other BGG status (Wishlist,
+     For Trade, ...) gets its own colored banner instead, so the different
+     statuses stand apart at a glance. -->
+{% if game.own == 1 %}
 <div class="status-banner {% if loan %}status-out{% if loan.overdue %} status-overdue{% endif %}{% else %}status-in{% endif %}">
   {% if loan %}
     {% if loan.overdue %}⚠ OVERDUE{% else %}Checked Out{% endif %}
@@ -47,6 +75,11 @@
     {% endif %}
   {% endif %}
 </div>
+{% elif game.bgg_status and game.bgg_status in bgg_status_colors %}
+<div class="status-banner" style="background:{{ bgg_status_colors[game.bgg_status].bg }};color:{{ bgg_status_colors[game.bgg_status].text }}">
+  {{ bgg_status_labels.get(game.bgg_status, game.bgg_status) }}
+</div>
+{% endif %}
 
 <!-- Quick-action row -->
 <div class="action-row">
@@ -75,6 +108,23 @@
   {% endif %}
 </section>
 {% endif %}
+
+<!-- Plays summary -->
+<section class="card mt play-summary" aria-labelledby="plays-card-title">
+  <h2 class="section-title" id="plays-card-title">Plays</h2>
+  {% if play_summary.count %}
+  <div class="ps-main">Played {{ play_summary.count }} time{{ 's' if play_summary.count != 1 else '' }}</div>
+  <div class="ps-sub">Last played {{ play_summary.last|usdate }}</div>
+  <ul class="play-list">
+    {% for p in play_summary.recent %}
+    <li>{{ p.played_at|usdate }}{% if p.winner %} · Winner: {{ p.winner }}{% endif %}</li>
+    {% endfor %}
+  </ul>
+  {% if play_summary.earlier %}<p class="muted">and {{ play_summary.earlier }} earlier</p>{% endif %}
+  {% else %}
+  <div class="ps-main">Not played yet</div>
+  {% endif %}
+</section>
 
 <!-- Tags -->
 {% if game.tags %}
@@ -199,11 +249,24 @@
           <input type="checkbox" name="has_insert" value="1" {% if game.has_insert %}checked{% endif %}>
           Has 3D printed insert
         </label>
+        {% if game.own == 1 and not plays %}
+        <label class="form-label mt-sm" style="display:flex;align-items:center;gap:8px">
+          <input type="hidden" name="unplayed_present" value="1">
+          <input type="checkbox" name="is_unplayed" value="1" {% if game.is_unplayed %}checked{% endif %}>
+          Not played yet
+        </label>
+        {% endif %}
         <label class="form-label mt-sm" for="eg-coop">Type</label>
         <select id="eg-coop" name="is_cooperative" class="form-control">
           <option value="unset"       {% if game.is_cooperative is none  %}selected{% endif %}>Unset</option>
           <option value="coop"        {% if game.is_cooperative == 1     %}selected{% endif %}>🤝 Cooperative</option>
           <option value="competitive" {% if game.is_cooperative == 0     %}selected{% endif %}>⚔️ Competitive</option>
+        </select>
+        <label class="form-label mt-sm" for="eg-status">Collection</label>
+        <select id="eg-status" name="bgg_status" class="form-control">
+          {% for f in bgg_status_flags %}
+            <option value="{{ f }}" {% if (game.bgg_status or 'own')==f %}selected{% endif %} style="background:{{ bgg_status_colors[f].bg }};color:{{ bgg_status_colors[f].text }}">{{ bgg_status_labels[f] }}</option>
+          {% endfor %}
         </select>
       </div>
       <div class="modal-footer">
