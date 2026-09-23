@@ -109,6 +109,23 @@
 </section>
 {% endif %}
 
+<!-- Plays summary -->
+<section class="card mt play-summary" aria-labelledby="plays-card-title">
+  <h2 class="section-title" id="plays-card-title">Plays</h2>
+  {% if play_summary.count %}
+  <div class="ps-main">Played {{ play_summary.count }} time{{ 's' if play_summary.count != 1 else '' }}</div>
+  <div class="ps-sub">Last played {{ play_summary.last|usdate }}</div>
+  <ul class="play-list">
+    {% for p in play_summary.recent %}
+    <li>{{ p.played_at|usdate }}{% if p.winner %} · Winner: {{ p.winner }}{% endif %}</li>
+    {% endfor %}
+  </ul>
+  {% if play_summary.earlier %}<p class="muted">and {{ play_summary.earlier }} earlier</p>{% endif %}
+  {% else %}
+  <div class="ps-main">Not played yet</div>
+  {% endif %}
+</section>
+
 <!-- Tags -->
 {% if game.tags %}
 <div class="tags mt-sm">

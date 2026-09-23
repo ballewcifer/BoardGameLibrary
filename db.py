@@ -839,6 +839,23 @@ def play_counts(c: sqlite3.Connection) -> dict[int, int]:
     return {r["game_id"]: r["n"] for r in rows}
 
 
+def play_summary(c: sqlite3.Connection, game_id: int) -> tuple[int, Optional[str], Optional[str]]:
+    """Return (count, first_played, last_played) for one game.
+
+    Dates are the ISO ``YYYY-MM-DD`` day part of ``played_at``; both are None
+    when the game has never been played (count 0).
+    """
+    row = c.execute(
+        "SELECT COUNT(*) AS n, MIN(played_at) AS first, MAX(played_at) AS last "
+        "FROM plays WHERE game_id = ?",
+        (game_id,),
+    ).fetchone()
+    n = row["n"] or 0
+    if not n:
+        return 0, None, None
+    return n, (row["first"] or "")[:10] or None, (row["last"] or "")[:10] or None
+
+
 # ---------- tags ----------
 
 def set_tags(c: sqlite3.Connection, bgg_id: int, tags: str) -> None:

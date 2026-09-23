@@ -367,6 +367,12 @@ def game_detail(bgg_id):
         loan      = _row_to_dict(db.open_loan_for_game(c, bgg_id))
         plays     = [_row_to_dict(r) for r in db.list_plays(c, game_id=bgg_id)]
         stats     = db.game_play_stats(c, bgg_id)
+        ps_n, ps_first, ps_last = db.play_summary(c, bgg_id)
+        play_summary = {
+            "count": ps_n, "first": ps_first, "last": ps_last,
+            "recent": plays[:10],           # list_plays is newest first
+            "earlier": max(0, len(plays) - 10),
+        }
         # Only members allowed to borrow this game (owners of a claimed
         # collection that contains it, plus members who claimed nothing).
         allowed   = db.members_allowed_to_checkout(c, bgg_id)
@@ -387,6 +393,7 @@ def game_detail(bgg_id):
                            loan=loan,
                            plays=plays,
                            stats=stats,
+                           play_summary=play_summary,
                            users=users,
                            can_checkout_here=can_checkout_here,
                            today=today,
@@ -654,10 +661,19 @@ def plays():
     with db.connect() as c:
         rows  = [_row_to_dict(r) for r in db.list_plays(c, game_id=game_id)]
         games = [_row_to_dict(r) for r in db.list_games(c, owned_only=False)]
+        summary = None
+        filter_name = None
+        if game_id is not None:
+            filter_name = next((g["name"] for g in games if g["bgg_id"] == game_id), None)
+            if filter_name is not None:
+                n, first, last = db.play_summary(c, game_id)
+                summary = {"count": n, "first": first, "last": last}
     return render_template("plays.html",
                            rows=rows,
                            games=games,
-                           filter_game=game_id)
+                           filter_game=game_id,
+                           filter_name=filter_name,
+                           play_summary=summary)
 
 
 @app.route("/plays/add", methods=["POST"])

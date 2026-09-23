@@ -367,6 +367,17 @@ def fmt_date(iso: Optional[str]) -> str:
         return iso
 
 
+def play_summary_text(count: int, first: Optional[str], last: Optional[str],
+                      compact: bool = False) -> str:
+    """Human line for a game's play history (see db.play_summary)."""
+    if not count:
+        return "Not played yet"
+    times = f"Played {count} time{'s' if count != 1 else ''}"
+    if compact:
+        return f"{times} · last {fmt_date(last)}"
+    return f"{times} · last {fmt_date(last)} · first {fmt_date(first)}"
+
+
 class _AutocompleteEntry(ttk.Entry):
     """Entry widget that shows a dropdown of suggestions as the user types.
 
@@ -5800,6 +5811,13 @@ class App(tk.Tk):
         ttk.Button(controls, text="Delete selected", style="Danger.TButton",
                    command=self.on_delete_play).pack(side="right")
 
+        # One-line "how often have I played this?" summary for the chosen game.
+        self.plays_summary_var = tk.StringVar(value="")
+        self._plays_summary_lbl = ttk.Label(
+            frame, textvariable=self.plays_summary_var,
+            font=("Segoe UI", 10, "bold"), foreground=C_INK_600)
+        # Packed only while a specific game is selected (see refresh_plays).
+
         # ── Play log pane ────────────────────────────────────────────────
         self._plays_pane = ttk.Frame(frame)
         self._plays_pane.pack(fill="both", expand=True)
@@ -6019,9 +6037,19 @@ class App(tk.Tk):
 
         with db.connect() as c:
             rows = db.list_plays(c, game_id=game_id)
+            summary = db.play_summary(c, game_id) if game_id is not None else None
+
+        if summary is None:
+            self.plays_summary_var.set("")
+            self._plays_summary_lbl.pack_forget()
+        else:
+            self.plays_summary_var.set(play_summary_text(*summary))
+            if not self._plays_summary_lbl.winfo_ismapped():
+                self._plays_summary_lbl.pack(anchor="w", pady=(0, self.SP["sm"]),
+                                             before=self._plays_pane)
 
         for r in rows:
-            dur = f"{r['duration_minutes']} min" if r["duration_minutes"] else ""
+            dur =f"{r['duration_minutes']} min" if r["duration_minutes"] else ""
             iid = str(r["id"])
             self.plays_tree.insert(
                 "", "end",
@@ -6450,6 +6478,10 @@ class App(tk.Tk):
         _sync_unplayed_banner()
         if game["year"]:
             ttk.Label(info, text=f"Published {game['year']}", foreground=C_INK_600).pack(anchor="w")
+        with db.connect() as c:
+            _ps = db.play_summary(c, game["bgg_id"])
+        ttk.Label(info, text=play_summary_text(*_ps, compact=True),
+                  font=("Segoe UI", 9, "bold"), foreground=C_INK_600).pack(anchor="w")
 
         detail_rows: list[tuple[str, str]] = []
         detail_rows.append(("Players",     fmt_players(game["min_players"], game["max_players"])))

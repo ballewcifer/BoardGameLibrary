@@ -48,6 +48,17 @@
   </form>
 </div>
 
+{% if play_summary is not none %}
+<section class="card play-summary" role="status">
+  {% if play_summary.count %}
+  <div class="ps-main">{{ filter_name }}: played {{ play_summary.count }} time{{ 's' if play_summary.count != 1 else '' }}</div>
+  <div class="ps-sub">Last played {{ play_summary.last|usdate }} · First played {{ play_summary.first|usdate }}</div>
+  {% else %}
+  <div class="ps-main">{{ filter_name }}: not played yet</div>
+  {% endif %}
+</section>
+{% endif %}
+
 <p class="result-count muted">{{ rows|length }} play{{ 's' if rows|length != 1 else '' }}</p>
 
 {% if rows %}

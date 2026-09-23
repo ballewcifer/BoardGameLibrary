@@ -1,5 +1,13 @@
 # Release Notes
 
+## Play history for a game (Mobile v2.8.2, Desktop and Web v7.1.2)
+
+- **See when and how often you played a game.** Pick a game in the Plays filter and a summary line appears: "Played 6 times", the date last played and the date first played, or "Not played yet". The play log below is filtered to that game as before. Any game in your library can be picked, including ones with no plays.
+- **Game details** now show the same at a glance: on desktop a "Played N times · last <date>" line under the title, and on the web a "Plays" card with the count, last played date, and up to 10 recent plays with the winner ("and N earlier" if there are more).
+- The summary updates when you log, edit or delete a play. On the web it is real text that screen readers announce.
+
+---
+
 ## Desktop/Web v7.1.1 - "In Collection" fix
 
 - **Games with no status checked on BoardGameGeek are no longer imported as Owned.** BGG keeps a game in your collection (shown as "In Collection") when you only rated, commented on or played it, even if none of Own, Wishlist, etc. is ticked. Those games used to show up as Owned and could be checked out. They now import with an "In Collection" label and a neutral grey badge, are not loanable, and can be filtered and edited like any other status. Set a real status on the game if you do own it.
