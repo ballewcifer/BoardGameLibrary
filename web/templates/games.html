@@ -35,6 +35,7 @@
     </select>
 
     <label class="filter-check"><input type="checkbox" name="exp" value="1" {% if show_exp %}checked{% endif %}> Expansions</label>
+    <label class="filter-check"><input type="checkbox" name="unplayed" value="1" {% if unplayed %}checked{% endif %}> Not played yet</label>
 
     {# Multi-select checklist — plain checkboxes sharing name="bstatus" submit
        as repeated params with no JS required; the small script below only
@@ -108,8 +109,12 @@
   <span id="bulk-count" class="muted">0 selected</span>
   <form method="post" action="/games/bulk_update" id="bulk-form" style="display:inline">
     <input type="hidden" name="has_insert" id="bulk-has-insert" value="1">
+    <input type="hidden" name="unplayed" id="bulk-unplayed" value="" disabled>
     <button type="button" class="btn btn-primary btn-sm" onclick="bulkSubmit(1)">📦 Mark Has 3D Insert</button>
     <button type="button" class="btn btn-secondary btn-sm" onclick="bulkSubmit(0)">Clear 3D Insert</button>
+    {# One toggle: marks the selection "not played yet", or clears the mark when
+       every selected game is already marked (label follows the selection). #}
+    <button type="button" class="btn btn-secondary btn-sm" id="bulk-unplayed-btn" onclick="bulkUnplayed()">Unplayed</button>
   </form>
   <button class="btn btn-secondary btn-sm" onclick="toggleSelectMode()">Cancel</button>
 </div>
@@ -118,10 +123,10 @@
 <div class="collection-bar">
   <span class="collection-label">Library:</span>
   <a class="collection-tab {% if active_collection is none %}active{% endif %}"
-     href="{{ url_for('games', q=q, status=status, tag=tag_filter, exp=('1' if show_exp else none), coop=coop, bstatus=bstatuses) }}">All</a>
+     href="{{ url_for('games', q=q, status=status, tag=tag_filter, exp=('1' if show_exp else none), unplayed=('1' if unplayed else none), coop=coop, bstatus=bstatuses) }}">All</a>
   {% for col in collections %}
   <a class="collection-tab {% if active_collection == col.id %}active{% endif %}"
-     href="{{ url_for('games', q=q, status=status, tag=tag_filter, exp=('1' if show_exp else none), coop=coop, bstatus=bstatuses, collection=col.id) }}">{{ col.name }} ({{ col.game_count }}){% if col.owner_name %} 👤 {{ col.owner_name }}{% endif %}</a>
+     href="{{ url_for('games', q=q, status=status, tag=tag_filter, exp=('1' if show_exp else none), unplayed=('1' if unplayed else none), coop=coop, bstatus=bstatuses, collection=col.id) }}">{{ col.name }} ({{ col.game_count }}){% if col.owner_name %} 👤 {{ col.owner_name }}{% endif %}</a>
   {% endfor %}
 
   <form method="get" action="/games" class="compare-form">
@@ -130,6 +135,7 @@
     {% for b in bstatuses %}<input type="hidden" name="bstatus" value="{{ b }}">{% endfor %}
     {% if tag_filter %}<input type="hidden" name="tag" value="{{ tag_filter }}">{% endif %}
     {% if show_exp %}<input type="hidden" name="exp" value="1">{% endif %}
+    {% if unplayed %}<input type="hidden" name="unplayed" value="1">{% endif %}
     {% if coop and coop != 'any' %}<input type="hidden" name="coop" value="{{ coop }}">{% endif %}
     {% if active_collection is not none %}<input type="hidden" name="collection" value="{{ active_collection }}">{% endif %}
     <p class="muted" style="font-size:.8rem;margin:0 6px 0 0;display:inline">Compare collections to see which games are shared, or unique to one.</p>
@@ -162,7 +168,7 @@
   {% for g in games %}
   <div class="game-card-wrap {% if g.loan %}game-card--out{% endif %}">
     <label class="game-card-select" onclick="event.stopPropagation()">
-      <input type="checkbox" class="game-select-box" value="{{ g.bgg_id }}" onchange="updateBulkCount()">
+      <input type="checkbox" class="game-select-box" value="{{ g.bgg_id }}" data-unplayed="{{ '1' if (g.own == 1 and g.is_unplayed) else '' }}" onchange="updateBulkCount()" aria-label="Select {{ g.name }}">
     </label>
     <a href="/games/{{ g.bgg_id }}" class="game-card"
        data-bgg-id="{{ g.bgg_id }}" data-out="{{ '1' if g.loan else '' }}">
@@ -170,6 +176,7 @@
       {% if g.is_expansion %}<span class="exp-badge" aria-label="Expansion">Expansion</span>{% endif %}
 
       <div class="game-card-img">
+        {% if g.own == 1 and g.is_unplayed %}<span class="unplayed-ribbon" aria-hidden="true">UNPLAYED</span>{% endif %}
         {% if g.image_path %}
           <img src="/img/{{ g.bgg_id }}" alt="{{ g.name }}" loading="lazy">
         {% elif g.image_url or g.thumbnail_url %}
@@ -180,7 +187,7 @@
       </div>
 
       <div class="game-card-body">
-        <div class="game-card-name">{{ g.name }}</div>
+        <div class="game-card-name">{{ g.name }}{% if g.own == 1 and g.is_unplayed %}<span class="sr-only">, not played yet</span>{% endif %}</div>
         <div class="game-card-meta muted">
           {% if g.year %}{{ g.year }} · {% endif %}
           {% if g.min_players and g.max_players %}
@@ -293,6 +300,29 @@ function toggleSelectMode() {
 function updateBulkCount() {
   const n = document.querySelectorAll('.game-select-box:checked').length;
   document.getElementById('bulk-count').textContent = n + ' selected';
+  // When every selected game is already marked, the button clears instead.
+  const sel = Array.from(document.querySelectorAll('.game-select-box:checked'));
+  const allMarked = sel.length > 0 && sel.every(b => b.dataset.unplayed === '1');
+  const ub = document.getElementById('bulk-unplayed-btn');
+  ub.textContent = allMarked ? 'Played' : 'Unplayed';
+  ub.dataset.clear = allMarked ? '1' : '';
+  ub.setAttribute('aria-label', allMarked ? 'Clear not played yet on selected games' : 'Mark selected games as not played yet');
+}
+function bulkUnplayed() {
+  const ids = Array.from(document.querySelectorAll('.game-select-box:checked')).map(b => b.value);
+  if (!ids.length) { alert('Select at least one game first.'); return; }
+  const form = document.getElementById('bulk-form');
+  form.querySelectorAll('input[name="bgg_ids"]').forEach(el => el.remove());
+  ids.forEach(id => {
+    const inp = document.createElement('input');
+    inp.type = 'hidden'; inp.name = 'bgg_ids'; inp.value = id;
+    form.appendChild(inp);
+  });
+  const flag = document.getElementById('bulk-unplayed');
+  flag.disabled = false;
+  flag.value = document.getElementById('bulk-unplayed-btn').dataset.clear ? '0' : '1';
+  document.getElementById('bulk-has-insert').disabled = true;
+  form.submit();
 }
 function bulkSubmit(hasInsert) {
   const ids = Array.from(document.querySelectorAll('.game-select-box:checked')).map(b => b.value);
@@ -476,6 +506,9 @@ function bulkSubmit(hasInsert) {
       <label class="filter-check mt-sm">
         <input type="checkbox" id="rnd-available" checked> Only available (not checked out)
       </label>
+      <label class="filter-check mt-sm">
+        <input type="checkbox" id="rnd-unplayed"> Only games I haven't played
+      </label>
 
       <div id="rnd-result" class="card mt" style="display:none; padding:12px"></div>
 
@@ -560,6 +593,7 @@ function pickRandomGame() {
     complexity: document.getElementById('rnd-complexity').value,
     coop:       document.getElementById('rnd-coop').value,
     available:  document.getElementById('rnd-available').checked ? '1' : '0',
+    unplayed:   document.getElementById('rnd-unplayed').checked ? '1' : '0',
     collection: {{ (active_collection if active_collection is not none else 'all') | tojson }},
   });
   const box = document.getElementById('rnd-result');

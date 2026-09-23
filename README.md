@@ -16,11 +16,12 @@ Both share the same local SQLite database and the `db.py` / `bgg.py` / `config.p
 - **Cooperative / Competitive** game type — auto-detected from BGG mechanics, editable per game, and usable as a filter
 - **Expansions** automatically link to their base game — "Expansion for X" on the expansion, "Expansions You Own" on the base game
 - **Browse** — card and table views with filters (players, best-at, play time, complexity, status, tags, favorites, cooperative/competitive, BGG collection status) and sort
-- **"Surprise Me"** random game picker, filtered by players, time, complexity, and game type
+- **"Surprise Me"** random game picker, filtered by players, time, complexity, and game type, or limited to games you haven't played
 - **Lending** — check games out to named **members**, with due dates, overdue flags, and full loan history
 - **Multi-collection** — sync several BGG users and compare libraries: *shared by all*, *unique to one*, or *in A but not B*
 - **Play log** — date, players, winner, duration, scores → win leaderboard + dashboard stats
 - Favorites, tags, custom cover photos, and 3D-insert badges
+- **"Not played yet"** marks (opt-in, owned games only) with a filter, a cover ribbon, and automatic clearing when you log a play
 - **Offline** — local SQLite, with backup export / import (including custom photos and per-game customizations)
 
 ## How it compares

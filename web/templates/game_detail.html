@@ -49,6 +49,10 @@
 </section>
 {% endif %}
 
+{% if game.own == 1 and game.is_unplayed %}
+<div class="unplayed-banner" role="status">Not played yet — Log a play to clear</div>
+{% endif %}
+
 <!-- Status banner — owned games get the loan-based Available/Checked Out
      banner and a Check In/Out action; every other BGG status (Wishlist,
      For Trade, ...) gets its own colored banner instead, so the different
@@ -228,6 +232,13 @@
           <input type="checkbox" name="has_insert" value="1" {% if game.has_insert %}checked{% endif %}>
           Has 3D printed insert
         </label>
+        {% if game.own == 1 and not plays %}
+        <label class="form-label mt-sm" style="display:flex;align-items:center;gap:8px">
+          <input type="hidden" name="unplayed_present" value="1">
+          <input type="checkbox" name="is_unplayed" value="1" {% if game.is_unplayed %}checked{% endif %}>
+          Not played yet
+        </label>
+        {% endif %}
         <label class="form-label mt-sm" for="eg-coop">Type</label>
         <select id="eg-coop" name="is_cooperative" class="form-control">
           <option value="unset"       {% if game.is_cooperative is none  %}selected{% endif %}>Unset</option>

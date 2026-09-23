@@ -128,6 +128,7 @@ def games():
     # db._status_where()).
     bstatuses  = request.args.getlist("bstatus") or ["all"]
     show_exp   = request.args.get("exp", "") == "1"
+    unplayed   = request.args.get("unplayed", "") == "1"   # owned + marked "not played yet"
     collection = request.args.get("collection", "all")
     compare    = request.args.get("compare", "off")          # off | shared | only | diff
     compare_other_raw = request.args.get("compare_other", "")
@@ -187,6 +188,8 @@ def games():
             continue
         if coop == "competitive" and g["is_cooperative"] != 0:
             continue
+        if unplayed and not (g["own"] == 1 and g["is_unplayed"]):
+            continue
 
         # collection tab / comparison filter
         if multi:
@@ -217,6 +220,7 @@ def games():
                            bgg_status_flags=_bgg.STATUS_FLAGS,
                            bgg_status_colors=_bgg.STATUS_COLORS,
                            show_exp=show_exp,
+                           unplayed=unplayed,
                            all_tags=all_tags,
                            collections=collections,
                            members=members,
@@ -249,6 +253,7 @@ def api_random_game():
     complexity = request.args.get("complexity", "Any")   # light|medium|heavy|Any
     coop       = request.args.get("coop", "Any")         # coop|competitive|Any
     available  = request.args.get("available", "1") == "1"
+    unplayed_only = request.args.get("unplayed", "0") == "1"   # only "not played yet" games
     collection = request.args.get("collection", "all")
 
     with db.connect() as c:
@@ -268,6 +273,8 @@ def api_random_game():
 
     def matches(g) -> bool:
         if available and g["bgg_id"] in open_loans:
+            return False
+        if unplayed_only and not (g["own"] == 1 and g["is_unplayed"]):
             return False
         if multi and active_cid is not None \
                 and active_cid not in gc_map.get(g["bgg_id"], set()):
@@ -476,6 +483,11 @@ def update_game(bgg_id):
         )
         db.set_tags(c, bgg_id, tags)
         db.set_insert(c, bgg_id, bool(has_insert))
+        # The checkbox is only rendered for an owned game with no plays; the
+        # hidden marker tells us it was on the form (an unchecked box sends
+        # nothing). db.set_unplayed enforces the same rule server-side.
+        if request.form.get("unplayed_present"):
+            db.set_unplayed(c, [bgg_id], bool(request.form.get("is_unplayed")))
     flash("Game updated.", "success")
     return redirect(url_for("game_detail", bgg_id=bgg_id))
 
@@ -483,6 +495,24 @@ def update_game(bgg_id):
 @app.route("/games/bulk_update", methods=["POST"])
 def bulk_update_games():
     bgg_ids = request.form.getlist("bgg_ids", type=int)
+    if request.form.get("unplayed") in ("1", "0"):
+        # Mark / clear "not played yet" on the selection. Marking skips games
+        # that aren't owned or already have a logged play.
+        value = request.form.get("unplayed") == "1"
+        if bgg_ids:
+            with db.connect() as c:
+                changed, skipped = db.set_unplayed(c, bgg_ids, value)
+            if not value:
+                flash(f"Cleared the mark on {changed} game{'s' if changed != 1 else ''}.", "success")
+            elif changed == 0:
+                flash(db.UNPLAYED_NONE_ELIGIBLE, "error")
+            else:
+                msg = f"Marked {changed} game{'s' if changed != 1 else ''} as not played yet."
+                if skipped:
+                    msg += (f" Skipped {skipped} (games with a logged play, and games "
+                            f"you don't own, can't be marked).")
+                flash(msg, "success")
+        return redirect(request.referrer or url_for("games"))
     has_insert = request.form.get("has_insert") == "1"
     if bgg_ids:
         with db.connect() as c:

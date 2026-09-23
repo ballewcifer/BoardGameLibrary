@@ -346,5 +346,95 @@ class StatusFilterTests(DbCase):
             self.assertEqual(db.count_games(c, status=["all"]), 3)
 
 
+class UnplayedTests(DbCase):
+    def test_migration_adds_column_to_old_db(self):
+        import sqlite3
+        old = self.tmp / "old.db"
+        conn = sqlite3.connect(old)
+        conn.execute("CREATE TABLE games (bgg_id INTEGER PRIMARY KEY, name TEXT NOT NULL, own INTEGER DEFAULT 1)")
+        conn.execute("INSERT INTO games (bgg_id, name) VALUES (1, 'Old')")
+        conn.commit()
+        conn.close()
+        db.init_db(old)
+        with db.connect(old) as c:
+            cols = {r[1] for r in c.execute("PRAGMA table_info(games)")}
+            self.assertIn("is_unplayed", cols)
+            self.assertEqual(c.execute("SELECT is_unplayed FROM games").fetchone()[0], 0)
+
+    def test_never_flagged_automatically(self):
+        with db.connect(self.src) as c:
+            self.insert_game(c, _game(1, "Fresh"))
+            self.assertEqual(db.get_game(c, 1)["is_unplayed"], 0)
+
+    def test_guard_rules(self):
+        with db.connect(self.src) as c:
+            self.insert_game(c, _game(1, "Owned"))
+            self.insert_game(c, _game(2, "Played"))
+            self.insert_game(c, _game(3, "Wish", own=0))
+            db.log_play(c, 2, "2026-01-01")
+            self.assertEqual(db.set_unplayed(c, [1, 2, 3, 99], True), (1, 3))
+            self.assertEqual(db.get_game(c, 1)["is_unplayed"], 1)
+            self.assertEqual(db.get_game(c, 2)["is_unplayed"], 0)
+            self.assertEqual(db.get_game(c, 3)["is_unplayed"], 0)
+            self.assertEqual(db.set_unplayed(c, [1], False), (1, 0))
+            self.assertEqual(db.get_game(c, 1)["is_unplayed"], 0)
+
+    def test_log_play_and_update_play_clear_the_mark(self):
+        with db.connect(self.src) as c:
+            self.insert_game(c, _game(1, "A"))
+            self.insert_game(c, _game(2, "B"))
+            db.set_unplayed(c, [1, 2], True)
+            db.log_play(c, 1, "2026-02-01")
+            self.assertEqual(db.get_game(c, 1)["is_unplayed"], 0)
+            self.assertEqual(db.get_game(c, 2)["is_unplayed"], 1)
+            pid = db.log_play(c, 1, "2026-02-02")
+            db.update_play(c, pid, 2, "2026-02-02")   # re-point the play at B
+            self.assertEqual(db.get_game(c, 2)["is_unplayed"], 0)
+
+    def test_list_games_unplayed_only(self):
+        with db.connect(self.src) as c:
+            self.insert_game(c, _game(1, "Marked"))
+            self.insert_game(c, _game(2, "Plain"))
+            db.set_unplayed(c, [1], True)
+            self.assertEqual([g["name"] for g in db.list_games(c, unplayed_only=True)], ["Marked"])
+
+    def test_backup_round_trip_preserves_the_mark(self):
+        with db.connect(self.src) as c:
+            self.insert_game(c, _game(1, "Marked"))
+            self.insert_game(c, _game(2, "Plain"))
+            db.set_unplayed(c, [1], True)
+        data = self.export()
+        self.assertEqual(
+            [cu["bgg_id"] for cu in data["customisations"] if cu.get("is_unplayed")], [1])
+        self.assertEqual(self.restore(self.dst, data)["games"], 2)
+        with db.connect(self.dst) as c:
+            self.assertEqual(db.get_game(c, 1)["is_unplayed"], 1)
+            self.assertEqual(db.get_game(c, 2)["is_unplayed"], 0)
+
+    def test_restore_drops_mark_when_plays_exist(self):
+        with db.connect(self.src) as c:
+            self.insert_game(c, _game(1, "Marked"))
+            db.set_unplayed(c, [1], True)
+        data = self.export()
+        data["plays"] = [{"game_id": 1, "played_at": "2026-03-01", "player_names": "A"}]
+        self.restore(self.dst, data)
+        with db.connect(self.dst) as c:
+            self.assertEqual(db.get_game(c, 1)["is_unplayed"], 0)
+
+    def test_older_backup_without_field_is_treated_as_unmarked(self):
+        with db.connect(self.src) as c:
+            self.insert_game(c, _game(1, "Old", is_favorite=1))
+            db.set_unplayed(c, [1], True)
+        data = self.export()
+        for g in data["games"]:
+            g.pop("is_unplayed", None)
+        for cu in data["customisations"]:
+            cu.pop("is_unplayed", None)
+        self.restore(self.dst, data)
+        with db.connect(self.dst) as c:
+            self.assertEqual(db.get_game(c, 1)["is_unplayed"], 0)
+            self.assertEqual(db.get_game(c, 1)["is_favorite"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()

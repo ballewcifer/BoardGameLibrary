@@ -1165,6 +1165,9 @@ class App(tk.Tk):
         ))
         self.tag_filter_cb.bind("<<ComboboxSelected>>", lambda *_: self.refresh_games())
 
+        self.unplayed_filter_var = tk.BooleanVar(value=False)
+        fcheck("Not played yet", self.unplayed_filter_var)
+
         self.coop_filter_var = tk.StringVar(value="Any")
         fgroup("TYPE", lambda p: ttk.Combobox(
             p, textvariable=self.coop_filter_var, width=12, state="readonly",
@@ -1274,6 +1277,8 @@ class App(tk.Tk):
         if self.tag_filter_var.get() != "Any":
             v = self.tag_filter_var.get()
             active.append(("Tag", v, lambda _v=v: self.tag_filter_var.set("Any")))
+        if self.unplayed_filter_var.get():
+            active.append(("Not played yet", "on", lambda: self.unplayed_filter_var.set(False)))
         if self.collection_status_labels != {"All"}:
             v = (next(iter(self.collection_status_labels))
                  if len(self.collection_status_labels) == 1
@@ -1717,12 +1722,13 @@ class App(tk.Tk):
             self._card_frame.pack(fill="both", expand=True)
 
     def _build_table_widget(self, parent: ttk.Frame) -> None:
-        cols = ("fav", "insert", "name", "year", "players", "time", "weight", "rating", "best", "status", "plays")
+        cols = ("fav", "insert", "unplayed", "name", "year", "players", "time", "weight", "rating", "best", "status", "plays")
         self.games_tree = ttk.Treeview(parent, columns=cols, show="headings", selectmode="extended")
 
         col_defs = [
             ("fav",     "★",           34,  "center"),
             ("insert",  "Insert",      56,  "center"),
+            ("unplayed", "Unplayed",    92,  "center"),
             ("name",    "Name",        260, "w"     ),
             ("year",    "Year",         56, "center"),
             ("players", "Players",      88, "center"),
@@ -2099,6 +2105,7 @@ class App(tk.Tk):
         self.status_filter_var.set("Any")
         self.tag_filter_var.set("Any")
         self.coop_filter_var.set("Any")
+        self.unplayed_filter_var.set(False)
         self._reset_collection_filter()
         self._active_collection = None
         self._compare_mode = "off"
@@ -2223,6 +2230,10 @@ class App(tk.Tk):
                 if tag_val not in game_tags:
                     continue
 
+            # --- "not played yet" filter (owned + manually marked) ---
+            if self.unplayed_filter_var.get() and not (g["own"] == 1 and g["is_unplayed"]):
+                continue
+
             # --- cooperative/competitive filter ---
             coop_val = self.coop_filter_var.get()
             if coop_val == "Cooperative" and g["is_cooperative"] != 1:
@@ -2331,6 +2342,7 @@ class App(tk.Tk):
                                       self.coop_filter_var.get()])
             or self.collection_status_labels != {"All"}
             or self.exact_players_var.get()
+            or self.unplayed_filter_var.get()
             or bool(self.search_var.get())
             or (len(self._collections) >= 2
                 and (self._active_collection is not None or self._compare_mode != "off"))
@@ -2556,6 +2568,7 @@ class App(tk.Tk):
                 elif c == "plays":   return play_counts.get(g["bgg_id"], 0)
                 elif c == "fav":     return 0 if g["is_favorite"] else 1
                 elif c == "insert":  return 0 if g["has_insert"] else 1
+                elif c == "unplayed": return 0 if (g["own"] == 1 and g["is_unplayed"]) else 1
                 return ""
             games = sorted(games, key=_key, reverse=self._sort_rev)
 
@@ -2590,6 +2603,7 @@ class App(tk.Tk):
                 values=(
                     "★" if g["is_favorite"] else "",
                     "✓" if g["has_insert"] else "",
+                    "✓" if (g["own"] == 1 and g["is_unplayed"]) else "",
                     f"{exp_prefix}{g['name']}",
                     g["year"] or "—",
                     fmt_players(g["min_players"], g["max_players"]),
@@ -2615,7 +2629,7 @@ class App(tk.Tk):
             self._sort_rev = False
 
         _labels = {
-            "fav": "★", "insert": "Insert", "name": "Name", "year": "Year",
+            "fav": "★", "insert": "Insert", "unplayed": "Unplayed", "name": "Name", "year": "Year",
             "players": "Players", "time": "Time", "weight": "Complexity",
             "rating": "BGG ★", "best": "Best At", "status": "Status", "plays": "Plays",
         }
@@ -2734,6 +2748,15 @@ class App(tk.Tk):
                               command=lambda: self._bulk_set_insert(games, True))
             menu.add_command(label=f"Clear 3D Insert on {len(games)} Games",
                               command=lambda: self._bulk_set_insert(games, False))
+            menu.add_separator()
+            # One toggle: when every selected game is already marked it clears
+            # the mark instead (mirrors the mobile Unplayed / Played button).
+            if all(g["is_unplayed"] for g in games):
+                menu.add_command(label=f"Clear Not Played Yet on {len(games)} Games",
+                                  command=lambda: self._bulk_set_unplayed(games, False))
+            else:
+                menu.add_command(label=f"Mark {len(games)} Games as Not Played Yet",
+                                  command=lambda: self._bulk_set_unplayed(games, True))
             menu.tk_popup(x_root, y_root)
             return
 
@@ -2758,6 +2781,7 @@ class App(tk.Tk):
         menu.add_command(label="Details…",     command=lambda: self.show_details(game))
         menu.add_command(label="Edit Game…",   command=lambda: self.on_edit_game(game))
         menu.add_command(label="Set Image…",   command=lambda: self.on_set_image(game))
+        self._add_unplayed_item(menu, game)
 
         fav_lbl = "Remove from Favorites" if game["is_favorite"] else "Add to Favorites"
         menu.add_command(label=fav_lbl,        command=lambda: self.on_toggle_favorite(game))
@@ -2765,6 +2789,34 @@ class App(tk.Tk):
         menu.add_separator()
         menu.add_command(label="Delete Game…", command=lambda: self.on_delete_game(game))
         menu.tk_popup(x_root, y_root)
+
+    def _add_unplayed_item(self, menu: tk.Menu, game) -> None:
+        """Right-click item to mark / clear "not played yet" on one game. Shown
+        only when it applies (owned + no plays, or already marked)."""
+        if game["is_unplayed"]:
+            menu.add_command(label="Clear Not Played Yet",
+                             command=lambda: self._bulk_set_unplayed([game], False))
+        elif game["own"] == 1:
+            with db.connect() as c:
+                ok = db.unplayed_eligible(c, game["bgg_id"])
+            if ok:
+                menu.add_command(label="Mark as Not Played Yet",
+                                 command=lambda: self._bulk_set_unplayed([game], True))
+
+    def _bulk_set_unplayed(self, games: list, value: bool) -> None:
+        with db.connect() as c:
+            changed, skipped = db.set_unplayed(c, [g["bgg_id"] for g in games], value)
+        self.refresh_games(preserve_scroll=True)
+        if value and changed == 0:
+            messagebox.showinfo("Not played yet", db.UNPLAYED_NONE_ELIGIBLE, parent=self)
+        elif value:
+            msg = f"Marked {changed} game{'s' if changed != 1 else ''} as not played yet."
+            if skipped:
+                msg += (f" Skipped {skipped} (games with a logged play, and games "
+                        f"you don't own, can't be marked).")
+            self.status(msg)
+        else:
+            self.status(f"Cleared the mark on {changed} game{'s' if changed != 1 else ''}.")
 
     def _bulk_set_insert(self, games: list, value: bool) -> None:
         with db.connect() as c:
@@ -2865,6 +2917,7 @@ class App(tk.Tk):
 
         # Expansion ribbon — bottom-left of cover, sized to fit the label so it
         # never clips (the text width grows with DPI / card size).
+        _stack_top = _IH   # y where the next bottom-left ribbon must end
         if game["is_expansion"]:
             _exp_id = img_canvas.create_text(
                 SP["sm"], _IH - 12, anchor="w", text="Expansion",
@@ -2875,6 +2928,22 @@ class App(tk.Tk):
             _exp_bg = img_canvas.create_rectangle(0, y1, x2, _IH,
                                                   fill=C_BLUE_050, outline="")
             img_canvas.tag_lower(_exp_bg, _exp_id)   # behind the text, above the image
+            _stack_top = y1
+
+        # "Not played yet" ribbon — bottom-left of the cover (stacked above the
+        # Expansion ribbon if both apply). Fill is the active theme's second
+        # card colour with white text (>= 4.68:1 in every theme); the label is
+        # text, so the meaning never relies on colour alone.
+        if game["own"] == 1 and game["is_unplayed"]:
+            _up_id = img_canvas.create_text(
+                SP["sm"], _stack_top - 3, anchor="sw", text="UNPLAYED",
+                fill="#FFFFFF", font=self.FONTS["label"])
+            bb = img_canvas.bbox(_up_id)
+            x2 = (bb[2] + SP["sm"]) if bb else 90
+            y1 = (bb[1] - 3) if bb else (_stack_top - 22)
+            _up_bg = img_canvas.create_rectangle(0, y1, x2, _stack_top,
+                                                 fill=C_CARDS[1], outline="")
+            img_canvas.tag_lower(_up_bg, _up_id)
 
         # ── card body ──────────────────────────────────────────────────────────
         _is_sm = self._card_size == "sm"
@@ -3097,6 +3166,7 @@ class App(tk.Tk):
         menu.add_command(label="Details…",      command=lambda: self.show_details(game))
         menu.add_command(label="Edit Game…",    command=lambda: self.on_edit_game(game))
         menu.add_command(label="Set Image…",    command=lambda: self.on_set_image(game))
+        self._add_unplayed_item(menu, game)
         fav_lbl = "Remove from Favorites" if game["is_favorite"] else "Add to Favorites"
         menu.add_command(label=fav_lbl,         command=lambda: self.on_toggle_favorite(game))
         self._add_collection_remove_item(menu, game)
@@ -4655,6 +4725,7 @@ class App(tk.Tk):
         complexity_var = tk.StringVar(value="Any")
         coop_var       = tk.StringVar(value="Any")
         available_var  = tk.BooleanVar(value=True)
+        unplayed_only_var = tk.BooleanVar(value=False)
 
         def crit_row(r, label, var, values):
             ttk.Label(frame, text=label).grid(row=r, column=0, sticky="w", pady=3, padx=(0, 10))
@@ -4674,19 +4745,23 @@ class App(tk.Tk):
                         variable=available_var,
                         style="Filter.TCheckbutton").grid(row=5, column=0, columnspan=2,
                                                           sticky="w", pady=(6, 0))
+        ttk.Checkbutton(frame, text="Only games I haven't played",
+                        variable=unplayed_only_var,
+                        style="Filter.TCheckbutton").grid(row=6, column=0, columnspan=2,
+                                                          sticky="w", pady=(2, 0))
 
         ttk.Separator(frame, orient="horizontal").grid(
-            row=6, column=0, columnspan=2, sticky="ew", pady=12)
+            row=7, column=0, columnspan=2, sticky="ew", pady=12)
 
         # ── result area ───────────────────────────────────────────────────────
         result_name = tk.StringVar(value="Set your criteria, then press Pick.")
         result_meta = tk.StringVar(value="")
         name_lbl = ttk.Label(frame, textvariable=result_name,
                              font=("Segoe UI", 12, "bold"), wraplength=320, justify="left")
-        name_lbl.grid(row=7, column=0, columnspan=2, sticky="w")
+        name_lbl.grid(row=8, column=0, columnspan=2, sticky="w")
         meta_lbl = ttk.Label(frame, textvariable=result_meta, foreground=C_INK_600,
                              font=("Segoe UI", 9), wraplength=320, justify="left")
-        meta_lbl.grid(row=8, column=0, columnspan=2, sticky="w", pady=(2, 0))
+        meta_lbl.grid(row=9, column=0, columnspan=2, sticky="w", pady=(2, 0))
 
         picked: list = [None]   # holds the current game row
 
@@ -4697,6 +4772,8 @@ class App(tk.Tk):
 
         def _matches(g, open_ids) -> bool:
             if available_var.get() and g["bgg_id"] in open_ids:
+                return False
+            if unplayed_only_var.get() and not (g["own"] == 1 and g["is_unplayed"]):
                 return False
             pv = players_var.get()
             if pv != "Any":
@@ -4777,7 +4854,7 @@ class App(tk.Tk):
 
         # ── buttons ───────────────────────────────────────────────────────────
         btn_row = ttk.Frame(frame)
-        btn_row.grid(row=9, column=0, columnspan=2, sticky="e", pady=(16, 0))
+        btn_row.grid(row=10, column=0, columnspan=2, sticky="e", pady=(16, 0))
         ttk.Button(btn_row, text="Close", style="Ghost.TButton",
                    command=win.destroy).pack(side="left", padx=(0, 6))
         open_btn = ttk.Button(btn_row, text="Open Details", style="Ghost.TButton",
@@ -6275,6 +6352,23 @@ class App(tk.Tk):
             variable=insert_var, command=on_insert_toggle,
         ).pack(side="left")
 
+        # "Not played yet" — only offered for an owned game with no logged plays
+        # (logging a play clears the mark automatically).
+        with db.connect() as c:
+            _fresh = db.get_game(c, game["bgg_id"])
+            _can_unplayed = db.unplayed_eligible(c, game["bgg_id"])
+        unplayed_var = tk.BooleanVar(value=bool(_fresh and _fresh["is_unplayed"]))
+        if _can_unplayed:
+            def on_unplayed_toggle() -> None:
+                with db.connect() as c:
+                    db.set_unplayed(c, [game["bgg_id"]], unplayed_var.get())
+                self.refresh_games(preserve_scroll=True)
+                _sync_unplayed_banner()
+            ttk.Checkbutton(
+                toggles, text="Not played yet",
+                variable=unplayed_var, command=on_unplayed_toggle,
+            ).pack(side="left", padx=(20, 0))
+
         fav_var = tk.BooleanVar(value=bool(game["is_favorite"]))
         def on_fav_toggle() -> None:
             with db.connect() as c:
@@ -6343,6 +6437,17 @@ class App(tk.Tk):
         if game["is_expansion"]:
             tk.Label(info, text="Expansion", bg=C_BLUE_050, fg=C_BLUE_800,
                      font=("Segoe UI", 8), padx=6, pady=2).pack(anchor="w", pady=(2, 0))
+        # Themed "not played yet" banner (white on the theme's card colour).
+        unplayed_banner = tk.Label(
+            info, text="Not played yet — Log a play to clear",
+            bg=C_CARDS[1], fg="#FFFFFF", font=("Segoe UI", 9, "bold"),
+            padx=8, pady=3, anchor="w")
+        def _sync_unplayed_banner() -> None:
+            if unplayed_var.get() and _fresh is not None and _fresh["own"] == 1:
+                unplayed_banner.pack(anchor="w", pady=(4, 0), after=name_lbl)
+            else:
+                unplayed_banner.pack_forget()
+        _sync_unplayed_banner()
         if game["year"]:
             ttk.Label(info, text=f"Published {game['year']}", foreground=C_INK_600).pack(anchor="w")
 

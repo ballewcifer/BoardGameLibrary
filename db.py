@@ -123,6 +123,10 @@ MIGRATIONS = [
     "ALTER TABLE games ADD COLUMN bgg_status TEXT",
     # Optional BGG username on a friend (reference only — parity with mobile).
     "ALTER TABLE users ADD COLUMN bgg_username TEXT",
+    # 1 = the user manually marked this OWNED game "not played yet". Opt-in
+    # (a game with zero plays may have been played before the app existed);
+    # cleared automatically when a play is logged for the game.
+    "ALTER TABLE games ADD COLUMN is_unplayed INTEGER DEFAULT 0",
 ]
 
 
@@ -204,6 +208,40 @@ def set_insert(c: sqlite3.Connection, bgg_id: int, value: bool) -> None:
     c.execute("UPDATE games SET has_insert = ? WHERE bgg_id = ?", (int(value), bgg_id))
 
 
+def unplayed_eligible(c: sqlite3.Connection, bgg_id: int) -> bool:
+    """A game can be marked "not played yet" only if it is owned and has no
+    logged plays."""
+    row = c.execute(
+        "SELECT own, (SELECT COUNT(*) FROM plays WHERE game_id = games.bgg_id) AS n "
+        "FROM games WHERE bgg_id = ?", (bgg_id,)).fetchone()
+    return row is not None and bool(row["own"]) and row["n"] == 0
+
+
+def set_unplayed(c: sqlite3.Connection, ids, value: bool) -> tuple[int, int]:
+    """Mark (value=True) or clear (value=False) the "not played yet" flag on
+    *ids*. Marking skips ineligible games (not owned, or with a logged play).
+    Returns (changed, skipped); clearing never skips."""
+    changed = skipped = 0
+    for gid in ids:
+        if value and not unplayed_eligible(c, gid):
+            skipped += 1
+            continue
+        c.execute("UPDATE games SET is_unplayed = ? WHERE bgg_id = ?", (int(bool(value)), gid))
+        changed += 1
+    return changed, skipped
+
+
+UNPLAYED_NONE_ELIGIBLE = ("Games with a logged play, and games you don't own, "
+                          "can't be marked unplayed.")
+
+
+def clear_unplayed_if_played(c: sqlite3.Connection) -> None:
+    """Drop the mark from every game that has plays (keeps a mark from ever
+    contradicting the play log)."""
+    c.execute("UPDATE games SET is_unplayed = 0 WHERE is_unplayed = 1 AND "
+              "EXISTS (SELECT 1 FROM plays WHERE plays.game_id = games.bgg_id)")
+
+
 def get_manual_fields(c: sqlite3.Connection, bgg_id: int) -> set:
     """Return the set of field names that have been manually overridden."""
     row = c.execute(
@@ -277,9 +315,12 @@ def _status_where(owned_only: bool, status) -> tuple[str, list]:
 
 def list_games(c: sqlite3.Connection, search: str = "",
                owned_only: bool = True,
-               status=None) -> list[sqlite3.Row]:
-    """Return games ordered by name. See _status_where() for `status`'s shape."""
+               status=None, unplayed_only: bool = False) -> list[sqlite3.Row]:
+    """Return games ordered by name. See _status_where() for `status`'s shape.
+    unplayed_only: only owned games marked "not played yet"."""
     where, params = _status_where(owned_only, status)
+    if unplayed_only:
+        where = f"({where}) AND own = 1 AND is_unplayed = 1"
     if search:
         return c.execute(
             f"SELECT * FROM games WHERE {where} AND name LIKE ?"
@@ -741,6 +782,7 @@ def log_play(
         (game_id, played_at, player_names.strip(), winner.strip(), notes.strip(),
          duration_minutes, scores),
     )
+    c.execute("UPDATE games SET is_unplayed = 0 WHERE bgg_id = ?", (game_id,))
     return cur.lastrowid
 
 
@@ -766,6 +808,7 @@ def update_play(
         (game_id, played_at, player_names.strip(), winner.strip(), notes.strip(),
          duration_minutes, scores, play_id),
     )
+    c.execute("UPDATE games SET is_unplayed = 0 WHERE bgg_id = ?", (game_id,))
 
 
 def delete_play(c: sqlite3.Connection, play_id: int) -> None:
@@ -969,12 +1012,12 @@ def collect_backup_tables(c: sqlite3.Connection) -> dict:
     customisations = [dict(r) for r in c.execute(
         """SELECT bgg_id, name, tags, is_favorite, has_insert,
                   my_comment, my_rating, best_players, is_cooperative,
-                  manual_fields, image_path, own, bgg_status
+                  manual_fields, image_path, own, bgg_status, is_unplayed
            FROM games
            WHERE tags IS NOT NULL OR is_favorite = 1 OR has_insert = 1
               OR my_comment IS NOT NULL OR my_rating IS NOT NULL
               OR best_players IS NOT NULL OR is_cooperative IS NOT NULL
-              OR image_path IS NOT NULL OR own = 0
+              OR image_path IS NOT NULL OR own = 0 OR is_unplayed = 1
               OR (bgg_status IS NOT NULL AND bgg_status != 'own')""")]
 
     return {
@@ -1173,13 +1216,19 @@ def restore_backup_tables(c: sqlite3.Connection, data: dict,
             "UPDATE games SET tags=?, is_favorite=?, has_insert=?, "
             "my_comment=?, my_rating=?, best_players=?, is_cooperative=?, "
             "manual_fields=?, image_path=COALESCE(?, image_path), "
-            "own=COALESCE(?, own), bgg_status=COALESCE(?, bgg_status) WHERE bgg_id=?",
+            "own=COALESCE(?, own), bgg_status=COALESCE(?, bgg_status), "
+            "is_unplayed=COALESCE(?, is_unplayed) WHERE bgg_id=?",
             (cu.get("tags"), cu.get("is_favorite") or 0, cu.get("has_insert") or 0,
              cu.get("my_comment"), cu.get("my_rating"), cu.get("best_players"),
              cu.get("is_cooperative"), cu.get("manual_fields"), image_path,
-             cu.get("own"), cu.get("bgg_status"), cu["bgg_id"]),
+             cu.get("own"), cu.get("bgg_status"),
+             (1 if cu["is_unplayed"] else 0) if cu.get("is_unplayed") is not None else None,
+             cu["bgg_id"]),
         )
         counts["customisations"] += 1
+
+    # A restored mark must never contradict the play log.
+    clear_unplayed_if_played(c)
 
     return counts
 

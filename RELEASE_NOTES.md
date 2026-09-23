@@ -1,5 +1,16 @@
 # Release Notes
 
+## Desktop/Web v7.1.0 - "Not played yet"
+
+- **Mark games you own but haven't played.** It is your call, not automatic: a game with no plays in the app may still have been played before you started using it. Mark a game "Not played yet" and it stays marked until you log a play for it, which clears the mark for you.
+- **Desktop**: a "Not played yet" checkbox in the game's details window (shown only for owned games with no plays), plus right-click items to mark or clear one game, or several selected rows at once. Games that can't be marked (already played, or not owned) are skipped and you are told how many. The Games table has a new sortable "Unplayed" column, cards show an "UNPLAYED" tag on the cover, and the details window shows a "Not played yet - Log a play to clear" banner.
+- **Web**: the same checkbox in Edit Game, an "Unplayed" / "Played" button in Select mode (it flips to "Played" when every selected game is already marked), an "UNPLAYED" corner ribbon on game cards, and the banner on the game page. The colour follows your chosen theme, and the text stays readable in all of them.
+- **Filter and Surprise Me**: a "Not played yet" filter on the Games screen, and an "Only games I haven't played" option on the random game picker (off by default), on both desktop and web.
+- **Backups** carry the mark, and older backups without it still restore. A restored mark is dropped for any game that has plays, so it can never contradict your play log.
+
+---
+
+
 Covers Desktop/Web **v6.9.0 → v6.9.5** and Mobile **v2.2.8 → v2.5.4** (2026-08-04 to 2026-08-24).
 
 This file is duplicated in the companion [BoardGameLibrary](https://github.com/ballewcifer/BoardGameLibrary) repo (Desktop/Web) since most of this window's work spanned all three platforms.
