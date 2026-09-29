@@ -386,8 +386,11 @@ class _AutocompleteEntry(ttk.Entry):
     "Alice, Bob, ..." with autocomplete on each name.
     """
 
-    def __init__(self, parent, suggestions: list[str], **kwargs):
+    _MAX_VISIBLE = 12  # rows shown in the dropdown before it stops growing
+
+    def __init__(self, parent, suggestions: list[str], on_select=None, **kwargs):
         self._suggestions = suggestions
+        self._on_select = on_select
         self._var: tk.StringVar = kwargs.pop("textvariable", tk.StringVar())
         super().__init__(parent, textvariable=self._var, **kwargs)
         self._popup: Optional[tk.Toplevel] = None
@@ -396,6 +399,11 @@ class _AutocompleteEntry(ttk.Entry):
         self.bind("<FocusOut>", lambda e: self.after(150, self._hide))
         self.bind("<Escape>",   lambda e: self._hide())
         self.bind("<Down>",     self._focus_lb)
+        self.bind("<Return>",   self._commit)
+        # Clicking into (or tabbing into) an empty field shows every option, like a picker —
+        # not just once you start typing.
+        self.bind("<FocusIn>",  self._show_all_if_empty)
+        self.bind("<Button-1>", self._show_all_if_empty)
 
     @property
     def var(self) -> tk.StringVar:
@@ -436,10 +444,10 @@ class _AutocompleteEntry(ttk.Entry):
             self._lb.bind("<FocusOut>",        lambda e: self.after(150, self._hide))
 
         self._lb.delete(0, "end")
-        for m in matches[:8]:
+        for m in matches[:self._MAX_VISIBLE]:
             self._lb.insert("end", m)
 
-        count = min(len(matches), 8)
+        count = min(len(matches), self._MAX_VISIBLE)
         x = self.winfo_rootx()
         y = self.winfo_rooty() + self.winfo_height()
         w = max(self.winfo_width(), 200)
@@ -472,6 +480,19 @@ class _AutocompleteEntry(ttk.Entry):
         self.icursor("end")
         self._hide()
         self.focus_set()
+        if self._on_select:
+            self._on_select()
+
+    def _commit(self, event=None) -> None:
+        """Enter pressed in the entry itself (not the dropdown) — e.g. a name/game was
+        typed out in full rather than picked from the list."""
+        self._hide()
+        if self._on_select:
+            self._on_select()
+
+    def _show_all_if_empty(self, event=None) -> None:
+        if not self._last_token() and self._suggestions:
+            self._show(self._suggestions)
 
 
 def _date_entry(parent, textvariable: tk.StringVar, width: int = 12, **kw):
@@ -1608,9 +1629,9 @@ class App(tk.Tk):
             cols = ("Game", "Borrower", "Since", "Due")
             tree = ttk.Treeview(inner, columns=cols, show="headings", height=min(len(checked_out), 6))
             for col in cols:
-                tree.heading(col, text=col)
-            tree.column("Game",     width=220)
-            tree.column("Borrower", width=160)
+                tree.heading(col, text=col, anchor="center")
+            tree.column("Game",     width=220, anchor="center")
+            tree.column("Borrower", width=160, anchor="center")
             tree.column("Since",    width=100, anchor="center")
             tree.column("Due",      width=100, anchor="center")
             tree.tag_configure("overdue", foreground=C_DR_TEXT,
@@ -3077,16 +3098,30 @@ class App(tk.Tk):
         card.bind("<Enter>", lambda e: card.configure(highlightbackground=C_INK_500))
         card.bind("<Leave>", lambda e: card.configure(highlightbackground=C_LINE_200))
 
-        # Right-click context menu; double-click = quick check-in/out toggle
+        # Right-click context menu; single click (on the card itself, not a button) opens
+        # Details, like tapping a game on mobile; double-click = quick check-in/out toggle.
+        # The single-click is delayed briefly so a double-click doesn't also open Details
+        # right before it toggles checkout.
         def _card_right_click(event, g=game):
             self._show_card_context_menu(event, g)
-        def _card_double_click(event, g=game):
+        def _card_single_click(event, g=game, w=card):
+            pending = getattr(w, "_click_after_id", None)
+            if pending:
+                w.after_cancel(pending)
+            w._click_after_id = w.after(
+                250, lambda: (setattr(w, "_click_after_id", None), self.show_details(g)))
+        def _card_double_click(event, g=game, w=card):
+            pending = getattr(w, "_click_after_id", None)
+            if pending:
+                w.after_cancel(pending)
+                w._click_after_id = None
             self._toggle_checkout(g)
         _rc_targets = [card, img_canvas, body]
         if not _is_sm:
             _rc_targets.append(sec)
         for w in _rc_targets:
             w.bind("<Button-3>", _card_right_click)
+            w.bind("<Button-1>", _card_single_click)
             w.bind("<Double-Button-1>", _card_double_click)
 
         # Explicit recursive MouseWheel binding — a global bind_all is also in
@@ -5793,11 +5828,12 @@ class App(tk.Tk):
         ttk.Label(controls, text="FILTER BY GAME", style="Filter.TLabel"
                   ).pack(side="left", padx=(SP["md"], SP["xs"]))
         self.plays_game_var = tk.StringVar(value="All games")
-        self.plays_game_cb = ttk.Combobox(
-            controls, textvariable=self.plays_game_var, width=30, state="readonly",
+        self.plays_game_cb = _AutocompleteEntry(
+            controls, ["All games"], textvariable=self.plays_game_var, width=30,
+            on_select=lambda: self.refresh_plays(),
         )
         self.plays_game_cb.pack(side="left")
-        self.plays_game_cb.bind("<<ComboboxSelected>>", lambda *_: self.refresh_plays())
+        self.plays_game_cb.bind("<FocusOut>", lambda *_: self.refresh_plays(), add="+")
 
         ttk.Button(controls, text="Clear filter", style="Quiet.TButton",
                    command=lambda: [self.plays_game_var.set("All games"), self.refresh_plays()]
@@ -6028,7 +6064,7 @@ class App(tk.Tk):
             game_names = ["All games"] + [g["name"] for g in games]
             self._plays_game_map = {g["name"]: g["bgg_id"] for g in games}
 
-        self.plays_game_cb["values"] = game_names
+        self.plays_game_cb.set_suggestions(game_names)
         if self.plays_game_var.get() not in game_names:
             self.plays_game_var.set("All games")
 
