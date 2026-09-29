@@ -1,6 +1,7 @@
 """Board Game Library — Tkinter GUI."""
 from __future__ import annotations
 
+import math
 import os
 import random
 import re
@@ -645,6 +646,30 @@ def _date_entry(parent, textvariable: tk.StringVar, width: int = 12, **kw):
 
         de.bind("<<DateEntrySelected>>", _sync)
         de.bind("<FocusOut>", _sync)
+
+        # A dialog with a date field is usually opened with grab_set() (true modal — clicks on
+        # the main window behind it are blocked). tkcalendar's drop-down calendar is its own
+        # separate Toplevel popup, and under someone ELSE's active grab its month-navigation
+        # arrows can misread a click on them as "focus left the calendar" and close the whole
+        # thing instead of turning the page — this was never exercised before, since the
+        # calendar silently never worked pre-tkcalendar-bundling. Release the dialog's grab
+        # for exactly as long as the calendar is open, then restore it once it closes.
+        top = parent.winfo_toplevel()
+        _orig_drop_down = de.drop_down
+        def _drop_down_without_grab_conflict():
+            had_grab = top.grab_current() is top
+            if had_grab:
+                top.grab_release()
+            _orig_drop_down()
+            if had_grab:
+                def _restore_grab(event=None):
+                    try:
+                        if top.winfo_exists():
+                            top.grab_set()
+                    except tk.TclError:
+                        pass
+                de._top_cal.bind("<Unmap>", _restore_grab, add="+")
+        de.drop_down = _drop_down_without_grab_conflict
         return de
     else:
         return ttk.Entry(parent, textvariable=textvariable, width=width, **kw)
@@ -666,7 +691,6 @@ class App(tk.Tk):
         "label":       ("Segoe UI", 12, "bold"),   # UPPERCASE filter labels (prototype: 12px)
         "chip":        ("Segoe UI", 13, "bold"),   # active-filter chips (prototype: 13px)
         "meta":        ("Segoe UI", 14),           # count / sort row (prototype: 14px)
-        "loaned_to":   ("Segoe UI", 13),           # "To Name · due Date" line
     }
 
     # Gradient palette for cover placeholders (inspired by prototype game colours)
@@ -1895,7 +1919,7 @@ class App(tk.Tk):
             ("fav",     "★",           34,  "center"),
             ("insert",  "Insert",      56,  "center"),
             ("unplayed", "Unplayed",    92,  "center"),
-            ("name",    "Name",        260, "w"     ),
+            ("name",    "Name",        260, "center"),
             ("year",    "Year",         56, "center"),
             ("players", "Players",      88, "center"),
             ("time",    "Time",         92, "center"),
@@ -1909,7 +1933,7 @@ class App(tk.Tk):
         # Tkinter hands all spare horizontal space to it — the table stays
         # adaptive to the window width with no manual bookkeeping.
         for cid, heading, width, anchor in col_defs:
-            self.games_tree.heading(cid, text=heading,
+            self.games_tree.heading(cid, text=heading, anchor="center",
                                     command=lambda c=cid: self._sort_table(c))
             self.games_tree.column(cid, width=width, anchor=anchor,
                                    stretch=(cid == "name"),
@@ -1927,19 +1951,23 @@ class App(tk.Tk):
         self.games_tree.bind("<App>",       self._on_table_menu_key)
         self.games_tree.bind("<Shift-F10>", self._on_table_menu_key)
 
-        # Row colour tags
+        # Row colour tags. ttk.Treeview resolves two tags both setting the same option (here,
+        # "background") in favor of whichever tag was CONFIGURED FIRST via tag_configure() —
+        # this is what actually decides priority, not the order tags are listed in a given
+        # item's own tags=(...) tuple (which doesn't affect it at all, despite how that reads
+        # everywhere else this is documented/discussed). So "status_*" must be configured
+        # before "expansion" for the status tint to win over it.
         self.games_tree.tag_configure("out",       background=C_WN_BG)
         self.games_tree.tag_configure("favorite",  foreground=C_GOLD)
-        # Neutral gray, not a pastel — every BGG status color below is some shade of pink/
-        # purple/blue/orange/teal, and the old lavender expansion tint (#f3e5f5) was too close
-        # to "wanttobuy" (#FCE7F3) to tell apart at a glance even with the right one winning.
-        self.games_tree.tag_configure("expansion", background="#ECECEC")
         # One row-tint tag per non-"own" BGG status — a Treeview can't color
-        # individual cells, so the whole row is tinted instead. Listed first in the item's
-        # tags (see _refresh_games_table) so it outranks "expansion" for the background.
+        # individual cells, so the whole row is tinted instead.
         for _status, _colors in bgg.STATUS_COLORS.items():
             if _status != "own":
                 self.games_tree.tag_configure(f"status_{_status}", background=_colors["bg"])
+        # Neutral gray, not a pastel — every BGG status color above is some shade of pink/
+        # purple/blue/orange/teal, and the old lavender expansion tint (#f3e5f5) was too close
+        # to "wanttobuy" (#FCE7F3) to tell apart at a glance even with the right one winning.
+        self.games_tree.tag_configure("expansion", background="#ECECEC")
         # Per-game actions live on the row right-click menu (no bulk toolbar).
 
     def _set_view(self, mode: str) -> None:
@@ -2500,6 +2528,15 @@ class App(tk.Tk):
             self.games_tree.yview_moveto(_prev_scroll)
         else:
             self._refresh_card_view(games, open_loans, play_counts)
+            if preserve_scroll:
+                # Cards render lazily in batches of _CARD_BATCH as the user scrolls down —
+                # right after a refresh, only the first batch exists, so the scrollregion
+                # only reflects that partial content. Restoring a fractional position (e.g.
+                # 0.4) against that much-shorter region lands nowhere near where 0.4 actually
+                # was in the full list — usually right back at the top. Render every batch
+                # first (same helper used before an A-Z jump), so the scrollregion matches
+                # the full list before restoring a position within it.
+                self._flush_card_batches()
             # games_inner's <Configure> handler is what recalculates games_canvas's
             # scrollregion, and that fires asynchronously after the card grid is rebuilt —
             # calling yview_moveto() here, synchronously, runs before it and gets the stale
@@ -2757,9 +2794,9 @@ class App(tk.Tk):
             n_plays = play_counts.get(bgg_id, 0)
 
             tags: list[str] = []
-            # ttk.Treeview resolves conflicting tag options (e.g. two tags both setting
-            # "background") in favor of whichever tag is listed FIRST — not last, despite how
-            # that reads. The status tint needs to win over "expansion", so it goes first.
+            # This order doesn't actually affect which color wins when a row has more than one
+            # (that's decided by tag_configure() registration order, above) — kept status-first
+            # anyway since it reads correctly and doesn't hurt.
             if g["own"] != 1 and g["bgg_status"] and g["bgg_status"] in bgg.STATUS_COLORS:
                 tags.append(f"status_{g['bgg_status']}")
             if loan:
@@ -3103,20 +3140,29 @@ class App(tk.Tk):
             img_canvas.tag_lower(_exp_bg, _exp_id)   # behind the text, above the image
             _stack_top = y1
 
-        # "Not played yet" ribbon — bottom-left of the cover (stacked above the
-        # Expansion ribbon if both apply). Fill is the active theme's second
-        # card colour with white text (>= 4.68:1 in every theme); the label is
-        # text, so the meaning never relies on colour alone.
+        # "Not played yet" — a diagonal folded-corner ribbon across the bottom-left of the
+        # cover, matching mobile exactly (same geometry, same theme colour C_CARDS[1], same
+        # white/bold/uppercase label) rather than desktop's old plain horizontal bar. Fill is
+        # the active theme's second card colour with white text; the label is text, so the
+        # meaning never relies on colour alone.
         if game["own"] == 1 and game["is_unplayed"]:
-            _up_id = img_canvas.create_text(
-                SP["sm"], _stack_top - 3, anchor="sw", text="UNPLAYED",
-                fill="#FFFFFF", font=self.FONTS["label"])
-            bb = img_canvas.bbox(_up_id)
-            x2 = (bb[2] + SP["sm"]) if bb else 90
-            y1 = (bb[1] - 3) if bb else (_stack_top - 22)
-            _up_bg = img_canvas.create_rectangle(0, y1, x2, _stack_top,
-                                                 fill=C_CARDS[1], outline="")
-            img_canvas.tag_lower(_up_bg, _up_id)
+            band_len, band_th = 108, 18       # same proportions as mobile's ribbon
+            # Band centre, near the bottom-left corner — nudged up above the Expansion bar
+            # (via _stack_top) when a game happens to be both, so the two don't overlap.
+            cx, cy = 24, _stack_top - 24
+            angle = math.radians(45)
+            cos_a, sin_a = math.cos(angle), math.sin(angle)
+            def _rot(dx, dy):
+                # Tk canvas y grows downward, so this rotation direction is what actually
+                # renders as a band running from the lower-left up to the upper-right.
+                return (cx + dx * cos_a + dy * sin_a, cy - dx * sin_a + dy * cos_a)
+            half_l, half_t = band_len / 2, band_th / 2
+            corners = [_rot(-half_l, -half_t), _rot(half_l, -half_t),
+                       _rot(half_l, half_t), _rot(-half_l, half_t)]
+            img_canvas.create_polygon(corners, fill=C_CARDS[1], outline="")
+            img_canvas.create_text(
+                cx, cy, text="UNPLAYED", fill="#FFFFFF",
+                font=("Segoe UI", 8, "bold"), angle=45)
 
         # ── card body ──────────────────────────────────────────────────────────
         _is_sm = self._card_size == "sm"
@@ -3144,14 +3190,6 @@ class App(tk.Tk):
         # users can see where focus is (the star is otherwise mouse-only-looking).
         _star_lbl.bind("<FocusIn>", lambda e, w=_star_lbl: w.configure(highlightbackground=C_BLUE_600))
         _star_lbl.bind("<FocusOut>", lambda e, w=_star_lbl: w.configure(highlightbackground=C_SURFACE))
-
-        # Loaned-to line: "To Name · due Date" (prototype: 13px ink-600)
-        if out_to:
-            due_txt = f" · due {fmt_date(due)}" if due else ""
-            tk.Label(body, text=f"To {out_to}{due_txt}",
-                     bg=C_SURFACE, fg=C_INK_600,
-                     font=self.FONTS["loaned_to"],
-                     anchor="w", justify="left").pack(anchor="w", pady=(0, SP["xs"]))
 
         # Title (prototype: 16px bold) + year (prototype: 13px ink-600)
         tk.Label(body, text=_shorten(game["name"]),
@@ -3435,13 +3473,13 @@ class App(tk.Tk):
         self._members_headings = {"name": "Name", "bgg": "BGG username",
                                   "out": "Currently out", "since": "Friend since"}
         self.members_tree = ttk.Treeview(frame, columns=cols, show="headings")
-        self.members_tree.heading("name", text="Name")
-        self.members_tree.heading("bgg", text="BGG username")
-        self.members_tree.heading("out", text="Currently out")
-        self.members_tree.heading("since", text="Friend since")
+        self.members_tree.heading("name", text="Name", anchor="center")
+        self.members_tree.heading("bgg", text="BGG username", anchor="center")
+        self.members_tree.heading("out", text="Currently out", anchor="center")
+        self.members_tree.heading("since", text="Friend since", anchor="center")
         self._make_sortable(self.members_tree, self._members_headings)
-        self.members_tree.column("name", width=240)
-        self.members_tree.column("bgg", width=180)
+        self.members_tree.column("name", width=240, anchor="center")
+        self.members_tree.column("bgg", width=180, anchor="center")
         self.members_tree.column("out", width=120, anchor="center")
         self.members_tree.column("since", width=160, anchor="center")
         self.members_tree.pack(fill="both", expand=True, pady=(SP["md"], 0))
@@ -3626,15 +3664,15 @@ class App(tk.Tk):
 
         cols = ("game", "out", "returned", "notes")
         tree = ttk.Treeview(frame, columns=cols, show="headings", selectmode="browse")
-        tree.heading("game",     text="Game")
-        tree.heading("out",      text="Checked out")
-        tree.heading("returned", text="Returned")
-        tree.heading("notes",    text="Notes")
+        tree.heading("game",     text="Game",        anchor="center")
+        tree.heading("out",      text="Checked out",  anchor="center")
+        tree.heading("returned", text="Returned",     anchor="center")
+        tree.heading("notes",    text="Notes",        anchor="center")
         # Game stretches to fill; the rest are fixed-width to fit their content.
-        tree.column("game",     width=220, minwidth=140, anchor="w",      stretch=True)
+        tree.column("game",     width=220, minwidth=140, anchor="center", stretch=True)
         tree.column("out",      width=150, minwidth=150, anchor="center", stretch=False)
         tree.column("returned", width=150, minwidth=150, anchor="center", stretch=False)
-        tree.column("notes",    width=170, minwidth=120, anchor="w",      stretch=False)
+        tree.column("notes",    width=170, minwidth=120, anchor="center", stretch=False)
 
         vsb = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
         tree.configure(yscrollcommand=vsb.set)
@@ -3743,19 +3781,19 @@ class App(tk.Tk):
             "due": "Due", "returned": "Returned", "notes": "Notes",
         }
         self.history_tree = ttk.Treeview(self._hist_checkouts_pane, columns=cols, show="headings")
-        self.history_tree.heading("game",     text="Game")
-        self.history_tree.heading("member",   text="Friend")
-        self.history_tree.heading("out",      text="Checked Out")
-        self.history_tree.heading("due",      text="Due")
-        self.history_tree.heading("returned", text="Returned")
-        self.history_tree.heading("notes",    text="Notes")
+        self.history_tree.heading("game",     text="Game",        anchor="center")
+        self.history_tree.heading("member",   text="Friend",      anchor="center")
+        self.history_tree.heading("out",      text="Checked Out", anchor="center")
+        self.history_tree.heading("due",      text="Due",         anchor="center")
+        self.history_tree.heading("returned", text="Returned",    anchor="center")
+        self.history_tree.heading("notes",    text="Notes",       anchor="center")
         self._make_sortable(self.history_tree, self._history_headings)
-        self.history_tree.column("game",     width=220)
-        self.history_tree.column("member",   width=150)
+        self.history_tree.column("game",     width=220, anchor="center")
+        self.history_tree.column("member",   width=150, anchor="center")
         self.history_tree.column("out",      width=110, anchor="center")
         self.history_tree.column("due",      width=90,  anchor="center")
         self.history_tree.column("returned", width=110, anchor="center")
-        self.history_tree.column("notes",    width=180)
+        self.history_tree.column("notes",    width=180, anchor="center")
         self.history_tree.tag_configure("overdue", foreground=C_DR_TEXT,
                                         font=self.FONTS["body_strong"])
         self.history_tree.pack(fill="both", expand=True, pady=(SP["md"], 0))
@@ -3783,15 +3821,15 @@ class App(tk.Tk):
         p_tree_row.pack(fill="both", expand=True, pady=(SP["sm"], 0))
         self.history_plays_tree = ttk.Treeview(
             p_tree_row, columns=pcols, show="headings")
-        self.history_plays_tree.heading("game",     text="Game")
-        self.history_plays_tree.heading("date",     text="Date")
-        self.history_plays_tree.heading("players",  text="Players")
-        self.history_plays_tree.heading("winner",   text="Winner")
-        self.history_plays_tree.heading("duration", text="Duration")
+        self.history_plays_tree.heading("game",     text="Game",     anchor="center")
+        self.history_plays_tree.heading("date",     text="Date",     anchor="center")
+        self.history_plays_tree.heading("players",  text="Players",  anchor="center")
+        self.history_plays_tree.heading("winner",   text="Winner",   anchor="center")
+        self.history_plays_tree.heading("duration", text="Duration", anchor="center")
         self._make_sortable(self.history_plays_tree, self._history_plays_headings)
-        self.history_plays_tree.column("game",     width=220, anchor="w")
+        self.history_plays_tree.column("game",     width=220, anchor="center")
         self.history_plays_tree.column("date",     width=110, anchor="center", stretch=False)
-        self.history_plays_tree.column("players",  width=240, anchor="w")
+        self.history_plays_tree.column("players",  width=240, anchor="center")
         self.history_plays_tree.column("winner",   width=150, anchor="center", stretch=False)
         self.history_plays_tree.column("duration", width=90,  anchor="center", stretch=False)
         p_vsb = ttk.Scrollbar(p_tree_row, orient="vertical",
@@ -5842,6 +5880,7 @@ class App(tk.Tk):
         dialog.title("Check Out")
         dialog.transient(self)
         dialog.resizable(False, False)
+        dialog.configure(bg=C_BG)
         ttk.Label(dialog, text=f"Check out \"{game['name']}\" to:").grid(row=0, column=0, columnspan=2, padx=12, pady=(12, 6), sticky="w")
 
         member_var = tk.StringVar(value="")
@@ -5969,6 +6008,7 @@ class App(tk.Tk):
         dialog.title("Check In")
         dialog.transient(self)
         dialog.resizable(False, False)
+        dialog.configure(bg=C_BG)
         ttk.Label(dialog, text=f"Check in \"{game['name']}\"?").grid(
             row=0, column=0, columnspan=2, padx=12, pady=(12, 6), sticky="w")
 
@@ -6130,21 +6170,21 @@ class App(tk.Tk):
             "duration": "Duration", "scores": "Scores", "notes": "Notes",
         }
         self.plays_tree = ttk.Treeview(self._plays_pane, columns=cols, show="headings")
-        self.plays_tree.heading("game",     text="Game")
-        self.plays_tree.heading("date",     text="Date")
-        self.plays_tree.heading("players",  text="Players")
-        self.plays_tree.heading("winner",   text="Winner")
-        self.plays_tree.heading("duration", text="Duration")
-        self.plays_tree.heading("scores",   text="Scores")
-        self.plays_tree.heading("notes",    text="Notes")
+        self.plays_tree.heading("game",     text="Game",     anchor="center")
+        self.plays_tree.heading("date",     text="Date",     anchor="center")
+        self.plays_tree.heading("players",  text="Players",  anchor="center")
+        self.plays_tree.heading("winner",   text="Winner",   anchor="center")
+        self.plays_tree.heading("duration", text="Duration", anchor="center")
+        self.plays_tree.heading("scores",   text="Scores",   anchor="center")
+        self.plays_tree.heading("notes",    text="Notes",    anchor="center")
         self._make_sortable(self.plays_tree, self._plays_headings)
-        self.plays_tree.column("game",     width=190)
+        self.plays_tree.column("game",     width=190, anchor="center")
         self.plays_tree.column("date",     width=100, anchor="center")
-        self.plays_tree.column("players",  width=160)
+        self.plays_tree.column("players",  width=160, anchor="center")
         self.plays_tree.column("winner",   width=110, anchor="center")
         self.plays_tree.column("duration", width=80,  anchor="center")
         self.plays_tree.column("scores",   width=150, anchor="center")
-        self.plays_tree.column("notes",    width=150)
+        self.plays_tree.column("notes",    width=150, anchor="center")
 
         vsb = ttk.Scrollbar(self._plays_pane, orient="vertical",
                              command=self.plays_tree.yview)
@@ -6395,6 +6435,7 @@ class App(tk.Tk):
         dialog.title("Edit Play" if editing else "Log a Play")
         dialog.transient(self)
         dialog.resizable(False, False)
+        dialog.configure(bg=C_BG)
 
         pad = {"padx": 12, "pady": 4, "sticky": "w"}
 
@@ -6668,6 +6709,7 @@ class App(tk.Tk):
         win.geometry("820x700")
         win.minsize(560, 480)
         win.transient(self)
+        win.configure(bg=C_BG)
 
         # ── fixed bottom section — always visible regardless of scroll position ─
         bottom = ttk.Frame(win)
