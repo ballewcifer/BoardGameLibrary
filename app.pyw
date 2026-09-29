@@ -2619,9 +2619,18 @@ class App(tk.Tk):
         ).start()
 
     def _flush_card_batches(self) -> None:
-        """Render all remaining card batches now (used before an A–Z jump)."""
+        """Render all remaining card batches now (used before an A–Z jump, and to
+        restore scroll position after a refresh — see refresh_games)."""
         while self._cards_rendered < len(getattr(self, "_card_games", [])):
             self._render_more_cards()
+            # The normal scroll-triggered path (_card_yscroll) defers each batch via
+            # after_idle, which incidentally gives Tk's geometry manager a chance to
+            # fully settle each batch's widgets before the next one starts. Looping
+            # here with no pause at all skipped that — Tk could fall behind on laying
+            # out the earliest batches' labels, which then rendered with zero size
+            # (present, correctly built, just never actually measured/placed) until
+            # some later, unrelated full rebuild forced everything to be redone.
+            self.update_idletasks()
 
     def _card_yscroll(self, first: str, last: str) -> None:
         """Scrollbar callback: keep the bar in sync and load more cards as the
@@ -3846,7 +3855,7 @@ class App(tk.Tk):
         self.history_tree.delete(*self.history_tree.get_children())
         self._tv_rawdata[id(self.history_tree)] = {}
         with db.connect() as c:
-            rows = db.loan_history(c)
+            rows = db.loan_history(c, exclude_expansions=True)
         today = datetime.now().date()
         f = self.history_filter.get()
         for r in rows:

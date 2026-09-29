@@ -721,7 +721,13 @@ def loan_history(
     c: sqlite3.Connection,
     game_id: Optional[int] = None,
     user_id: Optional[int] = None,
+    exclude_expansions: bool = False,
 ) -> list[sqlite3.Row]:
+    """*exclude_expansions* leaves out expansions checked out alongside their base
+    game (see check_out()'s "also check out" checklist) — used by the History tab,
+    where the base game's own row already represents the whole checkout. Off by
+    default: a friend's own checkout-history popup, for instance, still wants to
+    show everything they've actually borrowed, expansions included."""
     where = []
     params: list = []
     if game_id is not None:
@@ -730,6 +736,8 @@ def loan_history(
     if user_id is not None:
         where.append("loans.user_id = ?")
         params.append(user_id)
+    if exclude_expansions:
+        where.append("games.is_expansion = 0")
     where_sql = ("WHERE " + " AND ".join(where)) if where else ""
     return c.execute(
         f"""
@@ -894,7 +902,15 @@ def stats_summary(c: sqlite3.Connection) -> dict:
 
 
 def currently_checked_out(c: sqlite3.Connection) -> list[sqlite3.Row]:
-    """Return all open loans with game name, borrower, checkout date, and due date."""
+    """Return all open loans with game name, borrower, checkout date, and due date.
+
+    Expansions checked out alongside their base game (see check_out()'s "also check
+    out" checklist) are left out — the base game's own row already represents the
+    whole checkout, and listing every expansion under it too just clutters this
+    summary view. The History tab does the same (loan_history(exclude_expansions=
+    True)); a friend's own checkout-history popup still shows everything, since
+    there it's "what has this person borrowed", not a checked-out-items summary.
+    """
     return c.execute(
         """
         SELECT loans.id, loans.game_id, loans.user_id,
@@ -904,7 +920,7 @@ def currently_checked_out(c: sqlite3.Connection) -> list[sqlite3.Row]:
         FROM loans
         JOIN games ON games.bgg_id = loans.game_id
         JOIN users ON users.id     = loans.user_id
-        WHERE loans.returned_at IS NULL
+        WHERE loans.returned_at IS NULL AND games.is_expansion = 0
         ORDER BY loans.checked_out_at ASC
         """
     ).fetchall()
