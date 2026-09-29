@@ -1860,7 +1860,10 @@ class App(tk.Tk):
         # Row colour tags
         self.games_tree.tag_configure("out",       background=C_WN_BG)
         self.games_tree.tag_configure("favorite",  foreground=C_GOLD)
-        self.games_tree.tag_configure("expansion", background="#f3e5f5")
+        # Neutral gray, not a pastel — every BGG status color below is some shade of pink/
+        # purple/blue/orange/teal, and the old lavender expansion tint (#f3e5f5) was too close
+        # to "wanttobuy" (#FCE7F3) to tell apart at a glance even with the right one winning.
+        self.games_tree.tag_configure("expansion", background="#ECECEC")
         # One row-tint tag per non-"own" BGG status — a Treeview can't color
         # individual cells, so the whole row is tinted instead. Listed first in the item's
         # tags (see _refresh_games_table) so it outranks "expansion" for the background.
@@ -5588,8 +5591,22 @@ class App(tk.Tk):
     def _save_games_to_db(self, games: list[bgg.GameDetails],
                           collection_username: Optional[str] = None,
                           collection_name: Optional[str] = None) -> None:
+        # An expansion can be cross-linked on BGG to more than one base game (e.g. a game and
+        # its Legacy edition) — bgg.py keeps every candidate. Prefer whichever one is actually
+        # in the library (this sync batch, or already saved) over just "whichever BGG listed
+        # first", which is what caused expansions to attach to the wrong base game.
+        batch_ids = {game.bgg_id for game in games}
+        def _resolve_base_game(g: bgg.GameDetails, c) -> tuple[Optional[int], Optional[str]]:
+            if len(g.base_game_candidates) <= 1:
+                return g.base_game_id, g.base_game_name
+            for cid, cname in g.base_game_candidates:
+                if cid in batch_ids or db.get_game(c, cid) is not None:
+                    return cid, cname
+            return g.base_game_id, g.base_game_name
+
         with db.connect() as c:
             for g in games:
+                base_game_id, base_game_name = _resolve_base_game(g, c)
                 row = {
                     "bgg_id": g.bgg_id,
                     "name": g.name,
@@ -5621,8 +5638,8 @@ class App(tk.Tk):
                     "last_synced": db.now_iso(),
                     "is_expansion": int(g.is_expansion),
                     "is_cooperative": bgg.derive_cooperative(g.mechanics),
-                    "base_game_id": g.base_game_id,
-                    "base_game_name": g.base_game_name,
+                    "base_game_id": base_game_id,
+                    "base_game_name": base_game_name,
                     "bgg_status": g.bgg_status,
                 }
                 # Don't clobber image_path or manually-locked fields on re-sync.
@@ -5717,6 +5734,12 @@ class App(tk.Tk):
         with db.connect() as c:
             all_users = db.list_users(c)
             allowed = db.members_allowed_to_checkout(c, game["bgg_id"])
+            # Owned expansions of this game that are free to check out too — offered as an
+            # "also check out" checklist below, alongside the base game.
+            available_expansions = [
+                e for e in db.list_expansions_of(c, game["bgg_id"])
+                if e["own"] == 1 and db.open_loan_for_game(c, e["bgg_id"]) is None
+            ]
 
         # Friends who have claimed a different collection can only check out
         # their own games, so only eligible ones are suggested — but typing a
@@ -5741,6 +5764,18 @@ class App(tk.Tk):
                 foreground=C_INK_500, font=("Segoe UI", 8), wraplength=260, justify="left",
             ).grid(row=next_row, column=0, columnspan=2, padx=12, pady=(4, 0), sticky="w")
             next_row += 1
+
+        expansion_vars: dict[int, tk.BooleanVar] = {}
+        if available_expansions:
+            ttk.Label(dialog, text="Also check out:").grid(
+                row=next_row, column=0, columnspan=2, padx=12, pady=(8, 0), sticky="w")
+            next_row += 1
+            for exp in available_expansions:
+                var = tk.BooleanVar(value=False)
+                expansion_vars[exp["bgg_id"]] = var
+                ttk.Checkbutton(dialog, text=exp["name"], variable=var).grid(
+                    row=next_row, column=0, columnspan=2, padx=24, sticky="w")
+                next_row += 1
 
         ttk.Label(dialog, text="Due date (optional):").grid(row=next_row, column=0, columnspan=2, padx=12, pady=(8, 0), sticky="w")
         next_row += 1
@@ -5782,6 +5817,17 @@ class App(tk.Tk):
                             f"check out games from it.\n\"{game['name']}\" isn't in it.")
                         return
                     db.check_out(c, game["bgg_id"], user_id, notes_var.get().strip(), due_date=due)
+                    checked_out_names = [game["name"]]
+                    skipped_names = []
+                    for exp_id, var in expansion_vars.items():
+                        if not var.get():
+                            continue
+                        exp = next(e for e in available_expansions if e["bgg_id"] == exp_id)
+                        if not db.user_can_checkout(c, user_id, exp_id):
+                            skipped_names.append(exp["name"])
+                            continue
+                        db.check_out(c, exp_id, user_id, notes_var.get().strip(), due_date=due)
+                        checked_out_names.append(exp["name"])
             except ValueError as e:
                 messagebox.showerror("Cannot check out", str(e))
                 return
@@ -5790,7 +5836,10 @@ class App(tk.Tk):
             self.refresh_members()
             self.refresh_history()
             self.refresh_dashboard()
-            self.status(f"Checked out \"{game['name']}\" to {name}.")
+            msg = f"Checked out {', '.join(checked_out_names)} to {name}."
+            if skipped_names:
+                msg += f" ({', '.join(skipped_names)} not in {name}'s collection — skipped.)"
+            self.status(msg)
 
         ttk.Button(dialog, text="Cancel", command=dialog.destroy).grid(row=next_row, column=0, padx=12, pady=(0, 12), sticky="we")
         ttk.Button(dialog, text="Check Out", command=confirm).grid(row=next_row, column=1, padx=12, pady=(0, 12), sticky="we")
@@ -5798,19 +5847,80 @@ class App(tk.Tk):
         dialog.grab_set()
 
     def on_check_in(self, game) -> None:
-        if not messagebox.askyesno("Check in", f"Mark \"{game['name']}\" as returned?"):
+        with db.connect() as c:
+            base_loan = db.open_loan_for_game(c, game["bgg_id"])
+            # Owned expansions of this game that are ALSO checked out, and to the same
+            # borrower — offered as a "also check in" checklist alongside the base game.
+            # An expansion out to someone else isn't part of this check-in.
+            checked_out_expansions = []
+            if base_loan is not None:
+                for exp in db.list_expansions_of(c, game["bgg_id"]):
+                    exp_loan = db.open_loan_for_game(c, exp["bgg_id"])
+                    if exp_loan is not None and exp_loan["user_id"] == base_loan["user_id"]:
+                        checked_out_expansions.append(exp)
+
+        if not checked_out_expansions:
+            if not messagebox.askyesno("Check in", f"Mark \"{game['name']}\" as returned?"):
+                return
+            try:
+                with db.connect() as c:
+                    db.check_in(c, game["bgg_id"])
+            except ValueError as e:
+                messagebox.showerror("Cannot check in", str(e))
+                return
+            self.refresh_games(preserve_scroll=True)
+            self.refresh_members()
+            self.refresh_history()
+            self.refresh_dashboard()
+            self.status(f"Checked in \"{game['name']}\".")
             return
-        try:
-            with db.connect() as c:
-                db.check_in(c, game["bgg_id"])
-        except ValueError as e:
-            messagebox.showerror("Cannot check in", str(e))
-            return
-        self.refresh_games(preserve_scroll=True)
-        self.refresh_members()
-        self.refresh_history()
-        self.refresh_dashboard()
-        self.status(f"Checked in \"{game['name']}\".")
+
+        dialog = tk.Toplevel(self)
+        dialog.title("Check In")
+        dialog.transient(self)
+        dialog.resizable(False, False)
+        ttk.Label(dialog, text=f"Check in \"{game['name']}\"?").grid(
+            row=0, column=0, columnspan=2, padx=12, pady=(12, 6), sticky="w")
+
+        ttk.Label(dialog, text="Also check in:").grid(
+            row=1, column=0, columnspan=2, padx=12, sticky="w")
+        expansion_vars: dict[int, tk.BooleanVar] = {}
+        row = 2
+        for exp in checked_out_expansions:
+            # Checked back in together by default — they were checked out to the same
+            # borrower, so returning them together is the common case.
+            var = tk.BooleanVar(value=True)
+            expansion_vars[exp["bgg_id"]] = var
+            ttk.Checkbutton(dialog, text=exp["name"], variable=var).grid(
+                row=row, column=0, columnspan=2, padx=24, sticky="w")
+            row += 1
+
+        def confirm() -> None:
+            try:
+                with db.connect() as c:
+                    db.check_in(c, game["bgg_id"])
+                    checked_in_names = [game["name"]]
+                    for exp_id, var in expansion_vars.items():
+                        if var.get():
+                            db.check_in(c, exp_id)
+                            checked_in_names.append(
+                                next(e["name"] for e in checked_out_expansions if e["bgg_id"] == exp_id))
+            except ValueError as e:
+                messagebox.showerror("Cannot check in", str(e))
+                return
+            dialog.destroy()
+            self.refresh_games(preserve_scroll=True)
+            self.refresh_members()
+            self.refresh_history()
+            self.refresh_dashboard()
+            self.status(f"Checked in {', '.join(checked_in_names)}.")
+
+        ttk.Button(dialog, text="Cancel", command=dialog.destroy).grid(
+            row=row, column=0, padx=12, pady=(8, 12), sticky="we")
+        ttk.Button(dialog, text="Check In", command=confirm).grid(
+            row=row, column=1, padx=12, pady=(8, 12), sticky="we")
+        dialog.bind("<Escape>", lambda *_: dialog.destroy())
+        dialog.grab_set()
 
     # ---------- delete game ----------
 
@@ -6465,8 +6575,8 @@ class App(tk.Tk):
     def show_details(self, game) -> None:
         win = tk.Toplevel(self)
         win.title(game["name"])
-        win.geometry("660x600")
-        win.minsize(500, 440)
+        win.geometry("820x700")
+        win.minsize(560, 480)
         win.transient(self)
 
         # ── fixed bottom section — always visible regardless of scroll position ─
@@ -6560,7 +6670,7 @@ class App(tk.Tk):
                 tk_img = ImageTk.PhotoImage(img)
                 lbl = ttk.Label(top, image=tk_img)
                 lbl.image = tk_img
-                lbl.pack(side="left", padx=(0, 14))
+                lbl.pack(side="left", padx=(0, 14), anchor="n")
             except (OSError, ValueError):
                 pass
 

@@ -181,6 +181,11 @@ class GameDetails:
     is_expansion: bool = False
     base_game_id: Optional[int] = None
     base_game_name: Optional[str] = None
+    # Every inbound "boardgameexpansion" link BGG returned, in XML order — an expansion can be
+    # cross-linked to more than one base game (e.g. a game and its Legacy edition both show up),
+    # and base_game_id/base_game_name above is just the first. _save_games_to_db() uses this
+    # list to prefer whichever candidate is actually in the user's own library.
+    base_game_candidates: list[tuple[int, str]] = field(default_factory=list)
     bgg_status: Optional[str] = None
 
 
@@ -467,6 +472,7 @@ def _parse_thing(item: ET.Element) -> GameDetails:
     publishers: list[str] = []
     base_game_id: Optional[int] = None
     base_game_name: Optional[str] = None
+    base_game_candidates: list[tuple[int, str]] = []
     for link in item.findall("link"):
         ltype = link.get("type", "")
         value = _unescape(link.get("value", "")) or ""
@@ -478,17 +484,20 @@ def _parse_thing(item: ET.Element) -> GameDetails:
             designers.append(value)
         elif ltype == "boardgamepublisher":
             publishers.append(value)
-        elif ltype == "boardgameexpansion" and link.get("inbound") == "true" and base_game_id is None:
-            # BGG marks the reverse relationship on an expansion's own /thing
-            # page with inbound="true" — this item IS an expansion of that
-            # base game. Unverified against live BGG data (network access to
-            # BGG is blocked in this dev environment); based on BGG's
-            # documented XML API v2 behavior. Double-check against a real
-            # synced expansion.
+        elif ltype == "boardgameexpansion" and link.get("inbound") == "true":
+            # BGG marks the reverse relationship on an expansion's own /thing page with
+            # inbound="true" — this item IS an expansion of that base game. An expansion can
+            # have more than one of these (e.g. cross-linked to both a game and its Legacy
+            # edition), so keep every one; base_game_id below is just the first, and the
+            # caller (_save_games_to_db) picks the best match against the user's own library.
             bid = link.get("id")
             if bid:
-                base_game_id = _i(bid)
-                base_game_name = value
+                cid = _i(bid)
+                if cid is not None:
+                    base_game_candidates.append((cid, value))
+                if base_game_id is None:
+                    base_game_id = cid
+                    base_game_name = value
 
     best_players = _best_players_from_poll(item)
 
@@ -515,6 +524,7 @@ def _parse_thing(item: ET.Element) -> GameDetails:
         is_expansion=is_expansion,
         base_game_id=base_game_id,
         base_game_name=base_game_name,
+        base_game_candidates=base_game_candidates,
     )
 
 
@@ -1065,19 +1075,24 @@ def fetch_game_details_from_page(bgg_id: int, *, fallback_name: str = "") -> Opt
         g_designers  = _names("boardgamedesigner")
         g_publishers = _names("boardgamepublisher")
 
-        # Base game this is an expansion of, if any (mirrors _parse_thing's
-        # XML "inbound" link handling — see the comment there. Field names in
-        # this page-scraped JSON blob are unverified from this environment).
+        # Base game this is an expansion of, if any (mirrors _parse_thing's XML "inbound"
+        # link handling — see the comment there, including why every candidate is kept, not
+        # just the first. Field names in this page-scraped JSON blob are unverified from this
+        # environment).
         g_base_game_id: Optional[int] = None
         g_base_game_name: Optional[str] = None
+        g_base_game_candidates: list[tuple[int, str]] = []
         for x in links.get("boardgameexpansion", []):
             if x.get("inbound") and x.get("id"):
                 try:
-                    g_base_game_id = int(x["id"])
+                    cid = int(x["id"])
                 except (TypeError, ValueError):
-                    g_base_game_id = None
-                g_base_game_name = _unescape(x.get("name", "")) or ""
-                break
+                    continue
+                cname = _unescape(x.get("name", "")) or ""
+                g_base_game_candidates.append((cid, cname))
+                if g_base_game_id is None:
+                    g_base_game_id = cid
+                    g_base_game_name = cname
 
         # ── best-players from poll ────────────────────────────────────────────
         best_list = (item.get("polls") or {}).get("userplayers", {}).get("best", [])
@@ -1139,6 +1154,7 @@ def fetch_game_details_from_page(bgg_id: int, *, fallback_name: str = "") -> Opt
             is_expansion=is_expansion,
             base_game_id=g_base_game_id,
             base_game_name=g_base_game_name,
+            base_game_candidates=g_base_game_candidates,
         )
     except Exception:
         return None
