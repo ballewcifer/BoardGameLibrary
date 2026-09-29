@@ -388,9 +388,12 @@ class _AutocompleteEntry(ttk.Entry):
 
     _MAX_VISIBLE = 12  # rows shown in the dropdown before it stops growing
 
-    def __init__(self, parent, suggestions: list[str], on_select=None, **kwargs):
+    def __init__(self, parent, suggestions: list[str], on_select=None, multi: bool = False, **kwargs):
         self._suggestions = suggestions
         self._on_select = on_select
+        self._multi = multi  # checkbox multi-pick (e.g. Players) instead of type-and-replace
+        self._check_vars: dict[str, tk.BooleanVar] = {}
+        self._check_frame: Optional[tk.Frame] = None
         self._var: tk.StringVar = kwargs.pop("textvariable", tk.StringVar())
         super().__init__(parent, textvariable=self._var, **kwargs)
         self._popup: Optional[tk.Toplevel] = None
@@ -400,10 +403,16 @@ class _AutocompleteEntry(ttk.Entry):
         self.bind("<Escape>",   lambda e: self._hide())
         self.bind("<Down>",     self._focus_lb)
         self.bind("<Return>",   self._commit)
-        # Clicking into (or tabbing into) an empty field shows every option, like a picker —
-        # not just once you start typing.
-        self.bind("<FocusIn>",  self._show_all_if_empty)
-        self.bind("<Button-1>", self._show_all_if_empty)
+        if self._multi:
+            # Clicking (or tabbing) in always shows every name as a checklist — not just when
+            # the field is empty — so you can review/add/remove picks, not just append.
+            self.bind("<FocusIn>",  lambda e: self._show_checklist())
+            self.bind("<Button-1>", lambda e: self._show_checklist())
+        else:
+            # Clicking into (or tabbing into) an empty field shows every option, like a picker —
+            # not just once you start typing.
+            self.bind("<FocusIn>",  self._show_all_if_empty)
+            self.bind("<Button-1>", self._show_all_if_empty)
 
     @property
     def var(self) -> tk.StringVar:
@@ -417,6 +426,11 @@ class _AutocompleteEntry(ttk.Entry):
         return text.rsplit(",", 1)[-1].strip()
 
     def _on_change(self, *_) -> None:
+        if self._multi:
+            # The checklist manages the popup itself (see _apply_checklist); typing here is
+            # just direct text editing (e.g. adding someone not in the list) and shouldn't
+            # pop up the single-pick listbox on top of/instead of the checklist.
+            return
         token = self._last_token()
         if not token:
             self._hide()
@@ -493,6 +507,52 @@ class _AutocompleteEntry(ttk.Entry):
     def _show_all_if_empty(self, event=None) -> None:
         if not self._last_token() and self._suggestions:
             self._show(self._suggestions)
+
+    def _show_checklist(self) -> None:
+        """Multi-select popup: every suggestion as a checkbox, pre-checked from whoever's
+        already in the comma-separated text. Stays open across multiple picks — it's only
+        closed by clicking away, Escape, or the Done button."""
+        if not self._suggestions:
+            return
+        current = {p.strip().lower() for p in self._var.get().split(",") if p.strip()}
+
+        if self._popup is None:
+            self._popup = tk.Toplevel(self)
+            self._popup.wm_overrideredirect(True)
+            self._popup.wm_attributes("-topmost", True)
+            outer = tk.Frame(self._popup, bg=C_WHITE, relief="solid", borderwidth=1)
+            outer.pack(fill="both", expand=True)
+            self._check_frame = tk.Frame(outer, bg=C_WHITE)
+            self._check_frame.pack(fill="both", expand=True, padx=2, pady=2)
+            ttk.Button(outer, text="Done", command=self._hide).pack(fill="x")
+
+        for w in self._check_frame.winfo_children():
+            w.destroy()
+        self._check_vars = {}
+        rows = self._suggestions[:self._MAX_VISIBLE]
+        for name in rows:
+            var = tk.BooleanVar(value=name.strip().lower() in current)
+            self._check_vars[name] = var
+            tk.Checkbutton(
+                self._check_frame, text=name, variable=var, anchor="w",
+                font=("Segoe UI", 9), bg=C_WHITE, activebackground=C_WHITE,
+                highlightthickness=0, command=self._apply_checklist,
+            ).pack(fill="x")
+
+        count = len(rows)
+        x = self.winfo_rootx()
+        y = self.winfo_rooty() + self.winfo_height()
+        w = max(self.winfo_width(), 220)
+        self._popup.wm_geometry(f"{w}x{count * 22 + 32}+{x}+{y}")
+        self._popup.deiconify()
+        self._popup.lift()
+
+    def _apply_checklist(self) -> None:
+        picked = [name for name in self._suggestions if self._check_vars.get(name) and self._check_vars[name].get()]
+        self._var.set(", ".join(picked))
+        self.icursor("end")
+        if self._on_select:
+            self._on_select()
 
 
 def _date_entry(parent, textvariable: tk.StringVar, width: int = 12, **kw):
@@ -5820,14 +5880,16 @@ class App(tk.Tk):
         # Primary action first; everything else is Ghost / Quiet
         ttk.Button(controls, text="Log Play…", command=lambda: self.on_log_play(
             {"name": self.plays_game_var.get()}
-            if self.plays_game_var.get() != "All games" else None
+            if self.plays_game_var.get().strip() not in ("", "All games") else None
         )).pack(side="left")
         ttk.Button(controls, text="Edit selected", style="Ghost.TButton",
                    command=self.on_edit_play).pack(side="left", padx=(SP["sm"], 0))
 
         ttk.Label(controls, text="FILTER BY GAME", style="Filter.TLabel"
                   ).pack(side="left", padx=(SP["md"], SP["xs"]))
-        self.plays_game_var = tk.StringVar(value="All games")
+        # Starts empty (unfiltered) rather than pre-filled with "All games" — "All games" is
+        # still a valid thing to type/pick, it's just no longer the default shown text.
+        self.plays_game_var = tk.StringVar(value="")
         self.plays_game_cb = _AutocompleteEntry(
             controls, ["All games"], textvariable=self.plays_game_var, width=30,
             on_select=lambda: self.refresh_plays(),
@@ -5836,7 +5898,7 @@ class App(tk.Tk):
         self.plays_game_cb.bind("<FocusOut>", lambda *_: self.refresh_plays(), add="+")
 
         ttk.Button(controls, text="Clear filter", style="Quiet.TButton",
-                   command=lambda: [self.plays_game_var.set("All games"), self.refresh_plays()]
+                   command=lambda: [self.plays_game_var.set(""), self.refresh_plays()]
                    ).pack(side="left", padx=(SP["xs"], 0))
 
         self._lb_showing = False
@@ -6065,11 +6127,12 @@ class App(tk.Tk):
             self._plays_game_map = {g["name"]: g["bgg_id"] for g in games}
 
         self.plays_game_cb.set_suggestions(game_names)
-        if self.plays_game_var.get() not in game_names:
-            self.plays_game_var.set("All games")
+        chosen = self.plays_game_var.get().strip()
+        if chosen not in game_names and chosen != "":
+            chosen = ""
+            self.plays_game_var.set("")
 
-        chosen = self.plays_game_var.get()
-        game_id = self._plays_game_map.get(chosen) if chosen != "All games" else None
+        game_id = self._plays_game_map.get(chosen) if chosen not in ("", "All games") else None
 
         with db.connect() as c:
             rows = db.list_plays(c, game_id=game_id)
@@ -6138,7 +6201,10 @@ class App(tk.Tk):
             initial = next((g["name"] for g in all_games if g["bgg_id"] == play["game_id"]),
                            game_names[0] if game_names else "")
         else:
-            initial = game["name"] if game else (game_names[0] if game_names else "")
+            # Logging a play from a specific game's card pre-fills that game; opening it
+            # generically (the Plays tab's "Log Play…" button with no filter) starts empty
+            # rather than defaulting to whatever game happens to sort first.
+            initial = game["name"] if game else ""
         game_var = tk.StringVar(value=initial)
         game_cb = _AutocompleteEntry(dialog, game_names, textvariable=game_var, width=30)
         game_cb.grid(row=0, column=1, sticky="w", padx=(12, 4), pady=4)
@@ -6219,7 +6285,7 @@ class App(tk.Tk):
 
         ttk.Label(dialog, text="Players (comma-separated):", font=("Segoe UI", 9, "bold")).grid(row=2, column=0, **pad)
         players_var = tk.StringVar(value=play["player_names"] or "" if editing else "")
-        _AutocompleteEntry(dialog, member_names, textvariable=players_var,
+        _AutocompleteEntry(dialog, member_names, textvariable=players_var, multi=True,
                            width=36).grid(row=2, column=1, **pad)
 
         ttk.Label(dialog, text="Winner:", font=("Segoe UI", 9, "bold")).grid(row=3, column=0, **pad)
