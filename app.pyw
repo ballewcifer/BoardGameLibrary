@@ -465,7 +465,9 @@ class _AutocompleteEntry(ttk.Entry):
         x = self.winfo_rootx()
         y = self.winfo_rooty() + self.winfo_height()
         w = max(self.winfo_width(), 200)
-        self._popup.wm_geometry(f"{w}x{count * 22}+{x}+{y}")
+        # 24px/row (not 22) plus a few px of slack for the popup's own border — at exactly
+        # 22px/row a single match had no room left and the text clipped at the bottom.
+        self._popup.wm_geometry(f"{w}x{count * 24 + 4}+{x}+{y}")
         self._popup.deiconify()
         self._popup.lift()
 
@@ -543,7 +545,9 @@ class _AutocompleteEntry(ttk.Entry):
         x = self.winfo_rootx()
         y = self.winfo_rooty() + self.winfo_height()
         w = max(self.winfo_width(), 220)
-        self._popup.wm_geometry(f"{w}x{count * 22 + 32}+{x}+{y}")
+        # Same 24px/row fix as the plain listbox popup — a Checkbutton row needs a bit more
+        # room than 22px too, or the last row's text clips at the bottom.
+        self._popup.wm_geometry(f"{w}x{count * 24 + 34}+{x}+{y}")
         self._popup.deiconify()
         self._popup.lift()
 
@@ -1858,8 +1862,8 @@ class App(tk.Tk):
         self.games_tree.tag_configure("favorite",  foreground=C_GOLD)
         self.games_tree.tag_configure("expansion", background="#f3e5f5")
         # One row-tint tag per non-"own" BGG status — a Treeview can't color
-        # individual cells, so the whole row is tinted instead. Applied last
-        # (see _refresh_games_table) so it takes priority over "expansion".
+        # individual cells, so the whole row is tinted instead. Listed first in the item's
+        # tags (see _refresh_games_table) so it outranks "expansion" for the background.
         for _status, _colors in bgg.STATUS_COLORS.items():
             if _status != "own":
                 self.games_tree.tag_configure(f"status_{_status}", background=_colors["bg"])
@@ -2676,17 +2680,17 @@ class App(tk.Tk):
             n_plays = play_counts.get(bgg_id, 0)
 
             tags: list[str] = []
+            # ttk.Treeview resolves conflicting tag options (e.g. two tags both setting
+            # "background") in favor of whichever tag is listed FIRST — not last, despite how
+            # that reads. The status tint needs to win over "expansion", so it goes first.
+            if g["own"] != 1 and g["bgg_status"] and g["bgg_status"] in bgg.STATUS_COLORS:
+                tags.append(f"status_{g['bgg_status']}")
             if loan:
                 tags.append("out")
             if g["is_favorite"]:
                 tags.append("favorite")
             if g["is_expansion"]:
                 tags.append("expansion")
-            # Non-owned statuses get their own row tint (added last so it
-            # takes priority over "expansion") — owned games keep the plain
-            # row background, relying on the "out" tag when checked out.
-            if g["own"] != 1 and g["bgg_status"] and g["bgg_status"] in bgg.STATUS_COLORS:
-                tags.append(f"status_{g['bgg_status']}")
 
             exp_prefix = "↳ " if g["is_expansion"] else ""
             self.games_tree.insert(
@@ -5207,9 +5211,9 @@ class App(tk.Tk):
                 if _row:
                     existing_tags = _row["tags"] or ""
         with db.connect() as c:
-            _existing_tag_list = ["Any"] + db.all_tags(c)
+            _existing_tag_list = db.all_tags(c)
         tags_var = tk.StringVar(value=existing_tags)
-        _AutocompleteEntry(dlg, _existing_tag_list, textvariable=tags_var,
+        _AutocompleteEntry(dlg, _existing_tag_list, textvariable=tags_var, multi=True,
                            width=34).grid(row=9 + _roff, column=1, **rpad)
         ttk.Label(dlg, text="Comma-separated, e.g. Party, Family, Filler",
                   foreground=C_INK_500, font=("Segoe UI", 8),
