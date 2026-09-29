@@ -658,16 +658,16 @@ def find_user_by_name(c: sqlite3.Connection, first_name: str, last_name: str,
 
 def validate_friend(c: sqlite3.Connection, first_name: str, last_name: str,
                     exclude_id: Optional[int] = None) -> Optional[str]:
-    """Shared Add/Edit Friend validation (matches mobile's FriendFormModal):
-    both names are required and must not duplicate an existing friend.
-    Returns an error message, or None when the names are acceptable."""
+    """Shared Add/Edit Friend validation: a name is required (a nickname alone
+    is fine — last name is optional) and it must not duplicate an existing
+    friend. Returns an error message, or None when the name is acceptable."""
     f, l = (first_name or "").strip(), (last_name or "").strip()
-    if not f or not l:
-        return "Both first and last name are required."
+    if not f:
+        return "A name is required."
     dupe = find_user_by_name(c, f, l, exclude_id)
     if dupe is not None:
-        return (f"{dupe['first_name']} {dupe['last_name']} is already in "
-                f"your friends list.")
+        dupe_name = f"{dupe['first_name']} {dupe['last_name']}".strip()
+        return f"{dupe_name} is already in your friends list."
     return None
 
 

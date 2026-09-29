@@ -408,6 +408,11 @@ class _AutocompleteEntry(ttk.Entry):
             # the field is empty — so you can review/add/remove picks, not just append.
             self.bind("<FocusIn>",  lambda e: self._show_checklist())
             self.bind("<Button-1>", lambda e: self._show_checklist())
+            # A click on blank dialog space doesn't move keyboard focus in Tk (there's no
+            # widget there to take it), so <FocusOut> never fires and the checklist stays
+            # open. Catch it explicitly: any click in the dialog that lands outside the entry
+            # and the popup itself closes the checklist.
+            self.winfo_toplevel().bind("<Button-1>", self._on_toplevel_click, add="+")
         else:
             # Clicking into (or tabbing into) an empty field shows every option, like a picker —
             # not just once you start typing.
@@ -435,7 +440,15 @@ class _AutocompleteEntry(ttk.Entry):
         if not token:
             self._hide()
             return
-        matches = [s for s in self._suggestions if token.lower() in s.lower()]
+        # A common short query (e.g. one letter) can substring-match most of the list; without
+        # ranking, whichever 12 happened to sort first alphabetically won — often not what was
+        # actually being typed. Names/titles starting with the query come first.
+        token_l = token.lower()
+        starts = sorted(s for s in self._suggestions if s.lower().startswith(token_l))
+        contains = sorted(
+            s for s in self._suggestions
+            if token_l in s.lower() and not s.lower().startswith(token_l))
+        matches = starts + contains
         if matches:
             self._show(matches)
         else:
@@ -446,19 +459,27 @@ class _AutocompleteEntry(ttk.Entry):
             self._popup = tk.Toplevel(self)
             self._popup.wm_overrideredirect(True)
             self._popup.wm_attributes("-topmost", True)
+            frame = tk.Frame(self._popup, relief="solid", borderwidth=1)
+            frame.pack(fill="both", expand=True)
             self._lb = tk.Listbox(
-                self._popup, selectmode="single",
+                frame, selectmode="single",
                 font=("Segoe UI", 9), activestyle="none",
                 selectbackground=C_BLUE, selectforeground=C_WHITE,
-                relief="solid", borderwidth=1,
+                relief="flat", borderwidth=0, highlightthickness=0,
             )
-            self._lb.pack(fill="both", expand=True)
+            sb = ttk.Scrollbar(frame, orient="vertical", command=self._lb.yview)
+            self._lb.configure(yscrollcommand=sb.set)
+            self._lb.pack(side="left", fill="both", expand=True)
+            sb.pack(side="right", fill="y")
             self._lb.bind("<ButtonRelease-1>", self._pick)
             self._lb.bind("<Return>",          self._pick)
             self._lb.bind("<FocusOut>",        lambda e: self.after(150, self._hide))
 
         self._lb.delete(0, "end")
-        for m in matches[:self._MAX_VISIBLE]:
+        # Every match is inserted, even past what's visible at once — the window below only
+        # caps the *visible height* at _MAX_VISIBLE rows; the rest are reachable by scrolling
+        # or the arrow keys, not silently dropped (which is what capped-at-insert used to do).
+        for m in matches:
             self._lb.insert("end", m)
 
         count = min(len(matches), self._MAX_VISIBLE)
@@ -510,6 +531,20 @@ class _AutocompleteEntry(ttk.Entry):
         if not self._last_token() and self._suggestions:
             self._show(self._suggestions)
 
+    def _on_toplevel_click(self, event) -> None:
+        if self._popup is None or not self._popup.winfo_exists():
+            return
+        w = event.widget
+        # A click on the entry itself, or anywhere inside the checklist popup, isn't "outside".
+        if w is self:
+            return
+        try:
+            if str(w).startswith(str(self._popup)):
+                return
+        except tk.TclError:
+            pass
+        self._hide()
+
     def _show_checklist(self) -> None:
         """Multi-select popup: every suggestion as a checkbox, pre-checked from whoever's
         already in the comma-separated text. Stays open across multiple picks — it's only
@@ -524,29 +559,50 @@ class _AutocompleteEntry(ttk.Entry):
             self._popup.wm_attributes("-topmost", True)
             outer = tk.Frame(self._popup, bg=C_WHITE, relief="solid", borderwidth=1)
             outer.pack(fill="both", expand=True)
-            self._check_frame = tk.Frame(outer, bg=C_WHITE)
-            self._check_frame.pack(fill="both", expand=True, padx=2, pady=2)
-            ttk.Button(outer, text="Done", command=self._hide).pack(fill="x")
+            ttk.Button(outer, text="Done", command=self._hide).pack(side="bottom", fill="x")
+            # A Frame of Checkbuttons can't scroll on its own — put it in a Canvas, the usual
+            # Tk way to get a scrollable region — so a long friends/tags list beyond
+            # _MAX_VISIBLE rows is reachable, not silently cut off.
+            check_canvas = tk.Canvas(outer, bg=C_WHITE, highlightthickness=0)
+            sb = ttk.Scrollbar(outer, orient="vertical", command=check_canvas.yview)
+            check_canvas.configure(yscrollcommand=sb.set)
+            sb.pack(side="right", fill="y")
+            check_canvas.pack(side="left", fill="both", expand=True)
+            self._check_canvas = check_canvas
+            self._check_frame = tk.Frame(check_canvas, bg=C_WHITE)
+            check_win = check_canvas.create_window((0, 0), window=self._check_frame, anchor="nw")
+            self._check_frame.bind("<Configure>",
+                lambda e: check_canvas.configure(scrollregion=check_canvas.bbox("all")))
+            check_canvas.bind("<Configure>",
+                lambda e: check_canvas.itemconfigure(check_win, width=e.width))
+            check_canvas.bind("<MouseWheel>",
+                lambda e: check_canvas.yview_scroll(int(-e.delta / 120), "units"))
 
         for w in self._check_frame.winfo_children():
             w.destroy()
         self._check_vars = {}
-        rows = self._suggestions[:self._MAX_VISIBLE]
+        rows = self._suggestions
         for name in rows:
             var = tk.BooleanVar(value=name.strip().lower() in current)
             self._check_vars[name] = var
-            tk.Checkbutton(
+            cb = tk.Checkbutton(
                 self._check_frame, text=name, variable=var, anchor="w",
                 font=("Segoe UI", 9), bg=C_WHITE, activebackground=C_WHITE,
                 highlightthickness=0, command=self._apply_checklist,
-            ).pack(fill="x")
+            )
+            cb.pack(fill="x")
+            # Same reason as the game-card fix: the canvas's own MouseWheel binding only
+            # fires with the pointer directly over it, not over a Checkbutton filling the row.
+            cb.bind("<MouseWheel>",
+                    lambda e: self._check_canvas.yview_scroll(int(-e.delta / 120), "units"))
 
-        count = len(rows)
+        count = min(len(rows), self._MAX_VISIBLE)
         x = self.winfo_rootx()
         y = self.winfo_rooty() + self.winfo_height()
         w = max(self.winfo_width(), 220)
         # Same 24px/row fix as the plain listbox popup — a Checkbutton row needs a bit more
-        # room than 22px too, or the last row's text clips at the bottom.
+        # room than 22px too, or the last row's text clips at the bottom. Capped at
+        # _MAX_VISIBLE rows tall regardless of how many there are — the rest scroll into view.
         self._popup.wm_geometry(f"{w}x{count * 24 + 34}+{x}+{y}")
         self._popup.deiconify()
         self._popup.lift()
@@ -1697,17 +1753,31 @@ class App(tk.Tk):
             tree.column("Game",     width=220, anchor="center")
             tree.column("Borrower", width=160, anchor="center")
             tree.column("Since",    width=100, anchor="center")
-            tree.column("Due",      width=100, anchor="center")
+            tree.column("Due",      width=130, anchor="center")
             tree.tag_configure("overdue", foreground=C_DR_TEXT,
                                font=self.FONTS["body_strong"])
             for row in checked_out:
                 since = fmt_date(row["checked_out_at"])
-                due   = fmt_date(row["due_date"]) or "—"
+                due_fmt = fmt_date(row["due_date"]) or "—"
                 borrower = f"{row['first_name']} {row['last_name']}".strip()
                 overdue = (row["due_date"] and row["due_date"] < str(today))
-                tree.insert("", "end", values=(row["game_name"], borrower, since, due),
+                # Overdue is also tinted/bolded via the "overdue" tag below, but that's
+                # color/weight alone — spell it out too so it doesn't rely on color to read.
+                due = f"{due_fmt} (Overdue)" if overdue else due_fmt
+                tree.insert("", "end", iid=str(row["bgg_id"]),
+                            values=(row["game_name"], borrower, since, due),
                             tags=("overdue",) if overdue else ())
             tree.pack(fill="x")
+
+            def _check_in_from_dashboard(event) -> None:
+                row_iid = tree.identify_row(event.y)
+                if not row_iid:
+                    return
+                game_name = tree.set(row_iid, "Game")
+                self.on_check_in({"bgg_id": int(row_iid), "name": game_name})
+            tree.bind("<Double-1>", _check_in_from_dashboard)
+            ttk.Label(inner, text="Double-click a game to check it in.",
+                      style="Muted.TLabel").pack(anchor="w", pady=(2, 0))
 
         # ── two-column lower section ─────────────────────────────────────────
         lower = tk.Frame(inner, bg=C_BG)
@@ -2148,7 +2218,7 @@ class App(tk.Tk):
         ttk.Label(win, text="They'll be able to check out only games from this collection.",
                   foreground=C_INK_600, font=("Segoe UI", 8),
                   padding=(16, 0, 16, 8)).pack(anchor="w")
-        member_names = [f"{u['first_name']} {u['last_name']}" for u in users]
+        member_names = [f"{u['first_name']} {u['last_name']}".strip() for u in users]
         var = tk.StringVar(value=member_names[0])
         ttk.Combobox(win, textvariable=var, values=member_names, state="readonly",
                      width=30).pack(padx=16, pady=(0, 10))
@@ -2430,7 +2500,11 @@ class App(tk.Tk):
             self.games_tree.yview_moveto(_prev_scroll)
         else:
             self._refresh_card_view(games, open_loans, play_counts)
-            self.games_canvas.yview_moveto(_prev_scroll)
+            # games_inner's <Configure> handler is what recalculates games_canvas's
+            # scrollregion, and that fires asynchronously after the card grid is rebuilt —
+            # calling yview_moveto() here, synchronously, runs before it and gets the stale
+            # (or default/zero) scrollregion, effectively landing back at the top. Defer it.
+            self.after_idle(lambda: self.games_canvas.yview_moveto(_prev_scroll))
 
     def _filters_active(self) -> bool:
         return (
@@ -2714,7 +2788,7 @@ class App(tk.Tk):
                     # Out/Available status; other BGG statuses (Wishlist, For
                     # Trade, ...) show their status instead, with the row
                     # tinted per-status above so they stand apart.
-                    (f"Out: {loan['first_name']} {loan['last_name']}" if loan else "Available")
+                    (f"Out: {loan['first_name']} {loan['last_name']}".strip() if loan else "Available")
                     if g["own"] == 1 else bgg.STATUS_LABELS.get(g["bgg_status"], "—"),
                     n_plays if n_plays else "—",
                 ),
@@ -3250,7 +3324,7 @@ class App(tk.Tk):
             ).fetchone()
         if not loan:
             return
-        name = f"{loan['first_name']} {loan['last_name']}"
+        name = f"{loan['first_name']} {loan['last_name']}".strip()
         due  = fmt_date(loan["due_date"]) or "no due date set"
         messagebox.showinfo(
             "Remind borrower",
@@ -3395,7 +3469,7 @@ class App(tk.Tk):
                 "",
                 "end",
                 iid=iid,
-                values=(f"{u['first_name']} {u['last_name']}", u["bgg_username"] or "",
+                values=(f"{u['first_name']} {u['last_name']}".strip(), u["bgg_username"] or "",
                         counts.get(u["id"], 0), fmt_date(u["created_at"])),
             )
             # Sort "Name" by last name (then first), and "Member since" by its
@@ -3422,7 +3496,7 @@ class App(tk.Tk):
         self.last_name_var.set("")
         self.bgg_user_var.set("")
         self.refresh_members()
-        self.status(f"Added {first} {last}.")
+        self.status(f"Added {first} {last}." if last else f"Added {first}.")
 
     def on_edit_member(self) -> None:
         """Edit the selected friend's first name, last name and BGG username."""
@@ -3529,7 +3603,7 @@ class App(tk.Tk):
         if not user:
             return
 
-        name = f"{user['first_name']} {user['last_name']}"
+        name = f"{user['first_name']} {user['last_name']}".strip()
         win = tk.Toplevel(self)
         win.title(f"Checkout History — {name}")
         win.geometry("760x440")
@@ -3571,11 +3645,15 @@ class App(tk.Tk):
         tree.tag_configure("open", background=C_WN_BG)
 
         still_out = 0
+        loan_games: dict[str, tuple[int, str]] = {}  # iid -> (bgg_id, game_name), open loans only
         for loan in loans:
             is_open = loan["returned_at"] is None
             if is_open:
                 still_out += 1
-            tree.insert("", "end",
+            iid = str(loan["id"])
+            if is_open:
+                loan_games[iid] = (loan["game_id"], loan["game_name"])
+            tree.insert("", "end", iid=iid,
                         tags=("open",) if is_open else (),
                         values=(
                             loan["game_name"],
@@ -3587,11 +3665,23 @@ class App(tk.Tk):
         summary = ttk.Label(
             win,
             text=f"{len(loans)} checkout{'s' if len(loans) != 1 else ''} total"
-                 + (f"  •  {still_out} currently out" if still_out else ""),
+                 + (f"  •  {still_out} currently out — double-click one to check it in"
+                    if still_out else ""),
             foreground=C_INK_600,
             font=("Segoe UI", 8),
         )
         summary.pack(anchor="w", padx=10)
+
+        def _check_in_from_here(event=None) -> None:
+            row = tree.identify_row(event.y) if event else None
+            if not row or row not in loan_games:
+                return
+            bgg_id, game_name = loan_games[row]
+            win.destroy()
+            self.on_check_in({"bgg_id": bgg_id, "name": game_name})
+            # Reopen refreshed, if this friend still has other checkouts/history to show.
+            self._show_member_checkouts(user_id)
+        tree.bind("<Double-1>", _check_in_from_here)
 
         ttk.Button(win, text="Close", command=win.destroy).pack(pady=(4, 10))
         win.bind("<Escape>", lambda *_: win.destroy())
@@ -3741,7 +3831,7 @@ class App(tk.Tk):
                 iid=iid,
                 values=(
                     r["game_name"],
-                    f"{r['first_name']} {r['last_name']}",
+                    f"{r['first_name']} {r['last_name']}".strip(),
                     fmt_date(r["checked_out_at"]),
                     due_str,
                     fmt_date(r["returned_at"]) or "⬤ still out",
@@ -3901,7 +3991,7 @@ class App(tk.Tk):
                   font=("Segoe UI", 9, "bold")).grid(row=0, column=0, columnspan=2,
                                                       sticky="w", pady=(0, 2))
         ttk.Label(frame,
-                  text=f"Friend: {loan['first_name']} {loan['last_name']}",
+                  text=f"Friend: {loan['first_name']} {loan['last_name']}".strip(),
                   font=("Segoe UI", 9, "bold")).grid(row=1, column=0, columnspan=2,
                                                       sticky="w", pady=(0, 10))
 
@@ -5746,7 +5836,7 @@ class App(tk.Tk):
         # new name always works, same as the Log Play players field, since a
         # brand-new friend has no claim and can borrow anything.
         eligible = [u for u in all_users if u["id"] in allowed]
-        names = [f"{u['first_name']} {u['last_name']}" for u in eligible]
+        names = [f"{u['first_name']} {u['last_name']}".strip() for u in eligible]
 
         dialog = tk.Toplevel(self)
         dialog.title("Check Out")
@@ -5754,7 +5844,7 @@ class App(tk.Tk):
         dialog.resizable(False, False)
         ttk.Label(dialog, text=f"Check out \"{game['name']}\" to:").grid(row=0, column=0, columnspan=2, padx=12, pady=(12, 6), sticky="w")
 
-        member_var = tk.StringVar(value=names[0] if names else "")
+        member_var = tk.StringVar(value="")
         _AutocompleteEntry(dialog, names, textvariable=member_var, width=30
                             ).grid(row=1, column=0, columnspan=2, padx=12, sticky="we")
         next_row = 2
@@ -6297,7 +6387,7 @@ class App(tk.Tk):
         if not all_games:
             messagebox.showinfo("No games", "Import your collection first.")
             return
-        member_names = [f"{u['first_name']} {u['last_name']}" for u in all_users]
+        member_names = [f"{u['first_name']} {u['last_name']}".strip() for u in all_users]
 
         editing = play is not None
 
@@ -6823,7 +6913,16 @@ class App(tk.Tk):
             text_box.insert("1.0", game["description"])
             text_box.configure(state="disabled")
             text_box.pack(fill="x", pady=(0, 6))
-            text_box.bind("<MouseWheel>", _on_mousewheel)
+
+        # canvas/content's own MouseWheel bindings only fire when the pointer is directly over
+        # them, not over one of the labels/frames filling the dialog — which is almost always
+        # where the pointer actually is. Bind every descendant too, so scrolling works no matter
+        # what's under the cursor (same fix as _bind_wheel_recursive uses for the game cards).
+        def _bind_wheel_recursive(widget):
+            widget.bind("<MouseWheel>", _on_mousewheel, add="+")
+            for child in widget.winfo_children():
+                _bind_wheel_recursive(child)
+        _bind_wheel_recursive(content)
 
         win.bind("<Escape>", lambda *_: win.destroy())
         win.grab_set()

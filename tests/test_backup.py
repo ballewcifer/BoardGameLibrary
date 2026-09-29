@@ -310,8 +310,9 @@ class FriendTests(DbCase):
     def test_validate_friend(self):
         with db.connect(self.dst) as c:
             jane = db.add_user(c, "Jane", "Doe")
-            self.assertIn("Both", db.validate_friend(c, "Jane", ""))
-            self.assertIn("Both", db.validate_friend(c, "  ", "Doe"))
+            # A last name is optional — a nickname alone is a valid, distinct friend.
+            self.assertIsNone(db.validate_friend(c, "Jane", ""))
+            self.assertIn("required", db.validate_friend(c, "  ", "Doe"))
             self.assertIn("already", db.validate_friend(c, "jane", "DOE"))
             self.assertIsNone(db.validate_friend(c, "Jane", "Doe", exclude_id=jane),
                               "editing a friend never collides with themselves")
