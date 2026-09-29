@@ -2590,8 +2590,14 @@ class App(tk.Tk):
         self._render_more_cards()
         self.after(80, lambda g=games: self._update_alpha_bar(g))
 
-    def _render_more_cards(self) -> None:
-        """Build the next batch of card widgets (called initially and on scroll)."""
+    def _render_more_cards(self, _caller_manages_visibility: bool = False) -> None:
+        """Build the next batch of card widgets (called initially and on scroll).
+
+        _caller_manages_visibility=True skips hiding/showing the canvas around this one
+        batch — _flush_card_batches() does that itself, once, around its whole run;
+        toggling it per-batch here too would flicker the canvas hidden/visible between
+        every batch instead of just staying hidden until everything is ready.
+        """
         games = getattr(self, "_card_games", None)
         if not games:
             return
@@ -2600,7 +2606,8 @@ class App(tk.Tk):
             return
         end = min(start + self._CARD_BATCH, len(games))
 
-        self.games_canvas.itemconfigure(self.games_window_id, state="hidden")
+        if not _caller_manages_visibility:
+            self.games_canvas.itemconfigure(self.games_window_id, state="hidden")
         lazy_queue: list[tuple] = []
         for game in games[start:end]:
             card, lazy = self._build_card(
@@ -2610,7 +2617,8 @@ class App(tk.Tk):
         self._cards_rendered = end
 
         self._layout_cards(self.games_canvas.winfo_width())
-        self.games_canvas.itemconfigure(self.games_window_id, state="normal")
+        if not _caller_manages_visibility:
+            self.games_canvas.itemconfigure(self.games_window_id, state="normal")
 
         threading.Thread(
             target=self._lazy_load_images,
@@ -2621,8 +2629,13 @@ class App(tk.Tk):
     def _flush_card_batches(self) -> None:
         """Render all remaining card batches now (used before an A–Z jump, and to
         restore scroll position after a refresh — see refresh_games)."""
+        if self._cards_rendered >= len(getattr(self, "_card_games", [])):
+            return
+        # Hidden for the whole run, not toggled per-batch — otherwise the canvas visibly
+        # flickers/blanks between every batch instead of one clean transition at the end.
+        self.games_canvas.itemconfigure(self.games_window_id, state="hidden")
         while self._cards_rendered < len(getattr(self, "_card_games", [])):
-            self._render_more_cards()
+            self._render_more_cards(_caller_manages_visibility=True)
             # The normal scroll-triggered path (_card_yscroll) defers each batch via
             # after_idle, which incidentally gives Tk's geometry manager a chance to
             # fully settle each batch's widgets before the next one starts. Looping
@@ -2630,7 +2643,10 @@ class App(tk.Tk):
             # out the earliest batches' labels, which then rendered with zero size
             # (present, correctly built, just never actually measured/placed) until
             # some later, unrelated full rebuild forced everything to be redone.
+            # update_idletasks() still processes that pending geometry work even while
+            # the canvas item stays hidden, so this doesn't reintroduce the flicker.
             self.update_idletasks()
+        self.games_canvas.itemconfigure(self.games_window_id, state="normal")
 
     def _card_yscroll(self, first: str, last: str) -> None:
         """Scrollbar callback: keep the bar in sync and load more cards as the
@@ -3155,10 +3171,27 @@ class App(tk.Tk):
         # the active theme's second card colour with white text; the label is text, so the
         # meaning never relies on colour alone.
         if game["own"] == 1 and game["is_unplayed"]:
-            band_len, band_th = 108, 18       # same proportions as mobile's ribbon
-            # Band centre, near the bottom-left corner — nudged up above the Expansion bar
-            # (via _stack_top) when a game happens to be both, so the two don't overlap.
+            # Place the text first at a nominal spot, then measure its actual rendered
+            # bounding box and shift so it's fully on-canvas — the label's real size
+            # depends on font metrics/DPI that can't be predicted from fixed coordinates
+            # (a hand-picked position clipped straight through the middle of the text
+            # itself, not just the band's decorative tail, which is fine to clip).
             cx, cy = 24, _stack_top - 24
+            _up_text_id = img_canvas.create_text(
+                cx, cy, text="UNPLAYED", fill="#FFFFFF",
+                font=("Segoe UI", 8, "bold"), angle=45)
+            bb = img_canvas.bbox(_up_text_id)
+            if bb:
+                dx = max(0, -bb[0]) + 2          # push right if it ran off the left edge
+                dy = min(0, _stack_top - bb[3]) - 2  # push up if it ran past the bottom
+                if dx or dy:
+                    cx, cy = cx + dx, cy + dy
+                    img_canvas.coords(_up_text_id, cx, cy)
+
+            # Band centre matches the (possibly nudged) text centre. Same proportions as
+            # mobile's ribbon; nudged up above the Expansion bar (via _stack_top) when a
+            # game happens to be both, so the two don't overlap.
+            band_len, band_th = 108, 18
             angle = math.radians(45)
             cos_a, sin_a = math.cos(angle), math.sin(angle)
             def _rot(dx, dy):
@@ -3168,10 +3201,8 @@ class App(tk.Tk):
             half_l, half_t = band_len / 2, band_th / 2
             corners = [_rot(-half_l, -half_t), _rot(half_l, -half_t),
                        _rot(half_l, half_t), _rot(-half_l, half_t)]
-            img_canvas.create_polygon(corners, fill=C_CARDS[1], outline="")
-            img_canvas.create_text(
-                cx, cy, text="UNPLAYED", fill="#FFFFFF",
-                font=("Segoe UI", 8, "bold"), angle=45)
+            _up_bg = img_canvas.create_polygon(corners, fill=C_CARDS[1], outline="")
+            img_canvas.tag_lower(_up_bg, _up_text_id)   # behind the text, above the image
 
         # ── card body ──────────────────────────────────────────────────────────
         _is_sm = self._card_size == "sm"
