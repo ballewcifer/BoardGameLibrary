@@ -2657,19 +2657,23 @@ class App(tk.Tk):
         rendered) so there's nothing to swap here.
         """
         if self._view_mode != "cards":
+            self._last_single_card_fail_reason = "not card view"
             return False
         idx = next((i for i, c in enumerate(self._cards)
                     if getattr(c, "_bgg_id", None) == bgg_id), None)
         if idx is None:
+            self._last_single_card_fail_reason = "card not found"
             return False
 
         with db.connect() as c:
             game = db.get_game(c, bgg_id)
             if game is None:
+                self._last_single_card_fail_reason = "game not found"
                 return False
             loan = db.open_loan_for_game(c, bgg_id)
 
         if not self._apply_filters([game], {bgg_id: loan} if loan else {}):
+            self._last_single_card_fail_reason = "filtered out"
             return False   # would need to disappear from the current view
 
         old_card = self._cards[idx]
@@ -2693,14 +2697,22 @@ class App(tk.Tk):
         ).start()
         return True
 
-    def _refresh_after_game_change(self, bgg_ids) -> None:
+    def _refresh_after_game_change(self, bgg_ids) -> str:
         """After a check-out/check-in/favorite/insert/unplayed change to one or more
         specific games: update just those cards in place when possible, falling back to
         one full refresh_games(preserve_scroll=True) if any of them can't be (see
-        _update_single_card) — covers every affected game either way."""
+        _update_single_card) — covers every affected game either way.
+
+        Returns a short diagnostic tag ("quick" or "full: <reason>") — TEMPORARY, so a
+        status-bar message can show which path actually ran. Once we've confirmed which
+        one is really happening (and why, if it's falling back), this can come back out.
+        """
+        self._last_single_card_fail_reason = None
         results = [self._update_single_card(bid) for bid in bgg_ids]
-        if not all(results):
-            self.refresh_games(preserve_scroll=True)
+        if all(results):
+            return "quick"
+        self.refresh_games(preserve_scroll=True)
+        return f"full: {self._last_single_card_fail_reason or 'unknown'}"
 
     def _flush_card_batches(self) -> None:
         """Render all remaining card batches now (used before an A–Z jump, and to
@@ -6080,11 +6092,11 @@ class App(tk.Tk):
                 messagebox.showerror("Cannot check out", str(e))
                 return
             dialog.destroy()
-            self._refresh_after_game_change(checked_out_ids)
+            diag = self._refresh_after_game_change(checked_out_ids)
             self.refresh_members()
             self.refresh_history()
             self.refresh_dashboard()
-            msg = f"Checked out {', '.join(checked_out_names)} to {name}."
+            msg = f"Checked out {', '.join(checked_out_names)} to {name}. [{diag}]"
             if skipped_names:
                 msg += f" ({', '.join(skipped_names)} not in {name}'s collection — skipped.)"
             self.status(msg)
@@ -6116,11 +6128,11 @@ class App(tk.Tk):
             except ValueError as e:
                 messagebox.showerror("Cannot check in", str(e))
                 return
-            self._refresh_after_game_change([game["bgg_id"]])
+            diag = self._refresh_after_game_change([game["bgg_id"]])
             self.refresh_members()
             self.refresh_history()
             self.refresh_dashboard()
-            self.status(f"Checked in \"{game['name']}\".")
+            self.status(f"Checked in \"{game['name']}\". [{diag}]")
             return
 
         dialog = tk.Toplevel(self)
@@ -6160,11 +6172,11 @@ class App(tk.Tk):
                 messagebox.showerror("Cannot check in", str(e))
                 return
             dialog.destroy()
-            self._refresh_after_game_change(checked_in_ids)
+            diag = self._refresh_after_game_change(checked_in_ids)
             self.refresh_members()
             self.refresh_history()
             self.refresh_dashboard()
-            self.status(f"Checked in {', '.join(checked_in_names)}.")
+            self.status(f"Checked in {', '.join(checked_in_names)}. [{diag}]")
 
         ttk.Button(dialog, text="Cancel", command=dialog.destroy).grid(
             row=row, column=0, padx=12, pady=(8, 12), sticky="we")
