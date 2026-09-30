@@ -2636,6 +2636,24 @@ class App(tk.Tk):
             daemon=True,
         ).start()
 
+    def _dbg_scroll(self, label: str) -> None:
+        """TEMPORARY: log the Games canvas's scroll position at a named checkpoint, to
+        C--Users-tballew-...\\bgl_debug_scroll.log in TEMP (never the library data folder).
+        Isolates exactly which step of a check-out/check-in moves it, since the
+        single-card-swap fix confirmed running ([quick]) but the scroll still jumped —
+        meaning the cause is somewhere else in that flow, not in _update_single_card
+        itself. Remove once found."""
+        try:
+            yv = self.games_canvas.yview()
+        except Exception as e:
+            yv = f"<error: {e}>"
+        try:
+            log_path = Path(os.environ.get("TEMP", ".")) / "bgl_debug_scroll.log"
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(f"{datetime.now().strftime('%H:%M:%S.%f')}  {label:<28} yview={yv}\n")
+        except Exception:
+            pass
+
     def _update_single_card(self, bgg_id: int) -> bool:
         """Swap just one game's card in place — its badge, button, star, ribbons —
         instead of tearing down and rebuilding the whole Games list for a change that
@@ -2676,8 +2694,10 @@ class App(tk.Tk):
             self._last_single_card_fail_reason = "filtered out"
             return False   # would need to disappear from the current view
 
+        self._dbg_scroll("single_card: before destroy")
         old_card = self._cards[idx]
         old_card.destroy()
+        self._dbg_scroll("single_card: after destroy")
         new_card, lazy = self._build_card(game, loan, self._card_play_counts)
         self._cards[idx] = new_card
 
@@ -2688,7 +2708,9 @@ class App(tk.Tk):
         cols = max(1, (self.games_canvas.winfo_width() - gap) // (card_w + gap))
         r, c = divmod(idx, cols)
         new_card.grid(row=r, column=c, padx=gap // 2, pady=gap // 2, sticky="nsew")
+        self._dbg_scroll("single_card: after grid")
         self.update_idletasks()
+        self._dbg_scroll("single_card: after update_idletasks")
 
         threading.Thread(
             target=self._lazy_load_images,
@@ -6091,11 +6113,17 @@ class App(tk.Tk):
             except ValueError as e:
                 messagebox.showerror("Cannot check out", str(e))
                 return
+            self._dbg_scroll("check_out: before dialog.destroy")
             dialog.destroy()
+            self._dbg_scroll("check_out: after dialog.destroy")
             diag = self._refresh_after_game_change(checked_out_ids)
+            self._dbg_scroll("check_out: after _refresh_after_game_change")
             self.refresh_members()
+            self._dbg_scroll("check_out: after refresh_members")
             self.refresh_history()
+            self._dbg_scroll("check_out: after refresh_history")
             self.refresh_dashboard()
+            self._dbg_scroll("check_out: after refresh_dashboard")
             msg = f"Checked out {', '.join(checked_out_names)} to {name}. [{diag}]"
             if skipped_names:
                 msg += f" ({', '.join(skipped_names)} not in {name}'s collection — skipped.)"
@@ -6128,10 +6156,15 @@ class App(tk.Tk):
             except ValueError as e:
                 messagebox.showerror("Cannot check in", str(e))
                 return
+            self._dbg_scroll("check_in: before _refresh_after_game_change")
             diag = self._refresh_after_game_change([game["bgg_id"]])
+            self._dbg_scroll("check_in: after _refresh_after_game_change")
             self.refresh_members()
+            self._dbg_scroll("check_in: after refresh_members")
             self.refresh_history()
+            self._dbg_scroll("check_in: after refresh_history")
             self.refresh_dashboard()
+            self._dbg_scroll("check_in: after refresh_dashboard")
             self.status(f"Checked in \"{game['name']}\". [{diag}]")
             return
 
@@ -6171,11 +6204,17 @@ class App(tk.Tk):
             except ValueError as e:
                 messagebox.showerror("Cannot check in", str(e))
                 return
+            self._dbg_scroll("check_in(exp): before dialog.destroy")
             dialog.destroy()
+            self._dbg_scroll("check_in(exp): after dialog.destroy")
             diag = self._refresh_after_game_change(checked_in_ids)
+            self._dbg_scroll("check_in(exp): after _refresh_after_game_change")
             self.refresh_members()
+            self._dbg_scroll("check_in(exp): after refresh_members")
             self.refresh_history()
+            self._dbg_scroll("check_in(exp): after refresh_history")
             self.refresh_dashboard()
+            self._dbg_scroll("check_in(exp): after refresh_dashboard")
             self.status(f"Checked in {', '.join(checked_in_names)}. [{diag}]")
 
         ttk.Button(dialog, text="Cancel", command=dialog.destroy).grid(
