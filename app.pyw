@@ -2636,6 +2636,72 @@ class App(tk.Tk):
             daemon=True,
         ).start()
 
+    def _update_single_card(self, bgg_id: int) -> bool:
+        """Swap just one game's card in place — its badge, button, star, ribbons —
+        instead of tearing down and rebuilding the whole Games list for a change that
+        only affects one card. That's the actual fix for check-out/check-in (and
+        favorite/insert/unplayed toggles) visibly resetting your scroll position: those
+        all used to call refresh_games(), which destroys and rebuilds every card in the
+        library — hundreds of widgets — to update one badge, and every scroll/geometry
+        timing bug chased across the last several releases came from trying to make
+        that huge, unnecessary rebuild happen reliably. Doing a single-card swap instead
+        means there's no full rebuild to get the timing right on in the first place.
+
+        Returns True if it handled it this way. Returns False when the caller should
+        fall back to a full refresh_games(preserve_scroll=True) instead — because this
+        game would now need to newly appear in, or disappear from, the current filtered/
+        searched view (a status/favorite/unplayed filter is active and this change flips
+        whether the game matches it), which is an insertion/removal, not a simple swap,
+        or because it isn't currently showing as a card at all (e.g. Table view, or the
+        action was taken from the Dashboard/History/a friend's popup while it wasn't
+        rendered) so there's nothing to swap here.
+        """
+        if self._view_mode != "cards":
+            return False
+        idx = next((i for i, c in enumerate(self._cards)
+                    if getattr(c, "_bgg_id", None) == bgg_id), None)
+        if idx is None:
+            return False
+
+        with db.connect() as c:
+            game = db.get_game(c, bgg_id)
+            if game is None:
+                return False
+            loan = db.open_loan_for_game(c, bgg_id)
+
+        if not self._apply_filters([game], {bgg_id: loan} if loan else {}):
+            return False   # would need to disappear from the current view
+
+        old_card = self._cards[idx]
+        old_card.destroy()
+        new_card, lazy = self._build_card(game, loan, self._card_play_counts)
+        self._cards[idx] = new_card
+
+        # Same row/col math as _layout_cards() — lands in the exact cell the old card
+        # occupied, since idx and the column count haven't changed.
+        card_w = _CARD_SIZES[self._card_size]["card_w"]
+        gap = 16
+        cols = max(1, (self.games_canvas.winfo_width() - gap) // (card_w + gap))
+        r, c = divmod(idx, cols)
+        new_card.grid(row=r, column=c, padx=gap // 2, pady=gap // 2, sticky="nsew")
+        self.update_idletasks()
+
+        threading.Thread(
+            target=self._lazy_load_images,
+            args=([lazy], self._lazy_generation),
+            daemon=True,
+        ).start()
+        return True
+
+    def _refresh_after_game_change(self, bgg_ids) -> None:
+        """After a check-out/check-in/favorite/insert/unplayed change to one or more
+        specific games: update just those cards in place when possible, falling back to
+        one full refresh_games(preserve_scroll=True) if any of them can't be (see
+        _update_single_card) — covers every affected game either way."""
+        results = [self._update_single_card(bid) for bid in bgg_ids]
+        if not all(results):
+            self.refresh_games(preserve_scroll=True)
+
     def _flush_card_batches(self) -> None:
         """Render all remaining card batches now (used before an A–Z jump, and to
         restore scroll position after a refresh — see refresh_games)."""
@@ -3127,6 +3193,7 @@ class App(tk.Tk):
         # ── card shell ────────────────────────────────────────────────────────
         card = tk.Frame(self.games_inner, bg=C_SURFACE,
                         highlightbackground=C_LINE_200, highlightthickness=1, bd=0)
+        card._bgg_id = bgg_id   # looked up by _update_single_card() to swap just this one
 
         # ── cover: gradient placeholder + game-name overlay + star chip ───────
         # Store cover dimensions so the lazy loader can resize to fit exactly.
@@ -5997,6 +6064,7 @@ class App(tk.Tk):
                         return
                     db.check_out(c, game["bgg_id"], user_id, notes_var.get().strip(), due_date=due)
                     checked_out_names = [game["name"]]
+                    checked_out_ids = [game["bgg_id"]]
                     skipped_names = []
                     for exp_id, var in expansion_vars.items():
                         if not var.get():
@@ -6007,11 +6075,12 @@ class App(tk.Tk):
                             continue
                         db.check_out(c, exp_id, user_id, notes_var.get().strip(), due_date=due)
                         checked_out_names.append(exp["name"])
+                        checked_out_ids.append(exp_id)
             except ValueError as e:
                 messagebox.showerror("Cannot check out", str(e))
                 return
             dialog.destroy()
-            self.refresh_games(preserve_scroll=True)
+            self._refresh_after_game_change(checked_out_ids)
             self.refresh_members()
             self.refresh_history()
             self.refresh_dashboard()
@@ -6047,7 +6116,7 @@ class App(tk.Tk):
             except ValueError as e:
                 messagebox.showerror("Cannot check in", str(e))
                 return
-            self.refresh_games(preserve_scroll=True)
+            self._refresh_after_game_change([game["bgg_id"]])
             self.refresh_members()
             self.refresh_history()
             self.refresh_dashboard()
@@ -6080,16 +6149,18 @@ class App(tk.Tk):
                 with db.connect() as c:
                     db.check_in(c, game["bgg_id"])
                     checked_in_names = [game["name"]]
+                    checked_in_ids = [game["bgg_id"]]
                     for exp_id, var in expansion_vars.items():
                         if var.get():
                             db.check_in(c, exp_id)
                             checked_in_names.append(
                                 next(e["name"] for e in checked_out_expansions if e["bgg_id"] == exp_id))
+                            checked_in_ids.append(exp_id)
             except ValueError as e:
                 messagebox.showerror("Cannot check in", str(e))
                 return
             dialog.destroy()
-            self.refresh_games(preserve_scroll=True)
+            self._refresh_after_game_change(checked_in_ids)
             self.refresh_members()
             self.refresh_history()
             self.refresh_dashboard()
@@ -6156,7 +6227,7 @@ class App(tk.Tk):
         new_val = not bool(game["is_favorite"])
         with db.connect() as c:
             db.set_favorite(c, game["bgg_id"], new_val)
-        self.refresh_games(preserve_scroll=True)
+        self._refresh_after_game_change([game["bgg_id"]])
 
     # ---------- plays tab ----------
 
@@ -6772,7 +6843,7 @@ class App(tk.Tk):
         def on_insert_toggle() -> None:
             with db.connect() as c:
                 db.set_insert(c, game["bgg_id"], insert_var.get())
-            self.refresh_games(preserve_scroll=True)
+            self._refresh_after_game_change([game["bgg_id"]])
         ttk.Checkbutton(
             toggles, text="📦 Has 3D printed insert",
             variable=insert_var, command=on_insert_toggle,
@@ -6788,7 +6859,7 @@ class App(tk.Tk):
             def on_unplayed_toggle() -> None:
                 with db.connect() as c:
                     db.set_unplayed(c, [game["bgg_id"]], unplayed_var.get())
-                self.refresh_games(preserve_scroll=True)
+                self._refresh_after_game_change([game["bgg_id"]])
                 _sync_unplayed_banner()
             ttk.Checkbutton(
                 toggles, text="Not played yet",
@@ -6799,7 +6870,7 @@ class App(tk.Tk):
         def on_fav_toggle() -> None:
             with db.connect() as c:
                 db.set_favorite(c, game["bgg_id"], fav_var.get())
-            self.refresh_games(preserve_scroll=True)
+            self._refresh_after_game_change([game["bgg_id"]])
         ttk.Checkbutton(
             toggles, text="★ Favorite",
             variable=fav_var, command=on_fav_toggle,
