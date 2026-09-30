@@ -2617,6 +2617,16 @@ class App(tk.Tk):
         self._cards_rendered = end
 
         self._layout_cards(self.games_canvas.winfo_width())
+        # Force Tk to fully process this batch's pending geometry — labels measured, text
+        # actually placed — before anything can show it. A batch is up to 60 cards, each
+        # with ~10 child widgets built back-to-back with nothing to yield to; without this,
+        # a few could still be un-measured when the canvas becomes visible (they're built
+        # correctly, just not yet actually laid out), showing as blank/missing title-and-
+        # specs text until some unrelated later rebuild forces everything to be redone.
+        # This is the real, universal fix — the earlier one only paused *between* batches
+        # in the flush loop, which doesn't run at all for the very first (most common)
+        # batch, so it could still happen browsing a freshly-opened or freshly-filtered list.
+        self.update_idletasks()
         if not _caller_manages_visibility:
             self.games_canvas.itemconfigure(self.games_window_id, state="normal")
 
