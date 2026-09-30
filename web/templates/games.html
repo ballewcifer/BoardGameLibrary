@@ -7,7 +7,10 @@
 <!-- Search & filter bar -->
 <div class="filter-bar">
   <form method="get" action="/games" class="filter-form">
-    <input type="search" name="q" value="{{ q }}" placeholder="Search games…" class="search-input" aria-label="Search games">
+    <input type="search" name="q" value="{{ q }}"
+           placeholder="{{ 'Add a game to search' if total_games_unfiltered == 0 else 'Search games…' }}"
+           class="search-input" aria-label="Search games"
+           {% if total_games_unfiltered == 0 %}disabled style="opacity:.5"{% endif %}>
 
     <select name="status" class="filter-select" aria-label="Filter by availability">
       <option value="all"       {% if status=='all'       %}selected{% endif %}>All</option>
@@ -32,22 +35,86 @@
     </select>
 
     <label class="filter-check"><input type="checkbox" name="exp" value="1" {% if show_exp %}checked{% endif %}> Expansions</label>
+    <label class="filter-check"><input type="checkbox" name="unplayed" value="1" {% if unplayed %}checked{% endif %}> Not played yet</label>
+
+    {# Multi-select checklist — plain checkboxes sharing name="bstatus" submit
+       as repeated params with no JS required; the small script below only
+       adds the "All"/other-status mutual-exclusivity UX and a live summary
+       label, matching the desktop app's equivalent popup. #}
+    <details class="bstatus-details">
+      <summary class="filter-select bstatus-summary" id="bstatus-summary">
+        {% if bstatuses|length == 1 %}{{ {'all': 'All', 'owned': 'Owned'}.get(bstatuses[0], bgg_status_labels.get(bstatuses[0], bstatuses[0])) }}{% else %}{{ bstatuses|length }} selected{% endif %}
+      </summary>
+      <div class="bstatus-menu" aria-label="Filter by BGG collection status">
+        <label class="bstatus-option">
+          <input type="checkbox" name="bstatus" value="all" {% if 'all' in bstatuses %}checked{% endif %}> All
+        </label>
+        <label class="bstatus-option">
+          <input type="checkbox" name="bstatus" value="owned" {% if 'owned' in bstatuses %}checked{% endif %}> Owned
+        </label>
+        {% for f in bgg_status_flags if f != 'own' %}
+          <label class="bstatus-option" style="background:{{ bgg_status_colors[f].bg }};color:{{ bgg_status_colors[f].text }}">
+            <input type="checkbox" name="bstatus" value="{{ f }}" {% if f in bstatuses %}checked{% endif %}> {{ bgg_status_labels[f] }}
+          </label>
+        {% endfor %}
+      </div>
+    </details>
 
     <button type="submit" class="btn btn-primary btn-sm">Filter</button>
   </form>
 
   <button class="btn btn-secondary btn-sm" onclick="openModal('modal-random')" aria-label="Pick a random game">🎲 Surprise Me</button>
-  <button class="btn btn-secondary btn-sm" onclick="openModal('modal-add-game')" aria-label="Add game from BGG">+ Add Game</button>
+  <button class="btn btn-secondary btn-sm" onclick="openModal('modal-add-game')" aria-label="Add game from BGG">+ Add Game from BGG</button>
+  <button class="btn btn-secondary btn-sm" onclick="openModal('modal-add-game-manual')" aria-label="Add game manually">+ Add Game Manually</button>
   <button id="select-mode-toggle" class="btn btn-secondary btn-sm" onclick="toggleSelectMode()" aria-label="Select multiple games">☑ Select</button>
 </div>
+
+<script>
+// Collection-status checklist: "All" (the default) is exclusive with every
+// other option — checking it clears the rest, checking anything else clears
+// it, and deselecting everything falls back to it — and the
+// <summary> label reflects the current selection, matching the desktop
+// app's equivalent popup. Submission itself needs none of this; plain
+// checkboxes sharing name="bstatus" already submit as repeated params.
+(function () {
+  const menu = document.querySelector('.bstatus-menu');
+  const summary = document.getElementById('bstatus-summary');
+  if (!menu || !summary) return;
+  const boxes = Array.from(menu.querySelectorAll('input[type=checkbox]'));
+  const allBox = boxes.find(b => b.value === 'all');
+
+  function updateSummary() {
+    const checked = boxes.filter(b => b.checked);
+    // Nothing selected is never valid — fall back to the default, "All".
+    if (checked.length === 0 && allBox) allBox.checked = true;
+    const now = boxes.filter(b => b.checked);
+    const labels = now.map(b => b.parentElement.textContent.trim());
+    summary.textContent = now.length === 1 ? labels[0] : `${now.length} selected`;
+  }
+
+  boxes.forEach(box => box.addEventListener('change', () => {
+    if (box.value === 'all' && box.checked) {
+      boxes.forEach(b => { if (b !== box) b.checked = false; });
+    } else if (box.checked && allBox) {
+      allBox.checked = false;
+    }
+    updateSummary();
+  }));
+  updateSummary();
+})();
+</script>
 
 <!-- Bulk-edit action bar (shown while in select mode) -->
 <div id="bulk-bar" class="bulk-bar" hidden>
   <span id="bulk-count" class="muted">0 selected</span>
   <form method="post" action="/games/bulk_update" id="bulk-form" style="display:inline">
     <input type="hidden" name="has_insert" id="bulk-has-insert" value="1">
+    <input type="hidden" name="unplayed" id="bulk-unplayed" value="" disabled>
     <button type="button" class="btn btn-primary btn-sm" onclick="bulkSubmit(1)">📦 Mark Has 3D Insert</button>
     <button type="button" class="btn btn-secondary btn-sm" onclick="bulkSubmit(0)">Clear 3D Insert</button>
+    {# One toggle: marks the selection "not played yet", or clears the mark when
+       every selected game is already marked (label follows the selection). #}
+    <button type="button" class="btn btn-secondary btn-sm" id="bulk-unplayed-btn" onclick="bulkUnplayed()">Unplayed</button>
   </form>
   <button class="btn btn-secondary btn-sm" onclick="toggleSelectMode()">Cancel</button>
 </div>
@@ -56,19 +123,22 @@
 <div class="collection-bar">
   <span class="collection-label">Library:</span>
   <a class="collection-tab {% if active_collection is none %}active{% endif %}"
-     href="{{ url_for('games', q=q, status=status, tag=tag_filter, exp=('1' if show_exp else none), coop=coop) }}">All</a>
+     href="{{ url_for('games', q=q, status=status, tag=tag_filter, exp=('1' if show_exp else none), unplayed=('1' if unplayed else none), coop=coop, bstatus=bstatuses) }}">All</a>
   {% for col in collections %}
   <a class="collection-tab {% if active_collection == col.id %}active{% endif %}"
-     href="{{ url_for('games', q=q, status=status, tag=tag_filter, exp=('1' if show_exp else none), coop=coop, collection=col.id) }}">{{ col.name }} ({{ col.game_count }}){% if col.owner_name %} 👤 {{ col.owner_name }}{% endif %}</a>
+     href="{{ url_for('games', q=q, status=status, tag=tag_filter, exp=('1' if show_exp else none), unplayed=('1' if unplayed else none), coop=coop, bstatus=bstatuses, collection=col.id) }}">{{ col.name }} ({{ col.game_count }}){% if col.owner_name %} 👤 {{ col.owner_name }}{% endif %}</a>
   {% endfor %}
 
   <form method="get" action="/games" class="compare-form">
     <input type="hidden" name="q" value="{{ q }}">
     <input type="hidden" name="status" value="{{ status }}">
+    {% for b in bstatuses %}<input type="hidden" name="bstatus" value="{{ b }}">{% endfor %}
     {% if tag_filter %}<input type="hidden" name="tag" value="{{ tag_filter }}">{% endif %}
     {% if show_exp %}<input type="hidden" name="exp" value="1">{% endif %}
+    {% if unplayed %}<input type="hidden" name="unplayed" value="1">{% endif %}
     {% if coop and coop != 'any' %}<input type="hidden" name="coop" value="{{ coop }}">{% endif %}
     {% if active_collection is not none %}<input type="hidden" name="collection" value="{{ active_collection }}">{% endif %}
+    <p class="muted" style="font-size:.8rem;margin:0 6px 0 0;display:inline">Compare collections to see which games are shared, or unique to one.</p>
     <select name="compare" class="filter-select" onchange="this.form.submit()" aria-label="Compare collections">
       <option value="off"    {% if compare=='off'    %}selected{% endif %}>Compare: Off</option>
       <option value="shared" {% if compare=='shared' %}selected{% endif %}>Shared by all</option>
@@ -96,49 +166,59 @@
 <!-- Game cards grid -->
 <div class="game-grid" id="grid-container">
   {% for g in games %}
-  <a href="/games/{{ g.bgg_id }}" class="game-card {% if g.loan %}game-card--out{% endif %}"
-     data-bgg-id="{{ g.bgg_id }}" data-out="{{ '1' if g.loan else '' }}">
+  <div class="game-card-wrap {% if g.loan %}game-card--out{% endif %}">
     <label class="game-card-select" onclick="event.stopPropagation()">
-      <input type="checkbox" class="game-select-box" value="{{ g.bgg_id }}" onchange="updateBulkCount()">
+      <input type="checkbox" class="game-select-box" value="{{ g.bgg_id }}" data-unplayed="{{ '1' if (g.own == 1 and g.is_unplayed) else '' }}" onchange="updateBulkCount()" aria-label="Select {{ g.name }}">
     </label>
-    {% if g.is_favorite %}<span class="fav-badge"><span aria-hidden="true">★</span><span class="sr-only">Favorite</span></span>{% endif %}
-    {% if g.is_expansion %}<span class="exp-badge" aria-label="Expansion">Expansion</span>{% endif %}
+    <a href="/games/{{ g.bgg_id }}" class="game-card"
+       data-bgg-id="{{ g.bgg_id }}" data-out="{{ '1' if g.loan else '' }}">
+      {% if g.is_favorite %}<span class="fav-badge"><span aria-hidden="true">★</span><span class="sr-only">Favorite</span></span>{% endif %}
+      {% if g.is_expansion %}<span class="exp-badge" aria-label="Expansion">Expansion</span>{% endif %}
 
-    <div class="game-card-img">
-      {% if g.image_path %}
-        <img src="/img/{{ g.bgg_id }}" alt="{{ g.name }}" loading="lazy">
-      {% elif g.image_url or g.thumbnail_url %}
-        <img src="{{ g.image_url or g.thumbnail_url }}" alt="{{ g.name }}" loading="lazy">
-      {% else %}
-        <div class="game-card-no-img">🎲</div>
-      {% endif %}
-    </div>
-
-    <div class="game-card-body">
-      <div class="game-card-name">{{ g.name }}</div>
-      <div class="game-card-meta muted">
-        {% if g.year %}{{ g.year }} · {% endif %}
-        {% if g.min_players and g.max_players %}
-          {{ g.min_players }}–{{ g.max_players }}p ·
+      <div class="game-card-img">
+        {% if g.own == 1 and g.is_unplayed %}<span class="unplayed-ribbon" aria-hidden="true">UNPLAYED</span>{% endif %}
+        {% if g.image_path %}
+          <img src="/img/{{ g.bgg_id }}" alt="{{ g.name }}" loading="lazy">
+        {% elif g.image_url or g.thumbnail_url %}
+          <img src="{{ g.image_url or g.thumbnail_url }}" alt="{{ g.name }}" loading="lazy">
+        {% else %}
+          <div class="game-card-no-img">🎲</div>
         {% endif %}
-        {% if g.playing_time %}{{ g.playing_time }}m{% endif %}
       </div>
-      {% if g.play_count %}
-        <div class="muted" style="font-size:.75rem">{{ g.play_count }} play{{ 's' if g.play_count != 1 else '' }}</div>
-      {% endif %}
-      {% if g.best_players %}
-        <div class="muted" style="font-size:.75rem">★ Best at {{ g.best_players }}</div>
-      {% endif %}
-    </div>
 
-    <div class="game-card-footer">
-      {% if g.loan %}
-        <span class="badge badge-out">Out: {{ g.loan.first_name }}</span>
-      {% else %}
-        <span class="badge badge-in">Available</span>
-      {% endif %}
-    </div>
-  </a>
+      <div class="game-card-body">
+        <div class="game-card-name">{{ g.name }}{% if g.own == 1 and g.is_unplayed %}<span class="sr-only">, not played yet</span>{% endif %}</div>
+        <div class="game-card-meta muted">
+          {% if g.year %}{{ g.year }} · {% endif %}
+          {% if g.min_players and g.max_players %}
+            {{ g.min_players }}–{{ g.max_players }}p ·
+          {% endif %}
+          {% if g.playing_time %}{{ g.playing_time }}m{% endif %}
+        </div>
+        {% if g.play_count %}
+          <div class="muted" style="font-size:.75rem">{{ g.play_count }} play{{ 's' if g.play_count != 1 else '' }}</div>
+        {% endif %}
+        {% if g.best_players %}
+          <div class="muted" style="font-size:.75rem">★ Best at {{ g.best_players }}</div>
+        {% endif %}
+      </div>
+
+      <div class="game-card-footer">
+        {# Only owned games are ever loanable, so only they get an Available/
+           Out tag; every other BGG status gets its own colored tag instead,
+           so the different statuses stand apart. #}
+        {% if g.own == 1 %}
+          {% if g.loan %}
+            <span class="badge badge-out">Out: {{ g.loan.first_name }}</span>
+          {% else %}
+            <span class="badge badge-in">Available</span>
+          {% endif %}
+        {% elif g.bgg_status and g.bgg_status in bgg_status_colors %}
+          <span class="badge" style="background:{{ bgg_status_colors[g.bgg_status].bg }};color:{{ bgg_status_colors[g.bgg_status].text }}">{{ bgg_status_labels.get(g.bgg_status, g.bgg_status) }}</span>
+        {% endif %}
+      </div>
+    </a>
+  </div>
   {% else %}
   <p class="muted mt" style="grid-column:1/-1">No games found. Try a different search or <button class="btn-link" onclick="openModal('modal-add-game')">add one</button>.</p>
   {% endfor %}
@@ -150,7 +230,7 @@
 // library paints fast instead of rendering hundreds of cards at once.
 (function () {
   const BATCH = 48;
-  const cards = Array.from(document.querySelectorAll('.game-grid > .game-card'));
+  const cards = Array.from(document.querySelectorAll('.game-grid > .game-card-wrap'));
   if (cards.length <= BATCH) return;
   let shown = BATCH;
   cards.forEach((c, i) => { if (i >= BATCH) c.style.display = 'none'; });
@@ -170,12 +250,12 @@
 // A single click still navigates to the detail page — delay it briefly so
 // a following second click can cancel it instead of racing the dblclick.
 (function () {
-  document.querySelectorAll('.game-grid > .game-card[data-bgg-id]').forEach((card) => {
+  document.querySelectorAll('.game-grid .game-card[data-bgg-id]').forEach((card) => {
     let clickTimer = null;
     card.addEventListener('click', (e) => {
       if (document.getElementById('grid-container').classList.contains('select-mode')) {
         e.preventDefault();
-        const box = card.querySelector('.game-select-box');
+        const box = card.parentElement.querySelector('.game-select-box');
         if (e.target !== box) box.checked = !box.checked;
         updateBulkCount();
         return;
@@ -209,7 +289,9 @@ function toggleSelectMode() {
   const grid = document.getElementById('grid-container');
   const on = grid.classList.toggle('select-mode');
   document.getElementById('bulk-bar').hidden = !on;
-  document.getElementById('select-mode-toggle').textContent = on ? '✕ Cancel Select' : '☑ Select';
+  const toggleBtn = document.getElementById('select-mode-toggle');
+  toggleBtn.textContent = on ? '✕ Cancel Select' : '☑ Select';
+  toggleBtn.setAttribute('aria-label', on ? 'Cancel select mode' : 'Select multiple games');
   if (!on) {
     document.querySelectorAll('.game-select-box').forEach(b => { b.checked = false; });
   }
@@ -218,6 +300,29 @@ function toggleSelectMode() {
 function updateBulkCount() {
   const n = document.querySelectorAll('.game-select-box:checked').length;
   document.getElementById('bulk-count').textContent = n + ' selected';
+  // When every selected game is already marked, the button clears instead.
+  const sel = Array.from(document.querySelectorAll('.game-select-box:checked'));
+  const allMarked = sel.length > 0 && sel.every(b => b.dataset.unplayed === '1');
+  const ub = document.getElementById('bulk-unplayed-btn');
+  ub.textContent = allMarked ? 'Played' : 'Unplayed';
+  ub.dataset.clear = allMarked ? '1' : '';
+  ub.setAttribute('aria-label', allMarked ? 'Clear not played yet on selected games' : 'Mark selected games as not played yet');
+}
+function bulkUnplayed() {
+  const ids = Array.from(document.querySelectorAll('.game-select-box:checked')).map(b => b.value);
+  if (!ids.length) { alert('Select at least one game first.'); return; }
+  const form = document.getElementById('bulk-form');
+  form.querySelectorAll('input[name="bgg_ids"]').forEach(el => el.remove());
+  ids.forEach(id => {
+    const inp = document.createElement('input');
+    inp.type = 'hidden'; inp.name = 'bgg_ids'; inp.value = id;
+    form.appendChild(inp);
+  });
+  const flag = document.getElementById('bulk-unplayed');
+  flag.disabled = false;
+  flag.value = document.getElementById('bulk-unplayed-btn').dataset.clear ? '0' : '1';
+  document.getElementById('bulk-has-insert').disabled = true;
+  form.submit();
 }
 function bulkSubmit(hasInsert) {
   const ids = Array.from(document.querySelectorAll('.game-select-box:checked')).map(b => b.value);
@@ -257,6 +362,7 @@ function bulkSubmit(hasInsert) {
       <button class="modal-close" onclick="closeModal('modal-add-game')">✕</button>
     </div>
     <div class="modal-body">
+      <p class="muted" style="font-size:.8rem;margin-top:0">Search BoardGameGeek to add a game with its full details filled in automatically.</p>
       <div class="search-row">
         <input type="text" id="bgg-search-input" placeholder="Search BoardGameGeek…" class="search-input">
         <button class="btn btn-primary" onclick="bggSearch()">Search</button>
@@ -267,12 +373,94 @@ function bulkSubmit(hasInsert) {
       <form id="add-game-form" method="post" action="/games/add" hidden>
         <input type="hidden" name="bgg_id" id="add-bgg-id">
         <div id="add-game-preview" class="game-preview"></div>
+        <label class="form-label mt-sm" for="add-game-status">Collection</label>
+        <select id="add-game-status" name="status" class="form-control">
+          {% for f in bgg_status_flags %}
+            <option value="{{ f }}" {% if f == 'own' %}selected{% endif %} style="background:{{ bgg_status_colors[f].bg }};color:{{ bgg_status_colors[f].text }}">{{ bgg_status_labels[f] }}</option>
+          {% endfor %}
+        </select>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" onclick="document.getElementById('add-game-form').hidden=true">Back</button>
           <button type="submit" class="btn btn-primary">Add to Library</button>
         </div>
       </form>
     </div>
+  </div>
+</div>
+
+<!-- ── Add Game Manually modal ───────────────────────────────────────────── -->
+<div id="modal-add-game-manual" class="modal-backdrop" hidden>
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Add Game Manually</h3>
+      <button class="modal-close" onclick="closeModal('modal-add-game-manual')">✕</button>
+    </div>
+    <form method="post" action="/games/add-manual">
+      <div class="modal-body">
+        <p class="muted" style="font-size:.8rem;margin-top:0">Enter a game's details yourself — useful for games not on BoardGameGeek.</p>
+
+        <label class="form-label" for="am-name">Name *</label>
+        <input type="text" id="am-name" name="name" class="form-control" required>
+
+        <label class="form-label mt-sm" for="am-year">Year</label>
+        <input type="number" id="am-year" name="year" class="form-control">
+
+        <label class="form-label mt-sm" for="am-minp">Min players</label>
+        <input type="number" id="am-minp" name="min_players" class="form-control" min="1">
+        <label class="form-label mt-sm" for="am-maxp">Max players</label>
+        <input type="number" id="am-maxp" name="max_players" class="form-control" min="1">
+
+        <label class="form-label mt-sm" for="am-minpt">Min playtime (min)</label>
+        <input type="number" id="am-minpt" name="min_playtime" class="form-control" min="0">
+        <label class="form-label mt-sm" for="am-maxpt">Max playtime (min)</label>
+        <input type="number" id="am-maxpt" name="max_playtime" class="form-control" min="0">
+        <label class="form-label mt-sm" for="am-pt">Playing time (min)</label>
+        <input type="number" id="am-pt" name="playing_time" class="form-control" min="0">
+
+        <label class="form-label mt-sm" for="am-minage">Min age</label>
+        <input type="number" id="am-minage" name="min_age" class="form-control" min="0">
+        <label class="form-label mt-sm" for="am-weight">Weight / complexity (1–5)</label>
+        <input type="number" id="am-weight" name="weight" class="form-control" min="1" max="5" step="0.01">
+
+        <label class="form-label mt-sm" for="am-desc">Description</label>
+        <textarea id="am-desc" name="description" class="form-control" rows="3"></textarea>
+
+        <label class="form-label mt-sm" for="am-categories">Categories (comma-separated)</label>
+        <input type="text" id="am-categories" name="categories" class="form-control" placeholder="Party, Family">
+        <label class="form-label mt-sm" for="am-mechanics">Mechanics (comma-separated)</label>
+        <input type="text" id="am-mechanics" name="mechanics" class="form-control" placeholder="Drafting, Set Collection">
+        <label class="form-label mt-sm" for="am-designers">Designers (comma-separated)</label>
+        <input type="text" id="am-designers" name="designers" class="form-control">
+        <label class="form-label mt-sm" for="am-publishers">Publishers (comma-separated)</label>
+        <input type="text" id="am-publishers" name="publishers" class="form-control">
+
+        <label class="form-label mt-sm" for="am-best">Best players</label>
+        <input type="text" id="am-best" name="best_players" class="form-control" placeholder="e.g. 4">
+
+        <label class="form-label mt-sm" for="am-coop">Cooperative?</label>
+        <select id="am-coop" name="is_cooperative" class="form-control">
+          <option value="unset" selected>Unset</option>
+          <option value="coop">🤝 Cooperative</option>
+          <option value="competitive">⚔️ Competitive</option>
+        </select>
+
+        <label class="form-label mt-sm" style="display:flex;align-items:center;gap:8px">
+          <input type="checkbox" name="is_expansion" value="1">
+          Is this an expansion?
+        </label>
+
+        <label class="form-label mt-sm" for="am-status">Collection</label>
+        <select id="am-status" name="status" class="form-control">
+          {% for f in bgg_status_flags %}
+            <option value="{{ f }}" {% if f == 'own' %}selected{% endif %} style="background:{{ bgg_status_colors[f].bg }};color:{{ bgg_status_colors[f].text }}">{{ bgg_status_labels[f] }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-add-game-manual')">Cancel</button>
+        <button type="submit" class="btn btn-primary">Add to Library</button>
+      </div>
+    </form>
   </div>
 </div>
 
@@ -317,6 +505,9 @@ function bulkSubmit(hasInsert) {
 
       <label class="filter-check mt-sm">
         <input type="checkbox" id="rnd-available" checked> Only available (not checked out)
+      </label>
+      <label class="filter-check mt-sm">
+        <input type="checkbox" id="rnd-unplayed"> Only games I haven't played
       </label>
 
       <div id="rnd-result" class="card mt" style="display:none; padding:12px"></div>
@@ -402,6 +593,7 @@ function pickRandomGame() {
     complexity: document.getElementById('rnd-complexity').value,
     coop:       document.getElementById('rnd-coop').value,
     available:  document.getElementById('rnd-available').checked ? '1' : '0',
+    unplayed:   document.getElementById('rnd-unplayed').checked ? '1' : '0',
     collection: {{ (active_collection if active_collection is not none else 'all') | tojson }},
   });
   const box = document.getElementById('rnd-result');

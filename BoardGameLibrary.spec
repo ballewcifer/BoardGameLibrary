@@ -14,6 +14,10 @@ a = Analysis(
         # Bundle certifi's cacert.pem so HTTPS works on every machine,
         # not just the one the app was compiled on.
         *collect_data_files('certifi'),
+        # tkcalendar's arrow/today icons, and babel's locale data it needs at import time —
+        # both are plain package data PyInstaller's static analysis won't find on its own.
+        *collect_data_files('tkcalendar'),
+        *collect_data_files('babel'),
         # Window/title-bar icon, loaded at runtime via iconbitmap().
         ('icon.ico', '.'),
     ],
@@ -22,6 +26,8 @@ a = Analysis(
         'PIL.Image',
         'PIL.ImageTk',
         'certifi',
+        'tkcalendar',
+        'babel.numbers',
     ],
     hookspath=[],
     hooksconfig={},

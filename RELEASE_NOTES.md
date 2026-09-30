@@ -1,5 +1,32 @@
 # Release Notes
 
+## Play history for a game (Mobile v2.8.2, Desktop and Web v7.1.2)
+
+- **See when and how often you played a game.** Pick a game in the Plays filter and a summary line appears: "Played 6 times", the date last played and the date first played, or "Not played yet". The play log below is filtered to that game as before. Any game in your library can be picked, including ones with no plays.
+- **Game details** now show the same at a glance: on desktop a "Played N times · last <date>" line under the title, and on the web a "Plays" card with the count, last played date, and up to 10 recent plays with the winner ("and N earlier" if there are more).
+- The summary updates when you log, edit or delete a play. On the web it is real text that screen readers announce.
+
+---
+
+## Desktop/Web v7.1.1 - "In Collection" fix
+
+- **Games with no status checked on BoardGameGeek are no longer imported as Owned.** BGG keeps a game in your collection (shown as "In Collection") when you only rated, commented on or played it, even if none of Own, Wishlist, etc. is ticked. Those games used to show up as Owned and could be checked out. They now import with an "In Collection" label and a neutral grey badge, are not loanable, and can be filtered and edited like any other status. Set a real status on the game if you do own it.
+- **Duplicate rows merged.** If BGG lists the same game more than once in your collection, the statuses are now combined (Owned still wins) instead of the last row winning.
+- **To correct games already in your library, run a sync again.** A status you changed by hand in the app is left alone.
+
+---
+
+## Desktop/Web v7.1.0 - "Not played yet"
+
+- **Mark games you own but haven't played.** It is your call, not automatic: a game with no plays in the app may still have been played before you started using it. Mark a game "Not played yet" and it stays marked until you log a play for it, which clears the mark for you.
+- **Desktop**: a "Not played yet" checkbox in the game's details window (shown only for owned games with no plays), plus right-click items to mark or clear one game, or several selected rows at once. Games that can't be marked (already played, or not owned) are skipped and you are told how many. The Games table has a new sortable "Unplayed" column, cards show an "UNPLAYED" tag on the cover, and the details window shows a "Not played yet - Log a play to clear" banner.
+- **Web**: the same checkbox in Edit Game, an "Unplayed" / "Played" button in Select mode (it flips to "Played" when every selected game is already marked), an "UNPLAYED" corner ribbon on game cards, and the banner on the game page. The colour follows your chosen theme, and the text stays readable in all of them.
+- **Filter and Surprise Me**: a "Not played yet" filter on the Games screen, and an "Only games I haven't played" option on the random game picker (off by default), on both desktop and web.
+- **Backups** carry the mark, and older backups without it still restore. A restored mark is dropped for any game that has plays, so it can never contradict your play log.
+
+---
+
+
 Covers Desktop/Web **v6.9.0 → v6.9.5** and Mobile **v2.2.8 → v2.5.4** (2026-08-04 to 2026-08-24).
 
 This file is duplicated in the companion [BoardGameLibrary](https://github.com/ballewcifer/BoardGameLibrary) repo (Desktop/Web) since most of this window's work spanned all three platforms.
