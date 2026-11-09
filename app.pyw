@@ -6348,7 +6348,45 @@ class App(tk.Tk):
 
         # ── Stats pane (hidden until toggled) ────────────────────────────
         self._stats_period = tk.StringVar(value="all")
+        self._stats_query = tk.StringVar(value="")
+        self._stats_game_var = tk.StringVar(value=self._STATS_ANY_GAME)
+        self._stats_friend_var = tk.StringVar(value=self._STATS_ANY_FRIEND)
+        self._stats_game_ids: dict = {}
+        self._stats_after = None
+        self._stats_count_var = tk.StringVar(value="")
         self._stats_pane = ttk.Frame(frame)
+
+        # Fixed filter bar above the scrolling results, so typing in the search box
+        # isn't interrupted when the results below are rebuilt.
+        bar = ttk.Frame(self._stats_pane)
+        bar.pack(side="top", fill="x", padx=10, pady=(8, 2))
+        row1 = ttk.Frame(bar)
+        row1.pack(fill="x")
+        ttk.Label(row1, text="SEARCH", style="Filter.TLabel").pack(side="left", padx=(0, 4))
+        ttk.Entry(row1, textvariable=self._stats_query, width=28).pack(side="left")
+        self._stats_query.trace_add("write", lambda *_: self._stats_schedule())
+        for i, (key, label) in enumerate((("all", "All time"), ("year", "This year"),
+                                          ("30d", "Last 30 days"))):
+            ttk.Radiobutton(row1, text=label, value=key, variable=self._stats_period,
+                            style="Toolbutton", command=self._refresh_stats
+                            ).pack(side="left", padx=(14 if i == 0 else 6, 0))
+        row2 = ttk.Frame(bar)
+        row2.pack(fill="x", pady=(6, 0))
+        ttk.Label(row2, text="GAME", style="Filter.TLabel").pack(side="left", padx=(0, 4))
+        self._stats_game_cb = ttk.Combobox(row2, textvariable=self._stats_game_var, state="readonly",
+                                           width=26, values=[self._STATS_ANY_GAME])
+        self._stats_game_cb.pack(side="left")
+        self._stats_game_cb.bind("<<ComboboxSelected>>", lambda *_: self._refresh_stats())
+        ttk.Label(row2, text="FRIEND", style="Filter.TLabel").pack(side="left", padx=(12, 4))
+        self._stats_friend_cb = ttk.Combobox(row2, textvariable=self._stats_friend_var, state="readonly",
+                                             width=18, values=[self._STATS_ANY_FRIEND])
+        self._stats_friend_cb.pack(side="left")
+        self._stats_friend_cb.bind("<<ComboboxSelected>>", lambda *_: self._refresh_stats())
+        ttk.Button(row2, text="Clear filters", style="Quiet.TButton",
+                   command=self._stats_clear).pack(side="left", padx=(12, 0))
+        ttk.Label(bar, textvariable=self._stats_count_var, style="Muted.TLabel"
+                  ).pack(anchor="w", pady=(6, 0))
+
         st_vsb = ttk.Scrollbar(self._stats_pane, orient="vertical")
         st_vsb.pack(side="right", fill="y")
         self._stats_canvas = tk.Canvas(self._stats_pane, bg=C_BG, highlightthickness=0,
@@ -6362,6 +6400,22 @@ class App(tk.Tk):
         self._stats_inner.bind("<Configure>",
                                lambda e: self._stats_canvas.configure(
                                    scrollregion=self._stats_canvas.bbox("all")))
+
+    _STATS_ANY_GAME = "Any game"
+    _STATS_ANY_FRIEND = "Any friend"
+
+    def _stats_schedule(self) -> None:
+        """Refresh the Stats results shortly after the last keystroke in the search box."""
+        if self._stats_after is not None:
+            self.after_cancel(self._stats_after)
+        self._stats_after = self.after(250, self._refresh_stats)
+
+    def _stats_clear(self) -> None:
+        self._stats_period.set("all")
+        self._stats_query.set("")
+        self._stats_game_var.set(self._STATS_ANY_GAME)
+        self._stats_friend_var.set(self._STATS_ANY_FRIEND)
+        self._refresh_stats()
 
     def _show_plays_pane(self, mode: str) -> None:
         """Show the 'log', 'leaderboard' or 'stats' pane of the Plays tab."""
@@ -6431,34 +6485,52 @@ class App(tk.Tk):
         self.refresh_plays()
 
     def _refresh_stats(self) -> None:
+        if self._stats_after is not None:
+            self.after_cancel(self._stats_after)
+            self._stats_after = None
         scroll = self._stats_canvas.yview()[0]
         for w in self._stats_inner.winfo_children():
             w.destroy()
         with db.connect() as c:
             plays = db.list_plays(c)
         inner = self._stats_inner
-        today_plays = play_stats.plays_this_year(plays)
+
+        # Keep the Game / Friend pickers in step with the data (and drop a stale selection).
+        any_game, any_friend = self._STATS_ANY_GAME, self._STATS_ANY_FRIEND
+        self._stats_game_ids = {g["name"]: g["game_id"] for g in play_stats.most_played_games(plays)}
+        friends = play_stats.player_names_in(plays)
+        self._stats_game_cb.configure(values=[any_game] + sorted(self._stats_game_ids, key=str.lower))
+        self._stats_friend_cb.configure(values=[any_friend] + friends)
+        if self._stats_game_var.get() not in self._stats_game_ids:
+            self._stats_game_var.set(any_game)
+        if self._stats_friend_var.get() not in friends:
+            self._stats_friend_var.set(any_friend)
+
+        friend = self._stats_friend_var.get()
+        flt = play_stats.PlayFilters(
+            period=self._stats_period.get(),
+            game_id=self._stats_game_ids.get(self._stats_game_var.get()),
+            friend=None if friend == any_friend else friend,
+            query=self._stats_query.get())
+        filters_on = play_stats.has_play_filters(flt)
+        stat_plays = play_stats.filter_plays(plays, flt)
+        year_plays = play_stats.plays_this_year(plays)
+        plural = "s" if len(plays) != 1 else ""
+        self._stats_count_var.set(
+            f"{len(stat_plays)} of {len(plays)} play{plural} match" if filters_on else
+            f"{year_plays} play{'s' if year_plays != 1 else ''} this year  ·  {len(plays)} total")
 
         def section(text: str) -> None:
             ttk.Label(inner, text=text.upper(), style="Muted.TLabel",
                       font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=10, pady=(14, 4))
 
-        ttk.Label(inner, style="Muted.TLabel",
-                  text=f"{today_plays} play{'s' if today_plays != 1 else ''} this year  ·  "
-                       f"{len(plays)} total").pack(anchor="w", padx=10, pady=(8, 0))
-
         # ── Most played games ────────────────────────────────────────────
         section("Most played games")
-        period_row = ttk.Frame(inner)
-        period_row.pack(anchor="w", padx=10, pady=(0, 6))
-        for key, label in (("all", "All time"), ("year", "This year"), ("30d", "Last 30 days")):
-            ttk.Radiobutton(period_row, text=label, value=key, variable=self._stats_period,
-                            style="Toolbutton", command=self._refresh_stats
-                            ).pack(side="left", padx=(0, 6))
-        top = play_stats.most_played_games(play_stats.plays_in_period(plays, self._stats_period.get()))
+        top = play_stats.most_played_games(stat_plays)
         if not top:
-            ttk.Label(inner, text="No plays in this period.", style="Muted.TLabel"
-                      ).pack(anchor="w", padx=10, pady=4)
+            ttk.Label(inner, text=("No plays match these filters." if filters_on
+                                   else "No plays logged yet."),
+                      style="Muted.TLabel").pack(anchor="w", padx=10, pady=4)
         for i, g in enumerate(top):
             self._stats_row(
                 inner, i, g["name"], f"{g['count']} play{'s' if g['count'] != 1 else ''}",
@@ -6467,10 +6539,13 @@ class App(tk.Tk):
 
         # ── Win rate ─────────────────────────────────────────────────────
         section("Win rate")
-        records = play_stats.player_records(plays)
-        ranked = [r for r in records if r["plays"] >= play_stats.MIN_RANKED_PLAYS]
+        records = play_stats.player_records(stat_plays)
+        # With filters on the sample is small by design, so show every player with a counted play.
+        min_ranked = 1 if filters_on else play_stats.MIN_RANKED_PLAYS
+        ranked = [r for r in records if r["plays"] >= min_ranked]
         if not ranked:
-            ttk.Label(inner, text="Log a few plays with players and a winner to see win rates.",
+            ttk.Label(inner, text=("No plays with a recorded winner match these filters." if filters_on
+                                   else "Log a few plays with players and a winner to see win rates."),
                       style="Muted.TLabel").pack(anchor="w", padx=10, pady=4)
         for i, r in enumerate(ranked):
             self._stats_row(inner, i, r["name"],
@@ -6478,13 +6553,14 @@ class App(tk.Tk):
         pending = len(records) - len(ranked)
         ttk.Label(inner, style="Muted.TLabel", wraplength=560, justify="left",
                   text=("Counts plays with a recorded winner; co-op “All” results are left out. "
-                        f"A player needs at least {play_stats.MIN_RANKED_PLAYS} such plays to be ranked"
-                        + (f" ({pending} not yet)." if pending else "."))
+                        + ("Filters are on, so every player with a counted play is shown." if filters_on
+                           else f"A player needs at least {play_stats.MIN_RANKED_PLAYS} such plays to be ranked"
+                                + (f" ({pending} not yet)." if pending else ".")))
                   ).pack(anchor="w", padx=10, pady=(2, 0))
 
         # ── Plays by month ───────────────────────────────────────────────
         section("Plays by month")
-        months = play_stats.plays_by_month(plays)
+        months = play_stats.plays_by_month(stat_plays)
         peak = max([m["count"] for m in months] + [1])
         for m in months:
             row = tk.Frame(inner, bg=C_BG)

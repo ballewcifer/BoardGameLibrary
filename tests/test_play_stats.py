@@ -62,6 +62,31 @@ class PlayStatsCase(unittest.TestCase):
         self.assertEqual(year[-1]["key"], "2025-02")
 
 
+class PlayFilterCase(unittest.TestCase):
+    def ids(self, **kw):
+        return [p["id"] for p in ps.filter_plays(PLAYS, ps.PlayFilters(**kw), TODAY)]
+
+    def test_filters(self):
+        self.assertFalse(ps.has_play_filters(ps.PlayFilters()))
+        self.assertFalse(ps.has_play_filters(ps.PlayFilters(query="  ")))
+        self.assertTrue(ps.has_play_filters(ps.PlayFilters(period="30d")))
+        self.assertEqual(self.ids(), [1, 2, 3, 4, 5, 6])
+        self.assertEqual(self.ids(game_id=3), [5, 6])
+        self.assertEqual(self.ids(friend="ann"), [1, 3, 5, 6])          # case-insensitive, listed players only
+        self.assertEqual(self.ids(friend="Sam", game_id=1), [1, 2])
+        self.assertEqual(self.ids(query="AZUL"), [5, 6])                # game name
+        self.assertEqual(self.ids(query="ann"), [1, 3, 5, 6])           # player names
+        self.assertEqual(self.ids(query="pand", period="year"), [4])    # combined with a period
+        self.assertEqual(self.ids(friend="Zed"), [])
+
+    def test_player_names_and_filtered_stats(self):
+        self.assertEqual(ps.player_names_in(PLAYS), ["Ann", "Sam", "Tim"])
+        azul = ps.filter_plays(PLAYS, ps.PlayFilters(game_id=3), TODAY)
+        self.assertEqual([(g["name"], g["count"]) for g in ps.most_played_games(azul)], [("Azul", 2)])
+        self.assertEqual([(r["name"], r["plays"], r["wins"]) for r in ps.player_records(azul)],
+                         [("Ann", 2, 1), ("Tim", 2, 1)])               # tie -> name A-Z
+
+
 class CollectionCaseCase(unittest.TestCase):
     def test_username_lookup_ignores_case(self):
         with tempfile.TemporaryDirectory() as tmp:

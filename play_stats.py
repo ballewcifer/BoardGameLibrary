@@ -3,6 +3,7 @@
 tested without a database. Mirrors the mobile app's lib/playStats.ts."""
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Optional
 
@@ -27,6 +28,46 @@ def period_start(period: str, today: Optional[date] = None) -> Optional[str]:
 def plays_in_period(plays, period: str, today: Optional[date] = None) -> list:
     since = period_start(period, today)
     return [p for p in plays if _day(p) >= since] if since else list(plays)
+
+
+@dataclass
+class PlayFilters:
+    period: str = "all"            # 'all' | 'year' | '30d'
+    game_id: Optional[int] = None
+    friend: Optional[str] = None   # must be a listed player of the play
+    query: str = ""                # matched against game name, players and winner
+
+
+def has_play_filters(f: PlayFilters) -> bool:
+    return f.period != "all" or f.game_id is not None or bool(f.friend) or bool(f.query.strip())
+
+
+def _names(s) -> list[str]:
+    return [n.strip() for n in (s or "").split(",") if n.strip()]
+
+
+def filter_plays(plays, f: PlayFilters, today: Optional[date] = None) -> list:
+    q = f.query.strip().lower()
+    friend = (f.friend or "").strip().lower() or None
+    out = []
+    for p in plays_in_period(plays, f.period, today):
+        if f.game_id is not None and p["game_id"] != f.game_id:
+            continue
+        if friend and friend not in {n.lower() for n in _names(p["player_names"])}:
+            continue
+        if q and q not in f"{p['game_name'] or ''} {p['player_names'] or ''} {p['winner'] or ''}".lower():
+            continue
+        out.append(p)
+    return out
+
+
+def player_names_in(plays) -> list[str]:
+    """Distinct player names across the plays (first-seen capitalization), A-Z."""
+    seen: dict[str, str] = {}
+    for p in plays:
+        for n in _names(p["player_names"]):
+            seen.setdefault(n.lower(), n)
+    return sorted(seen.values(), key=str.lower)
 
 
 def most_played_games(plays) -> list[dict]:
