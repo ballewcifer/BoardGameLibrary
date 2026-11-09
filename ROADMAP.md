@@ -21,6 +21,7 @@ Status legend: ✅ done · 🔜 next · 💡 idea
 
 ## Play tracking & stats (close the gap with BG Stats)
 - ✅ Play log + win leaderboard; winner picked from listed players
+- ✅ **Stats** view on the Plays tab: most played games (all time / this year / last 30 days), win rate per player, plays by month (in the repo, not yet released)
 - 💡 Scoring **categories / rounds**, cooperative & team results
 - 💡 Per game-and-player **charts**, H-index, win-rate trends
 - 💡 Optional play **timer** and game-specific scoring templates

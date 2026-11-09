@@ -26,6 +26,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageTk
 import bgg
 import config
 import db
+import play_stats
 
 # ── Secure credential storage ─────────────────────────────────────────────────
 # Layered approach:
@@ -4354,7 +4355,7 @@ class App(tk.Tk):
         missing) by username -- clearing one without also forgetting its
         username would have the next sync silently bring it right back."""
         username = self.settings.get("bgg_username")
-        if username and username in cleared_usernames:
+        if username and username.lower() in {u.lower() for u in cleared_usernames if u}:
             self.settings["bgg_username"] = ""
             config.save(self.settings)
 
@@ -6275,6 +6276,11 @@ class App(tk.Tk):
                                   command=self._toggle_leaderboard)
         self._lb_btn.pack(side="left", padx=(SP["sm"], 0))
 
+        self._stats_showing = False
+        self._stats_btn = ttk.Button(controls, text="📊 Stats", style="Ghost.TButton",
+                                     command=self._toggle_stats)
+        self._stats_btn.pack(side="left", padx=(SP["xs"], 0))
+
         ttk.Button(controls, text="Delete selected", style="Danger.TButton",
                    command=self.on_delete_play).pack(side="right")
 
@@ -6340,78 +6346,206 @@ class App(tk.Tk):
         if not hasattr(self, '_ribbon_photos'):
             self._ribbon_photos: dict = {}
 
-    def _toggle_leaderboard(self) -> None:
-        self._lb_showing = not self._lb_showing
-        if self._lb_showing:
-            self._plays_pane.pack_forget()
-            self._lb_pane.pack(fill="both", expand=True)
-            self._lb_btn.configure(text="📋 Play Log")
+        # ── Stats pane (hidden until toggled) ────────────────────────────
+        self._stats_period = tk.StringVar(value="all")
+        self._stats_pane = ttk.Frame(frame)
+        st_vsb = ttk.Scrollbar(self._stats_pane, orient="vertical")
+        st_vsb.pack(side="right", fill="y")
+        self._stats_canvas = tk.Canvas(self._stats_pane, bg=C_BG, highlightthickness=0,
+                                       yscrollcommand=st_vsb.set)
+        self._stats_canvas.pack(side="left", fill="both", expand=True)
+        st_vsb.configure(command=self._stats_canvas.yview)
+        self._stats_inner = ttk.Frame(self._stats_canvas)
+        _st_win = self._stats_canvas.create_window((0, 0), window=self._stats_inner, anchor="nw")
+        self._stats_canvas.bind("<Configure>",
+                                lambda e: self._stats_canvas.itemconfigure(_st_win, width=e.width))
+        self._stats_inner.bind("<Configure>",
+                               lambda e: self._stats_canvas.configure(
+                                   scrollregion=self._stats_canvas.bbox("all")))
+
+    def _show_plays_pane(self, mode: str) -> None:
+        """Show the 'log', 'leaderboard' or 'stats' pane of the Plays tab."""
+        self._plays_pane.pack_forget()
+        self._lb_pane.pack_forget()
+        self._stats_pane.pack_forget()
+        self._lb_showing = mode == "leaderboard"
+        self._stats_showing = mode == "stats"
+        self._lb_btn.configure(text="📋 Play Log" if self._lb_showing else "🏆 Leaderboard")
+        self._stats_btn.configure(text="📋 Play Log" if self._stats_showing else "📊 Stats")
+        {"log": self._plays_pane, "leaderboard": self._lb_pane,
+         "stats": self._stats_pane}[mode].pack(fill="both", expand=True)
+        if mode == "leaderboard":
             self._refresh_leaderboard()
+        elif mode == "stats":
+            self._refresh_stats()
+
+    def _toggle_leaderboard(self) -> None:
+        self._show_plays_pane("log" if self._lb_showing else "leaderboard")
+
+    def _toggle_stats(self) -> None:
+        self._show_plays_pane("log" if self._stats_showing else "stats")
+
+    def _stats_row(self, parent, i: int, name: str, right: str, frac: float,
+                   sub: str = "", on_click=None) -> None:
+        """One ranked row of the Stats pane: medal (top 3) or number, name, count text, bar."""
+        ROW_COLORS = {0: "#fff8d6", 1: "#f2f2f2", 2: "#fdf0e6"}
+        BAR_COLORS = {0: "#d4a017", 1: "#8a9ba8", 2: "#a0522d"}
+        bg = ROW_COLORS.get(i, C_BG)
+        row = tk.Frame(parent, bg=bg, padx=8, pady=4)
+        row.pack(fill="x", padx=6, pady=2)
+        if i < 3:
+            key = (i, 44)
+            if key not in self._ribbon_photos:
+                self._ribbon_photos[key] = self._make_ribbon_photo(i, 44)
+            tk.Label(row, image=self._ribbon_photos[key], bg=bg).pack(side="left", padx=(0, 8))
         else:
-            self._lb_pane.pack_forget()
-            self._plays_pane.pack(fill="both", expand=True)
-            self._lb_btn.configure(text="🏆 Leaderboard")
+            tk.Label(row, text=str(i + 1), bg=bg, font=("Segoe UI", 11, "bold"),
+                     foreground=C_INK_500, width=4, anchor="center").pack(side="left", padx=(0, 8))
+        text = tk.Frame(row, bg=bg)
+        text.pack(side="left", expand=True, fill="x")
+        tk.Label(text, text=name, bg=bg, font=("Segoe UI", 11, "bold" if i < 3 else "normal"),
+                 anchor="w").pack(fill="x")
+        if sub:
+            tk.Label(text, text=sub, bg=bg, font=("Segoe UI", 9), foreground=C_INK_500,
+                     anchor="w").pack(fill="x")
+        info = tk.Frame(row, bg=bg)
+        info.pack(side="right", padx=(8, 0))
+        tk.Label(info, text=right, bg=bg, font=("Segoe UI", 9), foreground=C_INK_600).pack(anchor="e")
+        bar_bg = tk.Frame(info, bg=C_LINE_200, height=5, width=120)
+        bar_bg.pack(anchor="e")
+        bar_bg.pack_propagate(False)
+        tk.Frame(bar_bg, bg=BAR_COLORS.get(i, C_NAVY_900), width=int(max(0.0, min(1.0, frac)) * 120),
+                 height=5).place(x=0, y=0)
+        if on_click:
+            def _bind(w):
+                w.bind("<Button-1>", lambda _e: on_click())
+                w.configure(cursor="hand2")
+                for child in w.winfo_children():
+                    _bind(child)
+            _bind(row)
+
+    def _stats_show_game(self, name: str) -> None:
+        """Jump from the Stats pane to the play log filtered to one game."""
+        self._show_plays_pane("log")
+        self.plays_game_var.set(name)
+        self.refresh_plays()
+
+    def _refresh_stats(self) -> None:
+        scroll = self._stats_canvas.yview()[0]
+        for w in self._stats_inner.winfo_children():
+            w.destroy()
+        with db.connect() as c:
+            plays = db.list_plays(c)
+        inner = self._stats_inner
+        today_plays = play_stats.plays_this_year(plays)
+
+        def section(text: str) -> None:
+            ttk.Label(inner, text=text.upper(), style="Muted.TLabel",
+                      font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=10, pady=(14, 4))
+
+        ttk.Label(inner, style="Muted.TLabel",
+                  text=f"{today_plays} play{'s' if today_plays != 1 else ''} this year  ·  "
+                       f"{len(plays)} total").pack(anchor="w", padx=10, pady=(8, 0))
+
+        # ── Most played games ────────────────────────────────────────────
+        section("Most played games")
+        period_row = ttk.Frame(inner)
+        period_row.pack(anchor="w", padx=10, pady=(0, 6))
+        for key, label in (("all", "All time"), ("year", "This year"), ("30d", "Last 30 days")):
+            ttk.Radiobutton(period_row, text=label, value=key, variable=self._stats_period,
+                            style="Toolbutton", command=self._refresh_stats
+                            ).pack(side="left", padx=(0, 6))
+        top = play_stats.most_played_games(play_stats.plays_in_period(plays, self._stats_period.get()))
+        if not top:
+            ttk.Label(inner, text="No plays in this period.", style="Muted.TLabel"
+                      ).pack(anchor="w", padx=10, pady=4)
+        for i, g in enumerate(top):
+            self._stats_row(
+                inner, i, g["name"], f"{g['count']} play{'s' if g['count'] != 1 else ''}",
+                g["count"] / top[0]["count"], f"Last played {fmt_date(g['last_played'])}",
+                on_click=lambda n=g["name"]: self._stats_show_game(n))
+
+        # ── Win rate ─────────────────────────────────────────────────────
+        section("Win rate")
+        records = play_stats.player_records(plays)
+        ranked = [r for r in records if r["plays"] >= play_stats.MIN_RANKED_PLAYS]
+        if not ranked:
+            ttk.Label(inner, text="Log a few plays with players and a winner to see win rates.",
+                      style="Muted.TLabel").pack(anchor="w", padx=10, pady=4)
+        for i, r in enumerate(ranked):
+            self._stats_row(inner, i, r["name"],
+                            f"{round(r['rate'] * 100)}%  ·  {r['wins']} of {r['plays']}", r["rate"])
+        pending = len(records) - len(ranked)
+        ttk.Label(inner, style="Muted.TLabel", wraplength=560, justify="left",
+                  text=("Counts plays with a recorded winner; co-op “All” results are left out. "
+                        f"A player needs at least {play_stats.MIN_RANKED_PLAYS} such plays to be ranked"
+                        + (f" ({pending} not yet)." if pending else "."))
+                  ).pack(anchor="w", padx=10, pady=(2, 0))
+
+        # ── Plays by month ───────────────────────────────────────────────
+        section("Plays by month")
+        months = play_stats.plays_by_month(plays)
+        peak = max([m["count"] for m in months] + [1])
+        for m in months:
+            row = tk.Frame(inner, bg=C_BG)
+            row.pack(fill="x", padx=6, pady=1)
+            tk.Label(row, text=m["label"], bg=C_BG, width=10, anchor="w",
+                     font=("Segoe UI", 10), foreground=C_INK_600).pack(side="left", padx=(8, 8))
+            bar_bg = tk.Frame(row, bg=C_LINE_200, height=8, width=300)
+            bar_bg.pack(side="left")
+            bar_bg.pack_propagate(False)
+            tk.Frame(bar_bg, bg=C_BLUE_600, width=int(m["count"] / peak * 300), height=8).place(x=0, y=0)
+            tk.Label(row, text=str(m["count"]), bg=C_BG, width=4, anchor="e",
+                     font=("Segoe UI", 10, "bold")).pack(side="left", padx=(8, 0))
+
+        self.after_idle(lambda: self._stats_canvas.yview_moveto(scroll))
 
     def _make_ribbon_photo(self, rank: int, size: int = 56) -> ImageTk.PhotoImage:
-        """Render a circular rosette badge (no tails) for rank 0/1/2 using Pillow.
+        """Render a gold / silver / bronze medal on a blue ribbon for rank 0/1/2.
 
-        The badge is a square image of *size* × *size* pixels containing:
-          • Scalloped outer ring (alternating body/dark petals)
-          • Solid backing disc
-          • Gold ring border
-          • Dark centre circle
-          • Bold gold rank text
+        The image is a square of *size* x *size* pixels: two ribbon bands crossing into a V
+        across the top, and a round medal (rim, gradient face, thin inner ring) carrying
+        the place number. Drawn at 4x and scaled down for smooth edges.
         """
-        import math as _math
-        COLORS = {
-            0: ((26, 35, 126),  (13, 20, 87)),   # navy   1st
-            1: ((183, 28, 28),  (127, 0, 0)),     # red    2nd
-            2: ((27, 94, 32),   (0, 51, 0)),      # green  3rd
+        MEDALS = {
+            0: ((255, 233, 163), (227, 167, 0),   (176, 122, 0),  (92, 61, 0)),    # gold
+            1: ((247, 249, 251), (170, 181, 192), (107, 119, 133), (47, 58, 70)),   # silver
+            2: ((243, 185, 138), (184, 105, 43),  (122, 69, 25),  (74, 40, 8)),     # bronze
         }
-        LABELS = {0: "1st", 1: "2nd", 2: "3rd"}
-        GOLD = (240, 192, 80)
-        body, dark = COLORS[rank]
+        top, bottom, rim, ink = MEDALS[rank]
+        RIBBON_L, RIBBON_R = (19, 102, 201), (11, 63, 128)
 
-        S  = 4            # oversample factor for AA
-        W  = size
-        w  = W * S
-        cx = cy = w // 2
-
-        PETALS    = 20
-        OUTER_R   = int(w * 0.46)
-        SCALLOP_R = int(w * 0.10)
-        RING_R    = int(w * 0.36)
-        INNER_R   = int(w * 0.29)
-
-        img  = Image.new("RGBA", (w, w), (0, 0, 0, 0))
+        S = 4
+        w = size * S
+        img = Image.new("RGBA", (w, w), (0, 0, 0, 0))
         draw = ImageDraw.Draw(img)
 
-        # Scalloped petals
-        for i in range(PETALS):
-            a  = (i / PETALS) * 2 * _math.pi - _math.pi / 2
-            sx = cx + OUTER_R * _math.cos(a)
-            sy = cy + OUTER_R * _math.sin(a)
-            c  = body if i % 2 == 0 else dark
-            draw.ellipse([(sx - SCALLOP_R, sy - SCALLOP_R),
-                          (sx + SCALLOP_R, sy + SCALLOP_R)], fill=c)
+        # Ribbon: two bands crossing into a V above the medal
+        draw.polygon([(0.15 * w, 0), (0.40 * w, 0), (0.64 * w, 0.58 * w), (0.39 * w, 0.58 * w)], fill=RIBBON_L)
+        draw.polygon([(0.60 * w, 0), (0.85 * w, 0), (0.61 * w, 0.58 * w), (0.36 * w, 0.58 * w)], fill=RIBBON_R)
 
-        # Solid backing disc (covers petal centres)
-        draw.ellipse([(cx - RING_R - 2*S, cy - RING_R - 2*S),
-                      (cx + RING_R + 2*S, cy + RING_R + 2*S)], fill=body)
+        cx, cy = w * 0.5, w * 0.67
+        r_out, r_face = w * 0.31, w * 0.275
+        draw.ellipse([(cx - r_out, cy - r_out), (cx + r_out, cy + r_out)], fill=rim)
 
-        # Gold ring
-        draw.ellipse([(cx - RING_R, cy - RING_R),
-                      (cx + RING_R, cy + RING_R)],
-                     outline=GOLD, width=max(3, S // 1))
+        # Face: vertical gradient clipped to a circle
+        face = Image.new("RGBA", (w, w), (0, 0, 0, 0))
+        fdraw = ImageDraw.Draw(face)
+        y0, y1 = int(cy - r_face), int(cy + r_face)
+        for y in range(y0, y1 + 1):
+            t = (y - y0) / max(1, y1 - y0)
+            col = tuple(int(top[i] + (bottom[i] - top[i]) * t) for i in range(3))
+            fdraw.line([(0, y), (w, y)], fill=col + (255,))
+        mask = Image.new("L", (w, w), 0)
+        ImageDraw.Draw(mask).ellipse([(cx - r_face, cy - r_face), (cx + r_face, cy + r_face)], fill=255)
+        img.paste(face, (0, 0), mask)
 
-        # Dark centre
-        draw.ellipse([(cx - INNER_R, cy - INNER_R),
-                      (cx + INNER_R, cy + INNER_R)], fill=dark)
+        r_ring = w * 0.235
+        draw.ellipse([(cx - r_ring, cy - r_ring), (cx + r_ring, cy + r_ring)], outline=rim + (140,), width=max(1, S // 2))
 
-        # Rank text
-        label    = LABELS[rank]
-        font_sz  = max(8, int(w * 0.22))
-        font     = None
+        label = str(rank + 1)
+        font_sz = max(8, int(w * 0.36))
+        font = None
         for name in ("arialbd.ttf", "arial.ttf", "DejaVuSans-Bold.ttf"):
             try:
                 font = ImageFont.truetype(name, font_sz)
@@ -6420,14 +6554,10 @@ class App(tk.Tk):
                 pass
         if font is None:
             font = ImageFont.load_default()
-
-        # Account for font bearing so text is visually centred in the circle
         bbox = draw.textbbox((0, 0), label, font=font)
-        tx   = cx - (bbox[0] + bbox[2]) // 2
-        ty   = cy - (bbox[1] + bbox[3]) // 2
-        draw.text((tx, ty), label, fill=GOLD, font=font)
+        draw.text((cx - (bbox[0] + bbox[2]) / 2, cy - (bbox[1] + bbox[3]) / 2), label, fill=ink, font=font)
 
-        img = img.resize((W, W), Image.LANCZOS)
+        img = img.resize((size, size), Image.LANCZOS)
         return ImageTk.PhotoImage(img)
 
     def _refresh_leaderboard(self) -> None:
@@ -6539,6 +6669,8 @@ class App(tk.Tk):
         # Keep leaderboard in sync if it's currently visible
         if getattr(self, "_lb_showing", False):
             self._refresh_leaderboard()
+        if getattr(self, "_stats_showing", False):
+            self._refresh_stats()
 
     def on_log_play(self, game, *, play=None) -> None:
         """Open the Log Play dialog.

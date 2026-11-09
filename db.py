@@ -390,7 +390,8 @@ def get_or_create_collection(
     """
     if bgg_username:
         row = c.execute(
-            "SELECT id FROM collections WHERE bgg_username = ?", (bgg_username,)
+            "SELECT id FROM collections WHERE bgg_username = ? COLLATE NOCASE ORDER BY id LIMIT 1",
+            (bgg_username,),
         ).fetchone()
         if row:
             if name:
@@ -408,7 +409,8 @@ def collection_id_for_username(c: sqlite3.Connection, bgg_username: str) -> Opti
     if not bgg_username:
         return None
     row = c.execute(
-        "SELECT id FROM collections WHERE bgg_username = ?", (bgg_username,)).fetchone()
+        "SELECT id FROM collections WHERE bgg_username = ? COLLATE NOCASE ORDER BY id LIMIT 1",
+        (bgg_username,)).fetchone()
     return row["id"] if row else None
 
 
@@ -482,7 +484,8 @@ def game_in_username_collection(c: sqlite3.Connection, bgg_username: str,
     is nothing to restrict against, so it returns True — same as mobile.
     """
     row = c.execute(
-        "SELECT id FROM collections WHERE bgg_username = ?", (bgg_username,)
+        "SELECT id FROM collections WHERE bgg_username = ? COLLATE NOCASE ORDER BY id LIMIT 1",
+        (bgg_username,),
     ).fetchone()
     if row is None:
         return True
@@ -522,7 +525,7 @@ def reset_claim_if_cleared(settings: dict, cleared_usernames) -> bool:
     """Drop ``claimed_bgg_username`` if its collection was just cleared, so a
     new collection can be claimed. Returns True when *settings* changed."""
     claimed = settings.get("claimed_bgg_username")
-    if claimed and claimed in set(cleared_usernames or []):
+    if claimed and claimed.lower() in {u.lower() for u in (cleared_usernames or []) if u}:
         settings.pop("claimed_bgg_username", None)
         return True
     return False
@@ -1161,8 +1164,9 @@ def restore_backup_tables(c: sqlite3.Connection, data: dict,
     coll_id_map: dict = {}
     for col in data.get("collections") or []:
         if col.get("bgg_username"):
-            existing = c.execute("SELECT id FROM collections WHERE bgg_username = ?",
-                                 (col["bgg_username"],)).fetchone()
+            existing = c.execute(
+                "SELECT id FROM collections WHERE bgg_username = ? COLLATE NOCASE ORDER BY id LIMIT 1",
+                (col["bgg_username"],)).fetchone()
         else:
             existing = c.execute(
                 "SELECT id FROM collections WHERE name = ? AND bgg_username IS NULL",
