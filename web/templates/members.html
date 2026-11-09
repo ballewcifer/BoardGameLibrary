@@ -28,12 +28,18 @@
     <div class="member-info">
       <div class="member-name">{{ u.first_name }} {{ u.last_name }}</div>
       <div class="muted" style="font-size:.8rem">Friend since {{ u.created_at|usdate }}</div>
+      {% if u.bgg_username %}
+        <div class="muted" style="font-size:.8rem">BGG: {{ u.bgg_username }}</div>
+      {% endif %}
       {% set games_out = open_map.get(u.id, []) %}
       {% if games_out %}
         <div class="muted" style="font-size:.8rem">Has out: {{ games_out|join(', ') }}</div>
       {% endif %}
     </div>
     <div class="member-actions">
+      <button type="button" class="btn btn-secondary btn-sm js-edit-member"
+              data-id="{{ u.id }}" data-first="{{ u.first_name }}"
+              data-last="{{ u.last_name }}" data-bgg="{{ u.bgg_username or '' }}">Edit</button>
       <a href="/history?user_id={{ u.id }}" class="btn btn-secondary btn-sm">History</a>
       <form method="post" action="/members/{{ u.id }}/delete"
             onsubmit="return confirm('Remove {{ u.first_name }} {{ u.last_name }}?')">
@@ -56,10 +62,13 @@
     </div>
     <form method="post" action="/members/add">
       <div class="modal-body">
+        <p class="muted" style="font-size:.8rem;margin-top:0">Adding friends lets you track plays and loan out games to them.</p>
         <label class="form-label" for="m-first">First Name</label>
         <input type="text" id="m-first" name="first_name" class="form-control" required autofocus>
         <label class="form-label mt-sm" for="m-last">Last Name</label>
         <input type="text" id="m-last" name="last_name" class="form-control" required>
+        <label class="form-label mt-sm" for="m-bgg">BGG Username (optional)</label>
+        <input type="text" id="m-bgg" name="bgg_username" class="form-control" placeholder="e.g. janesmith" autocomplete="off" autocapitalize="none">
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" onclick="closeModal('modal-add-member')">Cancel</button>
@@ -68,5 +77,42 @@
     </form>
   </div>
 </div>
+
+<!-- ── Edit Member modal ─────────────────────────────────────────────────── -->
+<div id="modal-edit-member" class="modal-backdrop" hidden>
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Edit Friend</h3>
+      <button class="modal-close" onclick="closeModal('modal-edit-member')">✕</button>
+    </div>
+    <form method="post" action="/members/0/edit" id="edit-member-form">
+      <div class="modal-body">
+        <p class="muted" style="font-size:.8rem;margin-top:0">Update this friend's details.</p>
+        <label class="form-label" for="em-first">First Name</label>
+        <input type="text" id="em-first" name="first_name" class="form-control" required>
+        <label class="form-label mt-sm" for="em-last">Last Name</label>
+        <input type="text" id="em-last" name="last_name" class="form-control" required>
+        <label class="form-label mt-sm" for="em-bgg">BGG Username (optional)</label>
+        <input type="text" id="em-bgg" name="bgg_username" class="form-control" placeholder="e.g. janesmith" autocomplete="off" autocapitalize="none">
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-edit-member')">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+// Edit buttons fill the shared Edit Friend modal from their data-* attributes
+// and point its form at /members/<id>/edit.
+document.querySelectorAll('.js-edit-member').forEach(btn => btn.addEventListener('click', () => {
+  document.getElementById('edit-member-form').action = '/members/' + btn.dataset.id + '/edit';
+  document.getElementById('em-first').value = btn.dataset.first;
+  document.getElementById('em-last').value  = btn.dataset.last;
+  document.getElementById('em-bgg').value   = btn.dataset.bgg;
+  openModal('modal-edit-member');
+}));
+</script>
 
 {% endblock %}

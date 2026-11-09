@@ -6,19 +6,19 @@
 
 <!-- Stat cards -->
 <div class="stat-grid">
-  <a href="/games" class="stat-card" style="--c:#1a237e">
+  <a href="/games" class="stat-card" style="--c:var(--c1)">
     <div class="stat-value">{{ summary.total_games }}</div>
     <div class="stat-label">Games</div>
   </a>
-  <a href="/plays" class="stat-card" style="--c:#1b5e20">
+  <a href="/plays" class="stat-card" style="--c:var(--c2)">
     <div class="stat-value">{{ summary.total_plays }}</div>
     <div class="stat-label">Total Plays</div>
   </a>
-  <a href="/members" class="stat-card" style="--c:#4a148c">
+  <a href="/members" class="stat-card" style="--c:var(--c3)">
     <div class="stat-value">{{ summary.total_members }}</div>
     <div class="stat-label">Friends</div>
   </a>
-  <a href="/history?status=active" class="stat-card" style="--c:{% if summary.checked_out %}#b71c1c{% else %}#37474f{% endif %}">
+  <a href="/history?status=active" class="stat-card" style="--c:var(--c4)">
     <div class="stat-value">{{ summary.checked_out }}</div>
     <div class="stat-label">Checked Out</div>
   </a>
@@ -36,7 +36,7 @@
         <td>{{ loan.game_name }}</td>
         <td>{{ loan.first_name }} {{ loan.last_name }}</td>
         <td class="center">{{ loan.checked_out_at|usdate }}</td>
-        <td class="center">{{ loan.due_date|usdate or '—' }}</td>
+        <td class="center">{{ loan.due_date|usdate or '—' }}{% if loan.overdue %} <span class="overdue-tag">⚠ Overdue</span>{% endif %}</td>
         <td>
           <form method="post" action="/history/{{ loan.id }}/return_now" style="display:inline">
             <button class="btn btn-sm btn-outline">Return</button>

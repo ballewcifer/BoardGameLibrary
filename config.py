@@ -8,7 +8,6 @@ from paths import CONFIG_PATH
 
 DEFAULTS: dict = {
     "bgg_username": "Ballewcifer",
-    "bgg_token": "",
 }
 
 

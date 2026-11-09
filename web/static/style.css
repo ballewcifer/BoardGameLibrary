@@ -3,14 +3,16 @@
 [hidden] { display: none !important; }
 
 :root {
-  --navy:   #1a237e;
-  --navy-d: #0d1457;
+  --navy:   #1B4B79;
+  --navy-d: #13395F;
+  --stripe: #6C5AE2;
+  --c1: #1B4B79; --c2: #5B55CD; --c3: #226F72; --c4: #8D3EC6;
   --white:  #ffffff;
-  --bg:     #f4f6fa;
+  --bg:     #F3F6F9;
   --card:   #ffffff;
   --text:   #1a1a2e;
   --muted:  #6b7280;
-  --border: #e5e7eb;
+  --border: #EAEDF0;
   --red:    #b71c1c;
   --green:  #1b5e20;
   --gold:   #f0c674;
@@ -46,6 +48,7 @@ img { max-width: 100%; display: block; }
   position: fixed; top: 0; left: 0; right: 0; z-index: 100;
   height: var(--top-h);
   background: var(--navy);
+  border-bottom: 4px solid var(--stripe);
   color: var(--white);
   display: flex; align-items: center; justify-content: space-between;
   padding: 0 16px;
@@ -69,8 +72,8 @@ img { max-width: 100%; display: block; }
 .bottom-nav {
   position: fixed; bottom: 0; left: 0; right: 0; z-index: 100;
   height: var(--nav-h);
-  background: var(--white);
-  border-top: 1px solid var(--border);
+  background: var(--navy);
+  border-top: 1px solid rgba(255,255,255,.14);
   display: flex;
   padding-bottom: env(safe-area-inset-bottom);
   box-shadow: 0 -1px 8px rgba(0,0,0,.08);
@@ -79,20 +82,21 @@ img { max-width: 100%; display: block; }
   flex: 1; display: flex; flex-direction: column;
   align-items: center; justify-content: center;
   position: relative;
-  color: var(--muted); font-size: .7rem; gap: 3px;
+  color: rgba(255,255,255,.62); font-size: .7rem; gap: 3px;
   transition: color .15s;
   text-decoration: none;
 }
-.nav-item.active { color: var(--navy); }
+.nav-item.active { color: var(--white); }
 .nav-item.active::before {
   content: '';
   position: absolute;
   top: 0; left: 20%; right: 20%;
   height: 3px;
-  background: var(--navy);
+  background: var(--stripe);
   border-radius: 0 0 3px 3px;
 }
 .nav-icon { font-size: 1.25rem; line-height: 1; }
+.nav-item:not(.active) .nav-icon { filter: grayscale(1) brightness(1.7); opacity: .75; }
 .nav-label { font-size: .7rem; }
 .nav-item.active .nav-label { font-weight: 600; }
 
@@ -144,6 +148,9 @@ img { max-width: 100%; display: block; }
 /* ── Section title ────────────────────────────────────────────────────────── */
 .section-title { font-size: .95rem; font-weight: 700; margin-bottom: 8px; color: var(--navy); }
 
+/* ── Plain list (e.g. expansions-you-own links) ──────────────────────────── */
+.plain-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+
 /* ── Two-column layout ────────────────────────────────────────────────────── */
 .two-col { display: grid; gap: 14px; }
 @media (min-width: 640px) { .two-col { grid-template-columns: 1fr 1fr; } }
@@ -175,6 +182,7 @@ img { max-width: 100%; display: block; }
 .data-table td { padding: 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
 .data-table tr:last-child td { border-bottom: none; }
 .data-table tr.overdue td { color: var(--red); }
+.overdue-tag { font-size: .72rem; font-weight: 700; color: var(--red); white-space: nowrap; }
 .data-table tr.history-row { cursor: pointer; }
 .data-table tr.history-row:hover td { background: var(--card); }
 .data-table th.sortable-col { cursor: pointer; user-select: none; }
@@ -215,6 +223,28 @@ img { max-width: 100%; display: block; }
 .filter-check { font-size: .85rem; display: flex; align-items: center; gap: 4px; }
 .result-count { margin-bottom: 6px; }
 
+/* Collection-status multi-select checklist (native <details>, no JS needed
+   for the core submission — plain checkboxes sharing one name). */
+.bstatus-details { position: relative; }
+.bstatus-summary {
+  cursor: pointer; list-style: none; display: inline-block; user-select: none;
+}
+.bstatus-summary::-webkit-details-marker { display: none; }
+.bstatus-summary::after { content: ' \25BE'; }
+.bstatus-menu {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 20;
+  background: var(--white); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 6px; min-width: 170px; max-height: 260px; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.bstatus-option {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 8px; border-radius: 6px; font-size: .85rem;
+  cursor: pointer; white-space: nowrap;
+}
+.bstatus-option:hover { filter: brightness(0.96); }
+
 /* ── Page header ──────────────────────────────────────────────────────────── */
 .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .page-title  { font-size: 1.2rem; font-weight: 700; }
@@ -250,13 +280,19 @@ img { max-width: 100%; display: block; }
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: 12px;
 }
-.game-card {
+/* .game-card-wrap is the actual grid cell / visual card box; .game-card (an
+   <a>) is the clickable content inside it. Split this way so the multi-select
+   checkbox can be a sibling of the link instead of nested inside it (an
+   interactive control inside an <a> is invalid HTML and confuses keyboard/
+   screen-reader focus order). */
+.game-card-wrap {
   background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow);
   overflow: hidden; display: flex; flex-direction: column; position: relative;
   transition: transform .15s, box-shadow .15s;
 }
-.game-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,.15); }
-.game-card--out  { outline: 2px solid var(--gold); }
+.game-card-wrap:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,.15); }
+.game-card-wrap.game-card--out { outline: 2px solid var(--gold); }
+.game-card { display: flex; flex-direction: column; flex: 1; min-height: 0; color: inherit; text-decoration: none; }
 
 .game-card-img  { height: 120px; background: #e8eaf6; overflow: hidden; flex-shrink: 0; }
 .game-card-img img { width: 100%; height: 100%; object-fit: cover; }
@@ -268,6 +304,25 @@ img { max-width: 100%; display: block; }
 
 .fav-badge { position: absolute; top: 4px; right: 4px; background: var(--gold); color: #5d4037; border-radius: 4px; padding: 1px 5px; font-size: .72rem; font-weight: 700; }
 .exp-badge { position: absolute; top: 4px; left: 4px; background: #7b1fa2; color: white; border-radius: 4px; padding: 1px 5px; font-size: .68rem; }
+
+/* "Not played yet" corner ribbon (bottom-left of the cover) and detail banner.
+   Fill is the active theme's --c2 (the theme's second card colour) with white
+   text; base.html swaps --c2 per theme. White on --c2 is >= 4.68:1 in every
+   theme. The ribbon is decorative (aria-hidden) - the card's accessible name
+   carries ", not played yet" instead. */
+.game-card-img { position: relative; }
+.unplayed-ribbon {
+  position: absolute; left: -34px; bottom: 12px; width: 110px;
+  transform: rotate(45deg); transform-origin: center;
+  background: var(--c2); color: #fff; text-align: center;
+  font-size: .62rem; font-weight: 700; letter-spacing: .04em; line-height: 1;
+  padding: 3px 0; pointer-events: none;
+  box-shadow: 0 1px 2px rgba(0,0,0,.35);
+}
+.unplayed-banner {
+  background: var(--c2); color: #fff; font-weight: 600;
+  padding: 10px 14px; border-radius: var(--radius); margin-bottom: 10px;
+}
 
 .badge { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: .72rem; font-weight: 600; }
 .badge-in  { background: #e8f5e9; color: var(--green); }
@@ -303,6 +358,10 @@ img { max-width: 100%; display: block; }
 .stat-row div { text-align: center; }
 .stat-row strong { font-size: 1.1rem; }
 
+.play-summary .ps-main { font-weight: 700; font-size: 1.05rem; color: var(--text); }
+.play-summary .ps-sub { color: var(--muted); font-size: .9rem; margin-top: 2px; }
+.play-list { list-style: none; margin: 8px 0 0; padding: 0; }
+.play-list li { padding: 4px 0; border-top: 1px solid var(--border); font-size: .92rem; }
 .winner-chip { display: inline-block; background: #fff8e1; border-radius: 20px; padding: 3px 10px; font-size: .8rem; margin: 2px; }
 .tags { display: flex; flex-wrap: wrap; gap: 6px; }
 .tag { background: #e3f2fd; color: #0d47a1; border-radius: 20px; padding: 3px 10px; font-size: .78rem; }

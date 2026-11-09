@@ -7,7 +7,6 @@ Then open  http://localhost:5000  on any device on the same Wi-Fi.
 from __future__ import annotations
 
 import json
-import os
 import random
 import sys
 import threading
@@ -36,6 +35,10 @@ db.init_db()
 with db.connect() as _c:
     _u = _config.load().get("bgg_username", "")
     db.ensure_collection_migration(_c, default_username=_u, default_name=_u or "My Collection")
+    # One-time: the old claimed_member_id (a Friend) becomes claimed_bgg_username.
+    _s = _config.load()
+    if db.migrate_claimed_member(_c, _s):
+        _config.save(_s)
 
 # ── Background sync state ─────────────────────────────────────────────────────
 _sync_lock   = threading.Lock()
@@ -118,13 +121,21 @@ def games():
     tag_filter = request.args.get("tag", "")
     status     = request.args.get("status", "all")   # all | available | out | favs
     coop       = request.args.get("coop", "any")     # any | coop | competitive
+    # Multi-select: any combination of "owned" + a bgg.STATUS_FLAGS value, or
+    # just ["all"] (the default, so newly synced wishlist / for-trade items
+    # aren't hidden). Repeated query params (?bstatus=wishlist&bstatus=fortrade)
+    # carry the selection; db.list_games()/count_games() combine them (see
+    # db._status_where()).
+    bstatuses  = request.args.getlist("bstatus") or ["all"]
     show_exp   = request.args.get("exp", "") == "1"
+    unplayed   = request.args.get("unplayed", "") == "1"   # owned + marked "not played yet"
     collection = request.args.get("collection", "all")
     compare    = request.args.get("compare", "off")          # off | shared | only | diff
     compare_other_raw = request.args.get("compare_other", "")
 
     with db.connect() as c:
-        rows      = db.list_games(c, search=q)
+        rows      = db.list_games(c, search=q, status=bstatuses)
+        total_games_unfiltered = db.count_games(c, status="all")
         open_loans = {r["game_id"]: _row_to_dict(r)
                       for r in db.currently_checked_out(c)}
         play_cts   = db.play_counts(c)
@@ -166,7 +177,8 @@ def games():
             tags = [t.strip() for t in (g["tags"] or "").split(",") if t.strip()]
             if tag_filter not in tags:
                 continue
-        if status == "available" and g["bgg_id"] in open_loans:
+        # Only owned games are ever loanable, so only they can be "Available".
+        if status == "available" and (g["own"] != 1 or g["bgg_id"] in open_loans):
             continue
         if status == "out" and g["bgg_id"] not in open_loans:
             continue
@@ -175,6 +187,8 @@ def games():
         if coop == "coop" and g["is_cooperative"] != 1:
             continue
         if coop == "competitive" and g["is_cooperative"] != 0:
+            continue
+        if unplayed and not (g["own"] == 1 and g["is_unplayed"]):
             continue
 
         # collection tab / comparison filter
@@ -201,14 +215,20 @@ def games():
                            tag_filter=tag_filter,
                            status=status,
                            coop=coop,
+                           bstatuses=bstatuses,
+                           bgg_status_labels=_bgg.STATUS_LABELS,
+                           bgg_status_flags=_bgg.STATUS_FLAGS,
+                           bgg_status_colors=_bgg.STATUS_COLORS,
                            show_exp=show_exp,
+                           unplayed=unplayed,
                            all_tags=all_tags,
                            collections=collections,
                            members=members,
                            multi=multi,
                            active_collection=active_cid,
                            compare=compare,
-                           compare_other=other_cid)
+                           compare_other=other_cid,
+                           total_games_unfiltered=total_games_unfiltered)
 
 
 @app.route("/collections/claim", methods=["POST"])
@@ -233,6 +253,7 @@ def api_random_game():
     complexity = request.args.get("complexity", "Any")   # light|medium|heavy|Any
     coop       = request.args.get("coop", "Any")         # coop|competitive|Any
     available  = request.args.get("available", "1") == "1"
+    unplayed_only = request.args.get("unplayed", "0") == "1"   # only "not played yet" games
     collection = request.args.get("collection", "all")
 
     with db.connect() as c:
@@ -252,6 +273,8 @@ def api_random_game():
 
     def matches(g) -> bool:
         if available and g["bgg_id"] in open_loans:
+            return False
+        if unplayed_only and not (g["own"] == 1 and g["is_unplayed"]):
             return False
         if multi and active_cid is not None \
                 and active_cid not in gc_map.get(g["bgg_id"], set()):
@@ -314,11 +337,9 @@ def clear_collections():
         deleted = db.clear_collections(c, ids)
         s = _config.load()
         changed = False
-        # If the device owner's collection was just cleared, drop the claim so a
-        # new collection can be claimed.
-        mid = s.get("claimed_member_id")
-        if mid and not db.owned_collection_ids(c, mid):
-            s.pop("claimed_member_id", None)
+        # If the device's claimed collection was just cleared, drop the claim
+        # so a new collection can be claimed.
+        if db.reset_claim_if_cleared(s, cleared_usernames):
             changed = True
         username = s.get("bgg_username")
         if username and username in cleared_usernames:
@@ -346,14 +367,22 @@ def game_detail(bgg_id):
         loan      = _row_to_dict(db.open_loan_for_game(c, bgg_id))
         plays     = [_row_to_dict(r) for r in db.list_plays(c, game_id=bgg_id)]
         stats     = db.game_play_stats(c, bgg_id)
+        ps_n, ps_first, ps_last = db.play_summary(c, bgg_id)
+        play_summary = {
+            "count": ps_n, "first": ps_first, "last": ps_last,
+            "recent": plays[:10],           # list_plays is newest first
+            "earlier": max(0, len(plays) - 10),
+        }
         # Only members allowed to borrow this game (owners of a claimed
         # collection that contains it, plus members who claimed nothing).
         allowed   = db.members_allowed_to_checkout(c, bgg_id)
         users     = [_row_to_dict(r) for r in db.list_users(c) if r["id"] in allowed]
-        # If this device's owner has claimed a collection, only their own games
-        # may be checked out here.
-        my_id = _config.load().get("claimed_member_id")
-        can_checkout_here = (not my_id) or db.user_can_checkout(c, my_id, bgg_id)
+        # If this device has claimed its synced collection as its own, only
+        # games in that collection may be checked out here.
+        claimed = _config.load().get("claimed_bgg_username")
+        can_checkout_here = (not claimed) or db.game_in_username_collection(c, claimed, bgg_id)
+        base_game = _row_to_dict(db.get_game(c, game["base_game_id"])) if game.get("base_game_id") else None
+        owned_expansions = [_row_to_dict(r) for r in db.list_expansions_of(c, bgg_id)]
 
     today = datetime.now().date().isoformat()
     if loan:
@@ -364,9 +393,15 @@ def game_detail(bgg_id):
                            loan=loan,
                            plays=plays,
                            stats=stats,
+                           play_summary=play_summary,
                            users=users,
                            can_checkout_here=can_checkout_here,
-                           today=today)
+                           today=today,
+                           base_game=base_game,
+                           owned_expansions=owned_expansions,
+                           bgg_status_labels=_bgg.STATUS_LABELS,
+                           bgg_status_flags=_bgg.STATUS_FLAGS,
+                           bgg_status_colors=_bgg.STATUS_COLORS)
 
 
 # ── Checkout ──────────────────────────────────────────────────────────────────
@@ -381,6 +416,15 @@ def checkout(bgg_id):
         return redirect(url_for("game_detail", bgg_id=bgg_id))
     try:
         with db.connect() as c:
+            game = db.get_game(c, bgg_id)
+            if not game or game["own"] != 1:
+                flash("Only games you own can be checked out.", "error")
+                return redirect(url_for("game_detail", bgg_id=bgg_id))
+            claimed = _config.load().get("claimed_bgg_username")
+            if claimed and not db.game_in_username_collection(c, claimed, bgg_id):
+                flash("This game isn't in your claimed collection, so it can't be "
+                      "checked out here.", "error")
+                return redirect(url_for("game_detail", bgg_id=bgg_id))
             # New name, not a current friend — auto-create them, same as
             # logging a play with a new player name does.
             db.ensure_players_as_members(c, name)
@@ -434,13 +478,23 @@ def update_game(bgg_id):
     tags       = request.form.get("tags", "").strip()
     my_comment = request.form.get("my_comment", "").strip() or None
     coop       = {"coop": 1, "competitive": 0}.get(request.form.get("is_cooperative", ""))
+    status     = request.form.get("bgg_status", "own")
+    if status not in _bgg.STATUS_FLAGS:
+        status = "own"
+    own = 1 if status == "own" else 0
     with db.connect() as c:
         c.execute(
-            "UPDATE games SET best_players=?, my_rating=?, my_comment=?, is_cooperative=? WHERE bgg_id=?",
-            (best_players, my_rating, my_comment, coop, bgg_id),
+            "UPDATE games SET best_players=?, my_rating=?, my_comment=?, is_cooperative=?, "
+            "bgg_status=?, own=? WHERE bgg_id=?",
+            (best_players, my_rating, my_comment, coop, status, own, bgg_id),
         )
         db.set_tags(c, bgg_id, tags)
         db.set_insert(c, bgg_id, bool(has_insert))
+        # The checkbox is only rendered for an owned game with no plays; the
+        # hidden marker tells us it was on the form (an unchecked box sends
+        # nothing). db.set_unplayed enforces the same rule server-side.
+        if request.form.get("unplayed_present"):
+            db.set_unplayed(c, [bgg_id], bool(request.form.get("is_unplayed")))
     flash("Game updated.", "success")
     return redirect(url_for("game_detail", bgg_id=bgg_id))
 
@@ -448,6 +502,24 @@ def update_game(bgg_id):
 @app.route("/games/bulk_update", methods=["POST"])
 def bulk_update_games():
     bgg_ids = request.form.getlist("bgg_ids", type=int)
+    if request.form.get("unplayed") in ("1", "0"):
+        # Mark / clear "not played yet" on the selection. Marking skips games
+        # that aren't owned or already have a logged play.
+        value = request.form.get("unplayed") == "1"
+        if bgg_ids:
+            with db.connect() as c:
+                changed, skipped = db.set_unplayed(c, bgg_ids, value)
+            if not value:
+                flash(f"Cleared the mark on {changed} game{'s' if changed != 1 else ''}.", "success")
+            elif changed == 0:
+                flash(db.UNPLAYED_NONE_ELIGIBLE, "error")
+            else:
+                msg = f"Marked {changed} game{'s' if changed != 1 else ''} as not played yet."
+                if skipped:
+                    msg += (f" Skipped {skipped} (games with a logged play, and games "
+                            f"you don't own, can't be marked).")
+                flash(msg, "success")
+        return redirect(request.referrer or url_for("games"))
     has_insert = request.form.get("has_insert") == "1"
     if bgg_ids:
         with db.connect() as c:
@@ -478,12 +550,32 @@ def members():
 def add_member():
     first = request.form.get("first_name", "").strip()
     last  = request.form.get("last_name",  "").strip()
-    if not first or not last:
-        flash("First and last name are required.", "error")
-        return redirect(url_for("members"))
+    bgg   = request.form.get("bgg_username", "").strip()
     with db.connect() as c:
-        db.add_user(c, first, last)
+        error = db.validate_friend(c, first, last)
+        if error:
+            flash(error, "error")
+            return redirect(url_for("members"))
+        db.add_user(c, first, last, bgg)
     flash(f"Added {first} {last}.", "success")
+    return redirect(url_for("members"))
+
+
+@app.route("/members/<int:user_id>/edit", methods=["POST"])
+def edit_member(user_id):
+    first = request.form.get("first_name", "").strip()
+    last  = request.form.get("last_name",  "").strip()
+    bgg   = request.form.get("bgg_username", "").strip()
+    with db.connect() as c:
+        if c.execute("SELECT 1 FROM users WHERE id = ?", (user_id,)).fetchone() is None:
+            flash("That friend no longer exists.", "error")
+            return redirect(url_for("members"))
+        error = db.validate_friend(c, first, last, exclude_id=user_id)
+        if error:
+            flash(error, "error")
+            return redirect(url_for("members"))
+        db.update_user(c, user_id, first, last, bgg)
+    flash(f"Updated {first} {last}.", "success")
     return redirect(url_for("members"))
 
 
@@ -569,10 +661,19 @@ def plays():
     with db.connect() as c:
         rows  = [_row_to_dict(r) for r in db.list_plays(c, game_id=game_id)]
         games = [_row_to_dict(r) for r in db.list_games(c, owned_only=False)]
+        summary = None
+        filter_name = None
+        if game_id is not None:
+            filter_name = next((g["name"] for g in games if g["bgg_id"] == game_id), None)
+            if filter_name is not None:
+                n, first, last = db.play_summary(c, game_id)
+                summary = {"count": n, "first": first, "last": last}
     return render_template("plays.html",
                            rows=rows,
                            games=games,
-                           filter_game=game_id)
+                           filter_game=game_id,
+                           filter_name=filter_name,
+                           play_summary=summary)
 
 
 @app.route("/plays/add", methods=["POST"])
@@ -649,8 +750,10 @@ def api_search():
     if not q:
         return jsonify([])
     try:
-        tok     = _config.load().get("bgg_token", "")
-        results = _bgg.search_games(q, token=tok or None)
+        # BGG requires a Bearer token on all endpoints. The token is embedded
+        # at build time and always used — never a per-user setting (parity with
+        # the desktop and mobile apps).
+        results = _bgg.search_games(q, token=_bgg.BGG_APP_TOKEN or None)
         return jsonify([
             {"id": bgg_id, "name": name, "year": year}
             for bgg_id, name, year in results[:30]
@@ -662,9 +765,9 @@ def api_search():
 @app.route("/api/game/<int:bgg_id>")
 def api_game_details(bgg_id):
     """Fetch full game details from BGG (used by Add Game confirm step)."""
-    settings = _settings()
     try:
-        details = _bgg.fetch_game_details(bgg_id, token=settings.get("bgg_token", ""))
+        _things = _bgg.fetch_things([bgg_id], token=_bgg.BGG_APP_TOKEN or None)
+        details = _things[0] if _things else None
         if details is None:
             return jsonify({"error": "Not found"}), 404
         return jsonify({
@@ -692,9 +795,12 @@ def add_game():
     if not bgg_id:
         flash("No BGG ID provided.", "error")
         return redirect(url_for("games"))
-    settings = _settings()
+    status = request.form.get("status", "own")
+    if status not in _bgg.STATUS_FLAGS:
+        status = "own"
     try:
-        details = _bgg.fetch_game_details(bgg_id, token=settings.get("bgg_token", ""))
+        _things = _bgg.fetch_things([bgg_id], token=_bgg.BGG_APP_TOKEN or None)
+        details = _things[0] if _things else None
         if details is None:
             flash("Game not found on BGG.", "error")
             return redirect(url_for("games"))
@@ -721,10 +827,13 @@ def add_game():
             "publishers":    ", ".join(details.publishers) if details.publishers else None,
             "best_players":  details.best_players,
             "my_comment":    None,
-            "own":           1,
+            "own":           1 if status == "own" else 0,
+            "bgg_status":    status,
             "last_synced":   db.now_iso(),
             "is_expansion":  int(details.is_expansion),
             "is_cooperative": _bgg.derive_cooperative(details.mechanics),
+            "base_game_id":   details.base_game_id,
+            "base_game_name": details.base_game_name,
         }
         with db.connect() as c:
             db.upsert_game(c, row)
@@ -734,24 +843,99 @@ def add_game():
     return redirect(url_for("games"))
 
 
+@app.route("/games/add-manual", methods=["POST"])
+def add_game_manual():
+    """Save a game entered entirely by hand — no BGG lookup involved."""
+    name = request.form.get("name", "").strip()
+    if not name:
+        flash("Name is required.", "error")
+        return redirect(url_for("games"))
+    status = request.form.get("status", "own")
+    if status not in _bgg.STATUS_FLAGS:
+        status = "own"
+
+    def _i(field):
+        v = request.form.get(field, "").strip()
+        try:
+            return int(v) if v else None
+        except ValueError:
+            return None
+
+    def _f(field):
+        v = request.form.get(field, "").strip()
+        try:
+            return float(v) if v else None
+        except ValueError:
+            return None
+
+    def _s(field):
+        return request.form.get(field, "").strip() or None
+
+    coop_raw = request.form.get("is_cooperative", "")
+    is_cooperative = {"coop": 1, "competitive": 0}.get(coop_raw)
+
+    try:
+        with db.connect() as c:
+            bgg_id = db.next_manual_id(c)
+            row = {
+                "bgg_id":        bgg_id,
+                "name":          name,
+                "year":          _i("year"),
+                "image_url":     None,
+                "thumbnail_url": None,
+                "image_path":    None,
+                "min_players":   _i("min_players"),
+                "max_players":   _i("max_players"),
+                "min_playtime":  _i("min_playtime"),
+                "max_playtime":  _i("max_playtime"),
+                "playing_time":  _i("playing_time"),
+                "min_age":       _i("min_age"),
+                "weight":        _f("weight"),
+                "avg_rating":    None,
+                "my_rating":     None,
+                "description":   _s("description"),
+                "categories":    _s("categories"),
+                "mechanics":     _s("mechanics"),
+                "designers":     _s("designers"),
+                "publishers":    _s("publishers"),
+                "best_players":  _s("best_players"),
+                "my_comment":    None,
+                "own":           1 if status == "own" else 0,
+                "bgg_status":    status,
+                "last_synced":   db.now_iso(),
+                "is_expansion":  1 if request.form.get("is_expansion") == "1" else 0,
+                "is_cooperative": is_cooperative,
+                "base_game_id":   None,
+                "base_game_name": None,
+            }
+            db.upsert_game(c, row)
+        flash(f'Added "{name}" to your library.', "success")
+    except Exception as e:
+        flash(f"Error adding game: {e}", "error")
+    return redirect(url_for("games"))
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # BGG Sync
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _run_sync(owner_first: str = "", owner_last: str = "", claim_as_mine: bool = False):
+def _run_sync(claim_as_mine: bool = False):
     global _sync_status
     settings = _settings()
     username = settings.get("bgg_username", "")
-    token    = settings.get("bgg_token", "")
+    token    = _bgg.BGG_APP_TOKEN or ""
 
     def on_status(msg):
         _sync_status["message"] = msg
 
     try:
-        collection = _bgg.fetch_collection(username, token=token, on_status=on_status)
-        total = len(collection)
+        # import_from_username fetches /collection (all BGG statuses — own,
+        # wishlist, fortrade, etc.) then enriches every game via /thing
+        # (weight, categories, designers, best-at...) and returns GameDetails.
+        games = _bgg.import_from_username(username, token=token, on_status=on_status)
+        total = len(games)
         with db.connect() as c:
-            for i, g in enumerate(collection, 1):
+            for i, g in enumerate(games, 1):
                 if i == 1 or i % 10 == 0 or i == total:
                     _sync_status["message"] = f"Saving {i} of {total} games…"
                 row = {
@@ -777,10 +961,15 @@ def _run_sync(owner_first: str = "", owner_last: str = "", claim_as_mine: bool =
                     "publishers":   ", ".join(g.publishers) if g.publishers else None,
                     "best_players": g.best_players,
                     "my_comment":   g.my_comment,
-                    "own":          1,
+                    # BGG collection status, when known, determines real ownership;
+                    # unknown status defaults to owned (matches prior behavior).
+                    "own":          1 if g.bgg_status in (None, "own") else 0,
                     "last_synced":  db.now_iso(),
                     "is_expansion": int(g.is_expansion),
                     "is_cooperative": _bgg.derive_cooperative(g.mechanics),
+                    "base_game_id": g.base_game_id,
+                    "base_game_name": g.base_game_name,
+                    "bgg_status":   g.bgg_status,
                 }
                 existing = db.get_game(c, g.bgg_id)
                 skip = set()
@@ -790,28 +979,24 @@ def _run_sync(owner_first: str = "", owner_last: str = "", claim_as_mine: bool =
                     skip = db.get_manual_fields(c, g.bgg_id)
                 db.upsert_game(c, row, skip_fields=skip)
 
-            # Link the synced games to this user's collection (multi-collection)
+            # Link every synced game (owned, wishlist, for-trade, etc.) to this
+            # collection so "Clear Collection" removes all of them, and collection
+            # comparisons reflect the full BGG collection.
             if username:
                 cid = db.get_or_create_collection(c, username, username)
-                db.replace_collection_games(c, cid, [g.bgg_id for g in collection])
+                all_ids = [g.bgg_id for g in games]
+                db.replace_collection_games(c, cid, all_ids)
 
-                # Optionally add the importer as a member, claim the collection
-                # for them, and mark them as this device's owner ("me").
-                if claim_as_mine and (owner_first or owner_last):
-                    existing = next(
-                        (u for u in db.list_users(c)
-                         if u["first_name"].strip().lower() == owner_first.lower()
-                         and u["last_name"].strip().lower() == owner_last.lower()),
-                        None,
-                    )
-                    uid = existing["id"] if existing else db.add_user(
-                        c, owner_first, owner_last)
-                    db.claim_collection(c, cid, uid)
+                # Optionally claim this collection as this device's own. The
+                # BGG username being synced is the identity — no name is asked
+                # for and no Friend is created. An existing claim is kept.
+                if claim_as_mine:
                     s = _config.load()
-                    s["claimed_member_id"] = uid
-                    _config.save(s)
+                    if not s.get("claimed_bgg_username"):
+                        s["claimed_bgg_username"] = username
+                        _config.save(s)
 
-        _sync_status["message"] = f"Sync complete — {len(collection)} games."
+        _sync_status["message"] = f"Sync complete — {len(games)} games."
     except Exception as e:
         _sync_status["error"]   = str(e)
         _sync_status["message"] = f"Sync failed: {e}"
@@ -827,8 +1012,6 @@ def sync():
         s = _config.load()
         s["bgg_username"] = new_username
         _config.save(s)
-    owner_first = request.form.get("owner_first", "").strip()
-    owner_last  = request.form.get("owner_last", "").strip()
     claim_as_mine = request.form.get("claim_as_mine") == "1"
     with _sync_lock:
         if _sync_status["running"]:
@@ -841,8 +1024,7 @@ def sync():
         _sync_status["message"] = "Starting sync…"
         _sync_status["error"]   = None
     threading.Thread(target=_run_sync,
-                     kwargs={"owner_first": owner_first, "owner_last": owner_last,
-                             "claim_as_mine": claim_as_mine},
+                     kwargs={"claim_as_mine": claim_as_mine},
                      daemon=True).start()
     flash("BGG sync started — refresh in a moment.", "info")
     return redirect(url_for("dashboard"))
@@ -861,36 +1043,10 @@ def sync_status():
 
 @app.route("/backup/export")
 def backup_export():
+    # Version-5 backup: the whole library (see db.build_backup_payload) —
+    # games, collections + membership, friends, plays, loans, customisations.
     with db.connect() as c:
-        members = [dict(r) for r in c.execute("SELECT * FROM users ORDER BY id").fetchall()]
-        plays = [dict(r) for r in c.execute(
-            """SELECT plays.*, games.name AS game_name
-               FROM plays
-               LEFT JOIN games ON games.bgg_id = plays.game_id
-               ORDER BY plays.played_at DESC""").fetchall()]
-        loans = [dict(r) for r in c.execute(
-            """SELECT loans.*, games.name AS game_name,
-                      users.first_name, users.last_name
-               FROM loans
-               LEFT JOIN games ON games.bgg_id = loans.game_id
-               LEFT JOIN users ON users.id = loans.user_id
-               ORDER BY loans.checked_out_at DESC""").fetchall()]
-        customisations = [dict(r) for r in c.execute(
-            """SELECT bgg_id, name, tags, is_favorite, has_insert,
-                      my_comment, my_rating, manual_fields
-               FROM games
-               WHERE tags IS NOT NULL OR is_favorite = 1 OR has_insert = 1
-                  OR my_comment IS NOT NULL OR my_rating IS NOT NULL
-               """).fetchall()]
-
-    payload = {
-        "version": 1,
-        "exported_at": db.now_iso(),
-        "members": members,
-        "plays": plays,
-        "loans": loans,
-        "customisations": customisations,
-    }
+        payload = db.build_backup_payload(c)
     body = json.dumps(payload, indent=2, default=str)
     filename = f"bgl-backup-{datetime.now():%Y-%m-%d}.json"
     return Response(
@@ -911,78 +1067,20 @@ def backup_import():
     except Exception:
         flash("Could not read that file — is it a valid backup JSON?", "error")
         return redirect(url_for("dashboard"))
-    if not data.get("version") or not data.get("members"):
+    if not db.is_backup_payload(data):
         flash("This doesn't appear to be a Board Game Library backup.", "error")
         return redirect(url_for("dashboard"))
 
-    counts = {"members": 0, "plays": 0, "loans": 0, "customisations": 0, "skipped": 0}
-    with db.connect() as c:
-        # Members — map old ids -> local ids so loans/plays resolve correctly.
-        user_id_map: dict[int, int] = {}
-        for m in data.get("members") or []:
-            row = c.execute(
-                "SELECT id FROM users WHERE first_name = ? AND last_name = ?",
-                (m.get("first_name"), m.get("last_name")),
-            ).fetchone()
-            if row:
-                user_id_map[m["id"]] = row["id"]
-                counts["skipped"] += 1
-            else:
-                new_id = db.add_user(c, m.get("first_name") or "", m.get("last_name") or "")
-                user_id_map[m["id"]] = new_id
-                counts["members"] += 1
+    # Merge: adds games missing locally, then friends, collections, plays, loans
+    # and per-game customisations; never overwrites an existing game row.
+    try:
+        with db.connect() as c:
+            counts = db.restore_backup_tables(c, data, images_dir=IMAGES_DIR)
+    except Exception as e:
+        flash(f"Import failed: {e}", "error")
+        return redirect(url_for("dashboard"))
 
-        for p in data.get("plays") or []:
-            exists = c.execute(
-                "SELECT id FROM plays WHERE game_id = ? AND played_at = ?",
-                (p.get("game_id"), p.get("played_at")),
-            ).fetchone()
-            if exists or not db.get_game(c, p.get("game_id")):
-                counts["skipped"] += 1
-                continue
-            db.log_play(
-                c, p["game_id"], p["played_at"],
-                p.get("player_names") or "", p.get("winner") or "", p.get("notes") or "",
-                duration_minutes=p.get("duration_minutes"), scores=p.get("scores"),
-            )
-            counts["plays"] += 1
-
-        for l in data.get("loans") or []:
-            mapped_user_id = user_id_map.get(l.get("user_id"), l.get("user_id"))
-            exists = c.execute(
-                "SELECT id FROM loans WHERE game_id = ? AND checked_out_at = ?",
-                (l.get("game_id"), l.get("checked_out_at")),
-            ).fetchone()
-            if exists or not db.get_game(c, l.get("game_id")):
-                counts["skipped"] += 1
-                continue
-            c.execute(
-                "INSERT INTO loans (game_id, user_id, checked_out_at, returned_at, due_date, notes) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (l["game_id"], mapped_user_id, l["checked_out_at"],
-                 l.get("returned_at"), l.get("due_date"), l.get("notes")),
-            )
-            counts["loans"] += 1
-
-        for cu in data.get("customisations") or []:
-            if not db.get_game(c, cu.get("bgg_id")):
-                counts["skipped"] += 1
-                continue
-            c.execute(
-                "UPDATE games SET tags=?, is_favorite=?, has_insert=?, "
-                "my_comment=?, my_rating=?, manual_fields=? WHERE bgg_id=?",
-                (cu.get("tags"), cu.get("is_favorite") or 0, cu.get("has_insert") or 0,
-                 cu.get("my_comment"), cu.get("my_rating"), cu.get("manual_fields"),
-                 cu["bgg_id"]),
-            )
-            counts["customisations"] += 1
-
-    flash(
-        f"Import complete — Members: +{counts['members']}, Plays: +{counts['plays']}, "
-        f"Loans: +{counts['loans']}, Customisations: {counts['customisations']}, "
-        f"Skipped (already existed): {counts['skipped']}",
-        "success",
-    )
+    flash("Import complete — " + db.summarize_import(counts, sep=", "), "success")
     return redirect(url_for("dashboard"))
 
 
@@ -996,7 +1094,7 @@ def inject_globals():
         "now": datetime.now(),
         "sync_status": _sync_status,
         "bgg_username": _config.load().get("bgg_username", ""),
-        "already_claimed": bool(_config.load().get("claimed_member_id")),
+        "claimed_username": _config.load().get("claimed_bgg_username") or "",
     }
 
 

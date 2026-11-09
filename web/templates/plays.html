@@ -5,7 +5,7 @@
 <div class="page-header">
   <h1 class="page-title">Play Log</h1>
   <div style="display:flex;gap:6px">
-    <button class="btn btn-secondary btn-sm" onclick="toggleLeaderboard()">🏆 Leaderboard</button>
+    <button class="btn btn-secondary btn-sm" onclick="toggleLeaderboard(this)" aria-expanded="false" aria-controls="leaderboard-panel">🏆 Leaderboard</button>
     <button class="btn btn-primary btn-sm" onclick="openModal('modal-log-play')">+ Log Play</button>
   </div>
 </div>
@@ -24,7 +24,7 @@
     <tbody>
       {% for name, count in sorted_winners %}
       <tr>
-        <td>{% if loop.index == 1 %}🥇{% elif loop.index == 2 %}🥈{% elif loop.index == 3 %}🥉{% else %}{{ loop.index }}{% endif %}</td>
+        <td>{% if loop.index == 1 %}<span aria-hidden="true">🥇</span> {% elif loop.index == 2 %}<span aria-hidden="true">🥈</span> {% elif loop.index == 3 %}<span aria-hidden="true">🥉</span> {% endif %}{{ loop.index }}</td>
         <td>{{ name }}</td>
         <td class="center"><strong>{{ count }}</strong></td>
       </tr>
@@ -47,6 +47,17 @@
     </select>
   </form>
 </div>
+
+{% if play_summary is not none %}
+<section class="card play-summary" role="status">
+  {% if play_summary.count %}
+  <div class="ps-main">{{ filter_name }}: played {{ play_summary.count }} time{{ 's' if play_summary.count != 1 else '' }}</div>
+  <div class="ps-sub">Last played {{ play_summary.last|usdate }} · First played {{ play_summary.first|usdate }}</div>
+  {% else %}
+  <div class="ps-main">{{ filter_name }}: not played yet</div>
+  {% endif %}
+</section>
+{% endif %}
 
 <p class="result-count muted">{{ rows|length }} play{{ 's' if rows|length != 1 else '' }}</p>
 
@@ -200,9 +211,11 @@ document.addEventListener('DOMContentLoaded', () => {
   if (ep && ew) ep.addEventListener('input', () => syncWinnerOptions(ep.value, ew, ew.value));
 });
 
-function toggleLeaderboard() {
+function toggleLeaderboard(btn) {
   const p = document.getElementById('leaderboard-panel');
-  p.style.display = p.style.display === 'none' ? 'block' : 'none';
+  const showing = p.style.display === 'none';
+  p.style.display = showing ? 'block' : 'none';
+  btn.setAttribute('aria-expanded', String(showing));
 }
 
 async function searchBGGForPlay() {

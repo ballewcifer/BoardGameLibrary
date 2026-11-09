@@ -12,27 +12,32 @@
   <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
   <link rel="stylesheet" href="/static/style.css">
   <script>
-    // 10 UI colour themes (parity with desktop) — [--navy, --navy-d]
+    // 12 UI colour themes (same palette as desktop + mobile).
+    // [--navy (header/footer/buttons), --navy-d, --stripe, --c1..--c4 (dashboard cards), --bg, --border]
     window.BGL_THEMES = {
-      "Classic Navy": ["#1a237e", "#0d1457"],
-      "Ocean":        ["#0e527e", "#0a3a5a"],
-      "Teal":         ["#0b6e78", "#08545c"],
-      "Forest":       ["#1b5e3a", "#114028"],
-      "Slate":        ["#37475a", "#283443"],
-      "Indigo":       ["#2a338e", "#1d2566"],
-      "Purple":       ["#5f28a0", "#45197a"],
-      "Burgundy":     ["#8e1e3d", "#6b162e"],
-      "Crimson":      ["#b3202e", "#8a1822"],
-      "Bronze":       ["#8a6420", "#664a18"],
-      "High Contrast":     ["#0B57D0", "#0842A0"],
-      "Colour-blind Safe": ["#0072B2", "#005B8F"]
+      "Classic Navy":      ["#1B4B79", "#13395F", "#6C5AE2", "#1B4B79", "#5B55CD", "#226F72", "#8D3EC6", "#F3F6F9", "#EAEDF0"],
+      "Ocean":             ["#12527E", "#0E3D5F", "#5A5CE2", "#12527E", "#4D5ACB", "#21726A", "#7F46C9", "#F3F7F9", "#EAEEF0"],
+      "Teal":              ["#155E67", "#10464D", "#5A86E2", "#155E67", "#3467B2", "#217352", "#6455CE", "#F3F8F9", "#EAF0F0"],
+      "Forest":            ["#1C5E39", "#16492C", "#5AE1E2", "#1C5E39", "#2E706B", "#357430", "#3B6A91", "#F3F9F6", "#EAF0ED"],
+      "Slate":             ["#384857", "#2A3744", "#685AE2", "#384857", "#5E5CB2", "#346E6F", "#8250AA", "#F3F6F9", "#EAEDF0"],
+      "Indigo":            ["#33398E", "#262C6E", "#9F5AE2", "#33398E", "#7952AD", "#416B8B", "#954899", "#F3F4F9", "#EAEAF0"],
+      "Purple":            ["#52247B", "#3E1B5E", "#E25ADA", "#52247B", "#9A449C", "#5C5EB8", "#A34775", "#F6F3F9", "#EDEAF0"],
+      "Burgundy":          ["#73243E", "#561B2F", "#E2855A", "#73243E", "#99523D", "#A4428D", "#75642F", "#F9F3F5", "#F0EAEC"],
+      "Crimson":           ["#7D202B", "#5E171F", "#E29C5A", "#7D202B", "#915A36", "#A73E7D", "#6C6728", "#F9F3F4", "#F0EAEB"],
+      "Bronze":            ["#74561E", "#574016", "#C4E25A", "#74561E", "#636C2D", "#9E4F42", "#44702F", "#F9F7F3", "#F0EEEA"],
+      "High Contrast":     ["#333333", "#1A1A1A", "#FFD54F", "#000000", "#1C5F4D", "#5F1C48", "#824517", "#F5F5F5", "#E6E6E6"],
+      "Colour-blind Safe": ["#00638C", "#004C6B", "#5A62E2", "#004C6B", "#26826A", "#D02597", "#5F391C", "#F3F7F9", "#EAEEF0"]
+    };
+    window.bglSetThemeVars = function (t) {
+      var r = document.documentElement.style;
+      ['--navy','--navy-d','--stripe','--c1','--c2','--c3','--c4','--bg','--border']
+        .forEach(function (k, i) { r.setProperty(k, t[i]); });
+      var m = document.querySelector('meta[name=theme-color]'); if (m) m.setAttribute('content', t[0]);
     };
     (function () {   // apply saved theme before paint to avoid a flash
       var t = window.BGL_THEMES[localStorage.getItem('bgl_theme') || 'Classic Navy']
               || window.BGL_THEMES['Classic Navy'];
-      var r = document.documentElement;
-      r.style.setProperty('--navy', t[0]);
-      r.style.setProperty('--navy-d', t[1]);
+      window.bglSetThemeVars(t);
     })();
   </script>
 </head>
@@ -104,19 +109,14 @@
         <input type="text" id="sync-username" name="bgg_username" class="form-control" value="{{ bgg_username }}" placeholder="e.g. Ballewcifer" autocomplete="off">
         <p class="muted" style="font-size:.8rem;margin-top:6px">Pulls your public collection from BoardGameGeek.</p>
 
-        {% if already_claimed %}
-        <p class="muted mt-sm" style="font-size:.85rem">You've already claimed a collection as your own.</p>
+        {% if claimed_username %}
+        <p class="muted mt-sm" style="font-size:.85rem">You've already claimed "{{ claimed_username }}" as your own collection.</p>
         {% else %}
         <label class="filter-check mt-sm" style="display:flex;gap:6px;align-items:center">
           <input type="checkbox" id="sync-claim" name="claim_as_mine" value="1">
           Claim this collection as my own
         </label>
-        <label class="form-label mt-sm" for="sync-owner-first">Your name</label>
-        <div style="display:flex; gap:8px">
-          <input type="text" id="sync-owner-first" name="owner_first" class="form-control" placeholder="First name" autocomplete="off" aria-label="Owner first name">
-          <input type="text" id="sync-owner-last"  name="owner_last"  class="form-control" placeholder="Last name"  autocomplete="off" aria-label="Owner last name">
-        </div>
-        <p class="muted" style="font-size:.8rem;margin-top:6px">Adds you as a friend and restricts check-outs so only you can borrow games from this collection.</p>
+        <p class="muted" style="font-size:.8rem;margin-top:6px">Marks this synced collection as yours, so check-outs are only offered for games from it. Doesn't add a friend — that only happens when you add one directly or type a new name while checking out or logging a play.</p>
         {% endif %}
       </div>
       <div class="modal-footer">

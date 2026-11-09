@@ -64,7 +64,7 @@ jobs:
         run: echo "__version__ = \"${{ steps.ver.outputs.VERSION }}\"" > version.py
 
       - name: Install Python dependencies
-        run: pip install pyinstaller pillow certifi keyring
+        run: pip install pyinstaller pillow certifi keyring tkcalendar
 
       - name: Write secrets.py
         shell: bash
@@ -127,7 +127,7 @@ jobs:
           fi
 
       - name: Install Python dependencies
-        run: pip install pyinstaller pillow certifi keyring
+        run: pip install pyinstaller pillow certifi keyring tkcalendar
 
       - name: Write secrets.py
         shell: bash
